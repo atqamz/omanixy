@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if git diff --cached --name-only | grep -E '(^|/)(\.env|.*\.(pem|key))$|credentials\.json$'; then
+    printf '%s\n' 'Refusing to commit probable secret file.' >&2
+    exit 1
+fi

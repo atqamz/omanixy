@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+message_file="$1"
+subject="$(head -n 1 "$message_file")"
+pattern='^(feat|fix|refactor|docs|test|build|ci|chore|perf)(\([a-zA-Z0-9._/-]+\))?!?: .{1,72}$'
+
+if [[ ! "$subject" =~ $pattern ]]; then
+    printf '%s\n' 'Invalid commit subject. Expected type(scope): concise description.' >&2
+    exit 1
+fi

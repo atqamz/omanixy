@@ -1,0 +1,9 @@
+project: basecamp/omarchy
+release: v3.8.4
+revision: 8fcc9d6048af4cb0e3af8512c78049857a3b53dd
+pinned_at: 2026-07-23
+
+policy:
+  source: pinned-revision-only
+  update_strategy: explicit-upstream-upgrade-task
+  mirror_goal: behavioral-parity

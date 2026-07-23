@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+test -s AGENTS.md
+test -s flake.nix
+test -s justfile
+test -s upstream/omarchy.yaml
+test -s upstream/porting-matrix.yaml
+test -s tasks/OMX-001-bootstrap.md
+test -x scripts/verify
+test -x scripts/task-context
+test -x scripts/upstream-diff
+test -x .githooks/pre-commit
+test -x .githooks/commit-msg
+test -s .github/copilot-instructions.md
