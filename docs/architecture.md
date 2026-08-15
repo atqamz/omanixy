@@ -245,8 +245,9 @@ emulating the complete Omarchy filesystem.
 For the pinned Quattro revision, the runtime uses an immutable compatibility
 view because some reachable consumers construct absolute
 `OMARCHY_PATH/bin/...` paths.
-The view contains exact source symlinks plus only the audited default menu and
-helper surface.
+The view contains only the pinned source files required by the supported
+runtime graph, three narrow compatibility patches, the safe fallback
+configuration, the audited default menu, and the helper surface.
 It preserves `passthru.omarchySource` as the exact source identity and exposes
 the view separately as `passthru.omarchyCompatibilityRoot`.
 It does not copy the upstream `bin/` tree or make the store mutable.

@@ -53,14 +53,24 @@ issue revalidates both inputs together.
 
 The runtime consumes the reviewed upstream shell from a deterministic,
 immutable compatibility root derived from the source-only flake input.
-The root symlinks the exact pinned `shell/` tree and the upstream files needed
-by supported startup and app-discovery paths, then adds only the audited menu
-and helper surface.
+The root contains the pinned runtime entrypoint, shared QML libraries, service
+objects, and the selected plugin files required by the supported baseline and
+its reachable panels.
+It applies three narrow compatibility patches: it hides the unsupported Custom
+DNS terminal action, makes the disabled-plugin floor apply to bar widgets, and
+routes the unsupported clock timezone middle-click action to the supported
+clock panel.
+Unsupported first-party plugin directories are absent rather than merely
+advertised as disabled.
+The root also supplies Omanixy's safe fallback shell configuration, audited
+menu, launcher-hides file, and helper surface.
 Runtime-writable configuration and state must be materialized outside the
 store.
 
 `OMARCHY_PATH` points at this compatibility root as an intentional source
 compatibility interface.
+The root has a narrow `bin/` view containing only the audited helper links
+required by reachable Quattro consumers.
 It does not authorize emulating the complete Omarchy filesystem or copying the
 upstream `bin/` tree.
 

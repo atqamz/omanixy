@@ -93,9 +93,17 @@ the immutable source model.
 
 Quattro is consumed from a deterministic immutable compatibility root through
 `OMARCHY_PATH`.
-The root symlinks the exact pinned `shell/` tree and the one upstream default
-config file Quattro reads, preserves the upstream launcher-hides file, and
-supplies only Omanixy's audited default menu.
+The root contains only the pinned source files required by the supported
+runtime graph, including shared QML libraries, shell services, the baseline
+bar widgets, and reachable panels and overlays.
+It applies narrow patches for the unsupported Custom DNS terminal action,
+enforcing the disabled-plugin floor on bar widgets, and routing the unsupported
+clock timezone middle-click action to the supported clock panel.
+Unsupported first-party plugin directories are not copied into the view.
+The root supplies Omanixy's safe fallback shell configuration, launcher-hides
+file, audited default menu, and helper view.
+The root `bin/` contains dispatch wrappers only for helper names required by
+reachable Quattro consumers; it is not the upstream `bin/` tree.
 The runtime's hermetic `PATH` includes a separate immutable compatibility-bin
 store path containing only the audited helper links.
 The source identity exposed as `runtime.passthru.omarchySource` remains the
@@ -128,7 +136,7 @@ and security-sensitive contracts.
 The flake check regenerates the snapshot from the flake-pinned source and
 fails on any drift.
 The fixture test also proves deterministic output, dynamic-command retention,
-menu-field coverage, unreachable `bin/` exclusion, and fail-closed changes for
+menu-field coverage, narrow compatibility-bin construction, and fail-closed changes for
 new helpers, executables, absolute paths, services, and PAM paths.
 Static audit is a pin-drift and review guard.
 Behavioral adapter tests and live smoke are separate evidence.
@@ -156,8 +164,10 @@ or manually edited content.
 Manually removing a safety-disabled plugin from an ordinary user-owned file is
 an explicit opt-in to that unsupported surface; Omanixy does not overwrite the
 file or claim that the feature is safe or implemented.
+First-party plugins omitted from the immutable compatibility view remain
+unavailable even if a user removes their disabled ID.
 Store-backed shell configuration symlinks are the one migration case where
-Omanixy preserves the upstream JSON while adding its mandatory safety floor
+Omanixy preserves the existing JSON while adding its mandatory safety floor
 before materializing the file.
 If an older activation left a writable-state symlink into the store, the
 activation copies its contents out to ordinary user storage before continuing.

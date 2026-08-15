@@ -18,10 +18,18 @@ into a filesystem emulation layer or a presentation fork.
 
 Omanixy sets `OMARCHY_PATH` to an immutable compatibility root derived from the
 exact pinned source.
-The root exposes the exact Quattro `shell/` source tree, the one upstream
-`config/omarchy/shell.json` file read by shell startup, the launcher-hides file
-required by app discovery, and a checked-in safe menu definition.
-Its `bin/` surface is not copied into the root.
+The root exposes only the pinned shell entrypoint, shared libraries, services,
+and selected plugin paths required by the supported runtime graph.
+It supplies an Omanixy safe fallback `config/omarchy/shell.json`, the
+launcher-hides file required by app discovery, and a checked-in safe menu
+definition.
+Its complete `bin/` surface is not copied into the root.
+The root contains only dispatch wrappers for the audited helper names required
+by reachable Quattro consumers.
+One narrow network-panel patch hides the unsupported Custom DNS terminal
+action, one registry patch applies the safety floor to bar widgets, and one
+clock patch routes the unsupported timezone middle-click action to the
+supported clock panel.
 The runtime package exposes only explicitly audited helper names, each linked
 to a narrow shared adapter or a native executable.
 

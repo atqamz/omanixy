@@ -51,7 +51,9 @@ The contract scanner is a static pin-drift guard.
 It records direct commands, dynamic command expressions, menu fields, absolute
 helper paths, filesystem and environment contracts, native Quickshell imports,
 service names, and security references from the pinned source roots.
-It intentionally excludes an unreachable upstream `bin/` tree.
+It intentionally excludes the complete upstream `bin/` tree while retaining a
+narrow compatibility-bin view for the audited absolute helper paths that are
+reachable from supported Quattro.
 Behavioral adapter tests and live Wayland/Hyprland smoke are separate runtime
 evidence and do not get replaced by static scanning.
 

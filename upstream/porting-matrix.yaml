@@ -9,12 +9,21 @@ items:
         - path: shell/shell.qml
           role: runtime entrypoint
           consumption: runtime
-        - path: shell/
-          role: runtime shell tree and first-party plugin discovery
+        - path: shell/Commons/
+          role: shared Quattro presentation components
+          consumption: runtime
+        - path: shell/Ui/
+          role: shared Quattro presentation components
+          consumption: runtime
+        - path: shell/services/
+          role: runtime services and app discovery
+          consumption: runtime
+        - path: shell/plugins/
+          role: audited supported first-party plugin subset
           consumption: runtime
         - path: config/omarchy/shell.json
-          role: upstream default shell configuration
-          consumption: runtime-fallback-and-migration
+          role: upstream default configuration input for user-state migration
+          consumption: reference-and-migration
         - path: themes/tokyo-night/
           role: Tokyo Night source for the baseline theme seed
           consumption: build-time
@@ -41,6 +50,9 @@ items:
     notes:
       - Systemd owns restart, logging, and graphical-session lifecycle.
       - The upstream Bash supervisor is not copied.
+      - The compatibility root copies only the audited supported plugin subset and supplies a safe fallback shell configuration.
+      - Its registry patch applies the disabled-plugin floor to bar widgets as well as panels and services.
+      - Its clock patch routes the unsupported timezone middle-click action to the supported clock panel.
 
   - id: shell.ipc
     classification: adapted
@@ -125,6 +137,7 @@ items:
     dependencies:
       runtime:
         - gtk3
+        - desktop-file-utils
       host:
         - user desktop entry database
     helper: omarchy-remove-launcher-entry
@@ -278,6 +291,7 @@ items:
     dependencies:
       runtime:
         - pipewire
+        - wireplumber
       host:
         - PipeWire
         - WirePlumber
@@ -355,6 +369,8 @@ items:
       - test/compat-adapters.sh
     notes:
       - DNS adaptation uses nmcli connection properties and never writes /etc/NetworkManager or systemd-resolved configuration.
+      - The upstream Custom DNS pill is hidden in the compatibility view because its terminal launcher depends on an omitted Omarchy presentation wrapper; DHCP, Cloudflare, and Google remain supported.
+      - Enterprise Wi-Fi rows are omitted from the compatibility view because the pinned enterprise profile mutation is outside the audited password contract.
       - Omanixy does not start a second NetworkManager instance.
 
   - id: network.qr
@@ -483,7 +499,7 @@ items:
     tests:
       - test/compat-adapters.sh
     notes:
-      - The adapter deliberately does not persist rfkill state because that would claim host boot policy.
+      - Power changes use host rfkill soft block or unblock semantics, preserving the pinned observable behavior without owning BlueZ daemon lifecycle or host boot policy.
 
   - id: power.native
     classification: exact
@@ -708,10 +724,10 @@ items:
         - path: shell/plugins/panels/weather/BarWidget.qml
           role: weather right-click notification client
           consumption: runtime
-        - path: bin/omarchy-display-text-size
-          role: Foot restart notification with replacement and persistence options
-          consumption: runtime
-    requirement: Send supported weather and Foot restart notifications through the host notification client.
+        - path: bin/omarchy-notification-send
+          role: pinned notification client contract
+          consumption: audited-reference
+    requirement: Send supported weather and pinned notification-client requests through the host notification client.
     ownership:
       presentation: omarchy
       adapter: omanixy
@@ -726,7 +742,7 @@ items:
       - test/compat-adapters.sh
     notes:
       - This adapter does not install, configure, or supervise a notification daemon.
-      - The adapter accepts only the pinned consumers' headline, optional description, -r numeric replacement id, and -p forms.
+      - The adapter preserves the pinned client options for app name, glyph, urgency, image, exec hint, replacement id, persistence, and other notify-send arguments without enabling the notification daemon plugin.
 
   - id: background.theme-workflow
     classification: omitted
@@ -851,7 +867,7 @@ items:
       - test/runtime-closure.sh
       - test/safe-menu-contract.sh
     notes:
-      - The compatibility root deliberately has no bin directory and the runtime exposes only audited helper names.
+      - The compatibility root has a narrow bin view containing only audited helper links; the complete upstream bin tree is not exposed.
 
   - id: security.lock
     classification: blocked
