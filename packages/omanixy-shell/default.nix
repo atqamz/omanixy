@@ -67,19 +67,139 @@ let
 
   safeMenu = pkgs.writeText "omanixy-safe-omarchy-menu.jsonc" (builtins.readFile ./safe-menu.jsonc);
 
+  safeShellConfig = pkgs.writeText "omanixy-safe-shell.json" ''
+    {
+      "version": 1,
+      "bar": {
+        "position": "top",
+        "transparent": false,
+        "centerAnchor": "omarchy.clock",
+        "layout": {
+          "left": [
+            { "id": "omarchy.menu" },
+            { "id": "omarchy.workspaces" }
+          ],
+          "center": [
+            { "id": "omarchy.clock", "format": "dddd HH:mm" },
+            { "id": "omarchy.weather" }
+          ],
+          "right": [
+            { "id": "omarchy.tray" },
+            { "id": "omarchy.media" },
+            { "id": "omarchy.bluetooth" },
+            { "id": "omarchy.network" },
+            { "id": "omarchy.audio" },
+            { "id": "omarchy.monitor" },
+            { "id": "omarchy.power" }
+          ]
+        }
+      },
+      "disabledPlugins": [
+        "omarchy.active-window",
+        "omarchy.agents",
+        "omarchy.background",
+        "omarchy.battery",
+        "omarchy.dev-gallery",
+        "omarchy.disk-speedtest",
+        "omarchy.dropbox",
+        "omarchy.idle",
+        "omarchy.image-picker",
+        "omarchy.indicators",
+        "omarchy.keyboard-layout",
+        "omarchy.lock",
+        "omarchy.microphone",
+        "omarchy.nightlight",
+        "omarchy.notifications",
+        "omarchy.polkit",
+        "omarchy.reminders",
+        "omarchy.system-update",
+        "omarchy.tailscale"
+      ]
+    }
+  '';
+
   omarchyCompatibilityRoot = stdenvNoCC.mkDerivation {
     pname = "omanixy-omarchy-compat-root";
     version = lib.substring 0 12 omarchyRevision;
     dontUnpack = true;
     installPhase = ''
-      mkdir -p "$out/config/omarchy" "$out/default/omarchy"
-      ln -s ${omarchySource}/shell "$out/shell"
-      ln -s ${omarchySource}/config/omarchy/shell.json "$out/config/omarchy/shell.json"
+      mkdir -p "$out/bin" "$out/config/omarchy" "$out/default/omarchy"
+      mkdir -p "$out/shell"
+      cp -R ${omarchySource}/shell/Commons "$out/shell/Commons"
+      cp -R ${omarchySource}/shell/Ui "$out/shell/Ui"
+      cp -R ${omarchySource}/shell/services "$out/shell/services"
+      install -Dm644 ${omarchySource}/shell/shell.qml "$out/shell/shell.qml"
+      mkdir -p "$out/shell/plugins/bar/widgets"
+      for file in Bar.qml BarModel.js manifest.json; do
+        install -Dm644 "${omarchySource}/shell/plugins/bar/$file" "$out/shell/plugins/bar/$file"
+      done
+      for file in Spacer.qml Spacer.manifest.json Tray.qml Tray.manifest.json TrayModel.js Workspaces.qml Workspaces.manifest.json; do
+        install -Dm644 "${omarchySource}/shell/plugins/bar/widgets/$file" "$out/shell/plugins/bar/widgets/$file"
+      done
+
+      for plugin in clipboard emojis menu osd; do
+        cp -R "${omarchySource}/shell/plugins/$plugin" "$out/shell/plugins/$plugin"
+      done
+      for plugin in audio bluetooth clock monitor network power speedtest weather wifiqr; do
+        mkdir -p "$out/shell/plugins/panels/$plugin"
+        cp -R "${omarchySource}/shell/plugins/panels/$plugin/." "$out/shell/plugins/panels/$plugin"
+      done
+      mkdir -p "$out/shell/plugins/services"
+      cp -R ${omarchySource}/shell/plugins/services/media "$out/shell/plugins/services/media"
+
+      chmod u+w "$out/shell/services" "$out/shell/services/PluginRegistry.qml"
+      sed -i '/^    if (manifest) {$/i\    if (isDisabled(config, key)) return false' \
+        "$out/shell/services/PluginRegistry.qml"
+      sed -i '/^      if (!network) continue$/a\      if (network.security === WifiSecurityType.Wpa2Eap || network.security === WifiSecurityType.WpaEap) continue' \
+        "$out/shell/plugins/panels/network/Panel.qml"
+      substituteInPlace "$out/shell/plugins/panels/clock/BarWidget.qml" \
+        --replace-fail 'else if (b === Qt.MiddleButton) { if (root.bar) root.bar.run("omarchy-menu-timezone") }' \
+          'else if (b === Qt.MiddleButton) root.togglePanel()'
+      substituteInPlace "$out/shell/plugins/panels/network/Panel.qml" \
+        --replace-fail 'readonly property var dnsProviders: ["DHCP", "Cloudflare", "Google", "Custom"]' \
+          'readonly property var dnsProviders: ["DHCP", "Cloudflare", "Google"]' \
+        --replace-fail 'readonly property int count: 4' \
+          'readonly property int count: 3' \
+        --replace-fail 'if (provider === "Custom") {
+      var launcher = "omarchy-launch-floating-terminal-with-presentation"
+      root.bar.run(launcher + " " + Util.shellQuote(root.dnsCommand(provider)))
+      root.close()
+      return
+    }' \
+          'if (provider === "Custom") return'
+      shell_file="$out/shell/plugins/panels/network/Panel.qml"
+      temporary="$shell_file.omanixy"
+      chmod u+w "''${shell_file%/*}"
+      chmod u+w "$shell_file"
+      \${pkgs.gawk}/bin/awk '
+        /^          DnsProviderPill \{$/ {
+          block = $0
+          if ((getline provider) <= 0) { print block; exit }
+          if (provider ~ /provider: "Custom"/) {
+            while ((getline line) > 0 && line !~ /^          \}$/) {}
+            next
+          }
+          print block
+          print provider
+          next
+        }
+        { print }
+      ' "$shell_file" > "$temporary"
+      mv -f -- "$temporary" "$shell_file"
+      install -Dm644 ${safeShellConfig} "$out/config/omarchy/shell.json"
       ln -s ${omarchySource}/default/omarchy/launcher.hides "$out/default/omarchy/launcher.hides"
       install -Dm644 ${safeMenu} "$out/default/omarchy/omarchy-menu.jsonc"
+      for helper in ${lib.concatStringsSep " " compatibilityHelpers}; do
+        cat > "$out/bin/$helper" <<EOF
+#!/bin/sh
+export COMPAT_ADAPTER_NAME=$helper
+exec omanixy-compat-adapter "\$@"
+EOF
+        chmod 0555 "$out/bin/$helper"
+      done
     '';
     passthru = {
-      inherit omarchySource safeMenu;
+      inherit omarchySource safeMenu safeShellConfig;
     };
   };
 
@@ -87,6 +207,7 @@ let
     bash
     coreutils
     curl
+    desktop-file-utils
     brightnessctl
     bluez
     findutils
@@ -106,11 +227,13 @@ let
     networkmanager
     pipewire
     power-profiles-daemon
+    procps
     qrencode
     quickshell
     systemd
     upower
     util-linux
+    wireplumber
     wl-clipboard
     wtype
     xdg-utils
@@ -184,7 +307,7 @@ let
 
   runtime = pkgs.writeShellApplication {
     name = "omanixy-shell-runtime";
-    runtimeInputs = runtimeInputs ++ [ compatibilityBin ];
+    runtimeInputs = runtimeInputs ++ [ compatAdapter compatibilityBin ];
     inheritPath = false;
     text = ''
       export OMARCHY_PATH=${lib.escapeShellArg "${omarchyCompatibilityRoot}"}

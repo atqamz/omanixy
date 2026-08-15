@@ -9,15 +9,26 @@ let
   cfg = config.programs.omanixy;
   runtime = omanixyRuntime;
   coreutils = "${pkgs.coreutils}/bin";
-  safetyDisabledPlugins = [
+  disabledPluginsFloor = [
+    "omarchy.active-window"
     "omarchy.agents"
     "omarchy.background"
     "omarchy.battery"
+    "omarchy.dev-gallery"
+    "omarchy.disk-speedtest"
+    "omarchy.dropbox"
     "omarchy.idle"
+    "omarchy.image-picker"
+    "omarchy.indicators"
+    "omarchy.keyboard-layout"
     "omarchy.lock"
+    "omarchy.microphone"
     "omarchy.nightlight"
     "omarchy.notifications"
     "omarchy.polkit"
+    "omarchy.reminders"
+    "omarchy.system-update"
+    "omarchy.tailscale"
   ];
   baselineConfig = {
     version = 1;
@@ -48,15 +59,15 @@ let
         ];
       };
     };
-    disabledPlugins = safetyDisabledPlugins;
+    disabledPlugins = disabledPluginsFloor;
   };
   configuredDisabledPlugins = cfg.shell.config.disabledPlugins or [ ];
   effectiveConfig = cfg.shell.config // {
-    disabledPlugins = lib.unique (safetyDisabledPlugins ++ configuredDisabledPlugins);
+    disabledPlugins = lib.unique (disabledPluginsFloor ++ configuredDisabledPlugins);
   };
   configJson = builtins.toJSON effectiveConfig;
   configSeed = pkgs.writeText "omanixy-shell-config" configJson;
-  safetyDisabledPluginsJson = builtins.toJSON safetyDisabledPlugins;
+  disabledPluginsFloorJson = builtins.toJSON disabledPluginsFloor;
   migrateStoreConfig = pkgs.writeShellScript "omanixy-migrate-store-shell-config" ''
     set -euo pipefail
     source=$1
@@ -66,13 +77,13 @@ let
     }
     trap cleanup EXIT
     ${pkgs.jq}/bin/jq \
-      --argjson safetyDisabledPlugins '${safetyDisabledPluginsJson}' \
+      --argjson disabledPluginsFloor '${disabledPluginsFloorJson}' \
       '
         if .disabledPlugins == null then
-          .disabledPlugins = $safetyDisabledPlugins
+          .disabledPlugins = $disabledPluginsFloor
         elif (.disabledPlugins | type) == "array" then
           .disabledPlugins = (
-            reduce $safetyDisabledPlugins[] as $plugin (
+            reduce $disabledPluginsFloor[] as $plugin (
               .disabledPlugins;
               if index($plugin) == null then . + [$plugin] else . end
             )
@@ -95,9 +106,9 @@ in
       defaultText = lib.literalExpression "<safe Quattro baseline>";
       description = ''
         Whole-file upstream-compatible Quattro shell.json configuration.
-        Omanixy always adds its safety floor to disabledPlugins, so this option
-        cannot enable unfinished lock, polkit, idle, notification, or related
-        surfaces owned by issue #4.
+        Omanixy always adds its disabled-plugin floor to disabledPlugins, so this
+        option cannot enable unfinished issue #4 security surfaces or unsupported
+        first-party Quattro plugins in the baseline.
         The file is seeded on first activation and remains user-owned after
         that; it is not deep-merged or overwritten by later activations.
       '';
