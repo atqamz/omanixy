@@ -12,11 +12,11 @@ items:
       service: omanixy-shell.service
       module: modules/home/default.nix
     tests:
-      - tests/config-ownership.sh
-      - tests/ipc-wrapper.sh
-      - tests/runtime-closure.sh
-      - tests/service-unit.sh
-      - tests/pin-invariants.sh
+      - test/config-ownership.sh
+      - test/ipc-wrapper.sh
+      - test/runtime-closure.sh
+      - test/service-unit.sh
+      - test/pin-invariants.sh
     notes:
       - Systemd owns restart, logging, and graphical-session lifecycle.
       - The upstream Bash supervisor is not copied.

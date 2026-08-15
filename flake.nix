@@ -133,20 +133,20 @@
           pin-invariants = pkgs.runCommand "omanixy-pin-invariants" {
             nativeBuildInputs = [ pkgs.bash pkgs.gnugrep pkgs.jq pkgs.ripgrep ];
           } ''
-            ${pkgs.bash}/bin/bash ${./tests/pin-invariants.sh} ${./.}
+            ${pkgs.bash}/bin/bash ${./test/pin-invariants.sh} ${./.}
             touch "$out"
           '';
           ipc-wrapper = pkgs.runCommand "omanixy-ipc-wrapper" {
             nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.gnused pkgs.python3 ];
           } ''
-            PYTHON=${pkgs.python3}/bin/python3 ${pkgs.bash}/bin/bash ${./tests/ipc-wrapper.sh} ${./.}
+            PYTHON=${pkgs.python3}/bin/python3 ${pkgs.bash}/bin/bash ${./test/ipc-wrapper.sh} ${./.}
             touch "$out"
           '';
           runtime-closure = pkgs.runCommand "omanixy-runtime-closure" {
             closurePaths = "${runtimeClosureInfo}/store-paths";
             nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.gnused ];
           } ''
-            ${pkgs.bash}/bin/bash ${./tests/runtime-closure.sh} ${runtime} "$closurePaths" ${runtime.passthru.quickshell} ${runtime.passthru.omarchySource}
+            ${pkgs.bash}/bin/bash ${./test/runtime-closure.sh} ${runtime} "$closurePaths" ${runtime.passthru.quickshell} ${runtime.passthru.omarchySource}
             touch "$out"
           '';
           config-ownership = pkgs.runCommand "omanixy-config-ownership" {
@@ -154,7 +154,7 @@
             customActivation = customActivationScript;
             nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.diffutils pkgs.jq ];
           } ''
-            ${pkgs.bash}/bin/bash ${./tests/config-ownership.sh} "$activation" "$customActivation" /build/omanixy-test /build/omanixy-custom-test /build/omanixy-store-link-test ${storeConfig}
+            ${pkgs.bash}/bin/bash ${./test/config-ownership.sh} "$activation" "$customActivation" /build/omanixy-test /build/omanixy-custom-test /build/omanixy-store-link-test ${storeConfig}
             touch "$out"
           '';
           service-unit = pkgs.runCommand "omanixy-service-unit" {
@@ -162,7 +162,7 @@
           } ''
             unit_dir=$(mktemp -d)
             cp ${serviceUnit} "$unit_dir/omanixy-shell.service"
-            ${pkgs.bash}/bin/bash ${./tests/service-unit.sh} "$unit_dir/omanixy-shell.service" ${runtime} ${runtime.passthru.omarchySource}
+            ${pkgs.bash}/bin/bash ${./test/service-unit.sh} "$unit_dir/omanixy-shell.service" ${runtime} ${runtime.passthru.omarchySource}
             printf '%s\n' '[Unit]' > "$unit_dir/sysinit.target"
             printf '%s\n' '[Unit]' > "$unit_dir/basic.target"
             XDG_RUNTIME_DIR="$unit_dir" \
@@ -179,7 +179,7 @@
           stale-text = pkgs.runCommand "omanixy-stale-text" {
             nativeBuildInputs = [ pkgs.bash pkgs.gnugrep pkgs.ripgrep ];
           } ''
-            ${pkgs.bash}/bin/bash ${./tests/stale-text.sh} ${./.}
+            ${pkgs.bash}/bin/bash ${./test/stale-text.sh} ${./.}
             touch "$out"
           '';
           configuration-contract = pkgs.runCommand "omanixy-configuration-contract" {
