@@ -13,7 +13,8 @@
     let
       systems = [ "x86_64-linux" "aarch64-linux" ];
       forEachSystem = nixpkgs.lib.genAttrs systems;
-    in {
+    in
+    {
       formatter = forEachSystem (system: nixpkgs.legacyPackages.${system}.nixpkgs-fmt);
     };
 }

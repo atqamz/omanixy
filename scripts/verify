@@ -2,14 +2,16 @@
 set -euo pipefail
 
 test -s AGENTS.md
+test -s README.md
 test -s flake.nix
 test -s justfile
+test -s docs/architecture.md
+test -s docs/project.md
+test -s docs/porting-principles.md
+test -s docs/upstream.md
 test -s upstream/omarchy.yaml
 test -s upstream/porting-matrix.yaml
-test -s tasks/done/OMX-001-bootstrap.md
 test -x scripts/verify
-test -x scripts/task-context
-test -x scripts/upstream-diff
 test -x .githooks/pre-commit
 test -x .githooks/commit-msg
 test -s .github/copilot-instructions.md

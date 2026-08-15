@@ -27,36 +27,48 @@ Use `omanixy-shell` only for runtime or service terminology, such as
   approved repetitive operations.
 - Default role is peer. The AI must challenge decisions and review actual
   repository state without taking over implementation.
-- Never assume permission to push, force-push, rebase, amend, delete, reset,
-  discard changes, or commit.
-- `finish task <id>` grants permission to create one commit containing only
-  the completed task.
-- `ship task <id>` grants permission to push that completed work.
+- An explicit request to implement authorizes changes within the stated scope.
+- Commit only when explicitly authorized.
+- Push and pull request creation only when explicitly authorized.
+- Never assume permission to force-push, rebase, amend, delete, reset,
+  discard changes, or perform other destructive Git operations.
 
 ## Source Of Truth
 
 Before working, read:
 
 1. `AGENTS.md`
-2. The active task under `tasks/`
+2. The active GitHub Issue
 3. `docs/architecture.md`
 4. `docs/porting-principles.md`
 5. `upstream/omarchy.yaml`
 6. Relevant entries in `upstream/porting-matrix.yaml`
+7. Relevant implementation and test files
 
-Do not rely on conversation memory when repository documentation answers the
-question.
+Read the actual GitHub Issue when executing issue work.
+Do not duplicate the issue body into a repository file or create a second work
+database.
+If an execution brief and the GitHub Issue conflict, stop and resolve the
+conflict before changing files.
 
-## Task Workflow
+## GitHub Workflow
 
-Every task must contain objective, motivation, dependencies, relevant
-upstream files, expected Omanixy files, acceptance criteria, verification
-commands, and status.
+GitHub Issues define work, including objectives, scope, dependencies,
+acceptance criteria, and discussion.
+GitHub pull requests carry implementation state, review, verification, and
+discussion.
+ADRs and repository documentation preserve durable product knowledge.
+`upstream/porting-matrix.yaml` preserves durable compatibility state.
+Git history preserves the historical implementation record.
 
-Valid statuses are `proposed`, `ready`, `in-progress`, `blocked`, `review`,
-and `done`.
+Use one primary issue per focused branch and pull request where practical.
+Use a draft pull request during implementation and link it to its issue with a
+closing keyword when appropriate.
+Do not add a local issue cache, work registry, issue synchronization script, or
+second issue identity system.
 
-Only one primary task may be active per working tree.
+An issue may depend on another issue, but GitHub remains the work lifecycle
+authority.
 
 ## Peer Workflow
 
@@ -67,21 +79,6 @@ When mentoring or supervising:
 - Let the human implement it.
 - Review actual repository state rather than assuming completion.
 - Do not modify or commit implementation changes unless explicitly requested.
-
-## Finish Task Workflow
-
-When the human says `finish task <id>`:
-
-1. Read the task and acceptance criteria.
-2. Inspect `git status --porcelain=v1`.
-3. Run `just fmt` and `just check`.
-4. Stop if required checks fail.
-5. Identify files belonging to the task.
-6. Stage explicit task-related paths only.
-7. Inspect `git diff --cached`.
-8. Generate a Conventional Commit message from the staged snapshot.
-9. Commit without bypassing hooks.
-10. Report the commit hash, checks performed, and remaining changes.
 
 ## Git Safety
 
@@ -99,8 +96,10 @@ Use `<type>(<scope>): <summary>`.
 Allowed types: `feat`, `fix`, `refactor`, `docs`, `test`, `build`, `ci`,
 `chore`, and `perf`.
 
-Use `Task: OMX-###` and `Upstream: basecamp/omarchy@<revision>` footers where
-applicable.
+Use an `Upstream: basecamp/omarchy@<revision>` footer where source provenance
+is technically useful.
+Use GitHub pull request linkage for issue identity rather than a mandatory
+commit footer.
 
 ## Verification
 
@@ -132,7 +131,8 @@ before committing.
 - Never port from an unpinned upstream branch.
 - Every port references the pinned release and revision.
 - Never silently copy behavior from a newer Omarchy version.
-- Upstream upgrades are dedicated tasks with their own review and commits.
+- Upstream upgrades are dedicated GitHub issues with their own review and
+  commits.
 - Issue #2 selects and validates the concrete Quattro and Quickshell runtime
   pair.
 - Issue #3 owns the contract audit and compatibility ledger.

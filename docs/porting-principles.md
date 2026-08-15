@@ -37,7 +37,7 @@ Every audited compatibility item uses exactly one of these classifications:
 
 The taxonomy describes compatibility, not stability.
 A feature may be `adapted` and still be experimental, or `omitted` because
-omission is the correct architecture rather than an unfinished task.
+omission is the correct architecture rather than unfinished work.
 
 The porting matrix is a compatibility ledger, not a percentage-complete
 tracker.

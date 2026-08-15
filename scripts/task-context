@@ -1,8 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-
-task_id="${1:?usage: task-context OMX-###}"
-task_file="tasks/${task_id}.md"
-
-test -f "$task_file"
-sed -n '1,220p' "$task_file"

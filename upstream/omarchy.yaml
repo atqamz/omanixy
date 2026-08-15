@@ -5,7 +5,7 @@ pinned_at: 2026-07-23
 
 policy:
   source: pinned-revision-only
-  update_strategy: explicit-upstream-upgrade-task
+  update_strategy: explicit-upstream-upgrade-issue
   integration_target: omarchy-quattro
   current_pin_role: repository-source-baseline
   runtime_pair: pending-issue-2

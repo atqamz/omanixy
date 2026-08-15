@@ -1,9 +1,13 @@
 # Contributing
 
-Read `AGENTS.md` before working.
+Choose or work from a GitHub Issue, then read `AGENTS.md` before working.
+Keep one primary issue per focused branch and pull request where practical.
 
-Work from one task at a time and keep the compatibility ledger truthful and
-current.
-Add entries only after the supported upstream contract has been audited.
+Use a draft pull request during implementation and link it to the issue.
+Run `just fmt` and `just check` before requesting review.
+Keep the compatibility ledger truthful and current when the issue changes
+compatibility state.
 
-Do not push or commit unless the task workflow explicitly authorizes it.
+Add matrix entries only after the supported upstream contract has been
+audited.
+Commit, push, and pull request actions require explicit authorization.

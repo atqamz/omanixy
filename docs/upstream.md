@@ -16,7 +16,7 @@ Runtime and release inputs must use exact immutable revisions.
 Mutable branch heads may be inspected during research, but they are never
 release inputs.
 
-An upstream upgrade requires a dedicated task that records:
+An upstream upgrade requires a dedicated GitHub Issue that records:
 
 - the exact Omarchy revision and source date;
 - the exact or deliberately selected Quickshell revision;
@@ -26,7 +26,7 @@ An upstream upgrade requires a dedicated task that records:
 
 Do not let a routine `nix flake update` silently change the supported shell
 behavior.
-Ports use the current recorded revision until that explicit upgrade work
+Ports use the current recorded revision until that explicit upgrade issue
 changes the pin.
 
 ## Quattro compatibility pair
