@@ -159,10 +159,12 @@ shell reparsing, adds the upstream-compatible empty payload for
 `shell summon` and `shell toggle` calls with a plugin target, and uses a
 bounded timeout.
 It requires the authoritative `WAYLAND_DISPLAY` provided by the graphical
-session and validates that exact Wayland socket.
+session and the authoritative absolute, existing `XDG_RUNTIME_DIR`.
+The runtime directory is required for both exact socket validation and
+Quickshell's IPC instance namespace.
 An absolute `WAYLAND_DISPLAY` is used directly as the socket path.
-For a relative display name, it requires an existing absolute
-`XDG_RUNTIME_DIR` and resolves only that directory.
+For a relative display name, the wrapper resolves only
+`$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY`.
 It never selects a socket by mtime or guesses among multiple sessions.
 Missing or stale session environment fails with a diagnostic before Quickshell
 is invoked.

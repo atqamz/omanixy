@@ -24,6 +24,7 @@ cat > "$tmp/bin/quickshell" <<'EOF'
 set -euo pipefail
 printf '%s\n' "$@" > "$IPC_LOG"
 printf '%s\n' "${WAYLAND_DISPLAY:-unset}" > "${IPC_ENV_LOG:-/dev/null}"
+printf '%s\n' "${XDG_RUNTIME_DIR:-unset}" >> "${IPC_ENV_LOG:-/dev/null}"
 touch "${QS_CALL_LOG:-/dev/null}"
 case ${IPC_MODE:-success} in
   success) printf '%s\n' '{"ok":true}' ;;
@@ -84,6 +85,7 @@ grep -Fqx 'shell' "$tmp/ipc.log"
 grep -Fqx 'ping' "$tmp/ipc.log"
 grep -Fqx '{"value":"a b"}' "$tmp/ipc.log"
 grep -Fqx 'wayland-1' "$tmp/ipc-env.log"
+grep -Fqx "$tmp/runtime" "$tmp/ipc-env.log"
 
 output=$(IPC_LOG="$tmp/ipc.log" IPC_ENV_LOG="$tmp/ipc-env.log" QS_CALL_LOG="$tmp/qs-called" \
   PATH="$tmp/bin:$PATH" WAYLAND_DISPLAY=nested/wayland-3 XDG_RUNTIME_DIR="$tmp/runtime" \
@@ -92,10 +94,17 @@ test "$output" = '{"ok":true}'
 grep -Fqx 'nested/wayland-3' "$tmp/ipc-env.log"
 
 output=$(IPC_LOG="$tmp/ipc.log" IPC_ENV_LOG="$tmp/ipc-env.log" QS_CALL_LOG="$tmp/qs-called" \
-  PATH="$tmp/bin:$PATH" WAYLAND_DISPLAY="$tmp/absolute-wayland" env -u XDG_RUNTIME_DIR \
+  PATH="$tmp/bin:$PATH" WAYLAND_DISPLAY="$tmp/absolute-wayland" XDG_RUNTIME_DIR="$tmp/runtime" \
   "$tmp/omanixy-shell" shell ping)
 test "$output" = '{"ok":true}'
 grep -Fqx "$tmp/absolute-wayland" "$tmp/ipc-env.log"
+grep -Fqx "$tmp/runtime" "$tmp/ipc-env.log"
+
+rm -f "$tmp/qs-called"
+assert_failure 'omanixy-shell requires XDG_RUNTIME_DIR from the graphical session' env -u XDG_RUNTIME_DIR IPC_LOG="$tmp/ipc.log" IPC_ENV_LOG="$tmp/ipc-env.log" QS_CALL_LOG="$tmp/qs-called" PATH="$tmp/bin:$PATH" WAYLAND_DISPLAY="$tmp/absolute-wayland" "$tmp/omanixy-shell" shell ping
+test ! -e "$tmp/qs-called"
+assert_failure 'omanixy-shell requires an absolute XDG_RUNTIME_DIR from the graphical session' env IPC_LOG="$tmp/ipc.log" IPC_ENV_LOG="$tmp/ipc-env.log" QS_CALL_LOG="$tmp/qs-called" PATH="$tmp/bin:$PATH" WAYLAND_DISPLAY="$tmp/absolute-wayland" XDG_RUNTIME_DIR=relative-runtime "$tmp/omanixy-shell" shell ping
+assert_failure "omanixy-shell XDG_RUNTIME_DIR is not a directory: $tmp/missing-runtime" env IPC_LOG="$tmp/ipc.log" IPC_ENV_LOG="$tmp/ipc-env.log" QS_CALL_LOG="$tmp/qs-called" PATH="$tmp/bin:$PATH" WAYLAND_DISPLAY="$tmp/absolute-wayland" XDG_RUNTIME_DIR="$tmp/missing-runtime" "$tmp/omanixy-shell" shell ping
 
 run_wrapper shell summon omarchy.menu
 tail -n 1 "$tmp/ipc.log" | grep -Fqx '{}'
@@ -109,8 +118,8 @@ rm -f "$tmp/qs-called"
 assert_failure 'omanixy-shell requires WAYLAND_DISPLAY from the graphical session' env -u WAYLAND_DISPLAY IPC_LOG="$tmp/ipc.log" IPC_ENV_LOG="$tmp/ipc-env.log" QS_CALL_LOG="$tmp/qs-called" PATH="$tmp/bin:$PATH" XDG_RUNTIME_DIR="$tmp/runtime" "$tmp/omanixy-shell" shell ping
 test ! -e "$tmp/qs-called"
 
-assert_failure 'omanixy-shell requires XDG_RUNTIME_DIR for a relative WAYLAND_DISPLAY' env -u XDG_RUNTIME_DIR IPC_LOG="$tmp/ipc.log" IPC_ENV_LOG="$tmp/ipc-env.log" QS_CALL_LOG="$tmp/qs-called" PATH="$tmp/bin:$PATH" WAYLAND_DISPLAY=wayland-1 "$tmp/omanixy-shell" shell ping
-assert_failure 'omanixy-shell requires an absolute XDG_RUNTIME_DIR for a relative WAYLAND_DISPLAY' env IPC_LOG="$tmp/ipc.log" IPC_ENV_LOG="$tmp/ipc-env.log" QS_CALL_LOG="$tmp/qs-called" PATH="$tmp/bin:$PATH" WAYLAND_DISPLAY=wayland-1 XDG_RUNTIME_DIR=relative-runtime "$tmp/omanixy-shell" shell ping
+assert_failure 'omanixy-shell requires XDG_RUNTIME_DIR from the graphical session' env -u XDG_RUNTIME_DIR IPC_LOG="$tmp/ipc.log" IPC_ENV_LOG="$tmp/ipc-env.log" QS_CALL_LOG="$tmp/qs-called" PATH="$tmp/bin:$PATH" WAYLAND_DISPLAY=wayland-1 "$tmp/omanixy-shell" shell ping
+assert_failure 'omanixy-shell requires an absolute XDG_RUNTIME_DIR from the graphical session' env IPC_LOG="$tmp/ipc.log" IPC_ENV_LOG="$tmp/ipc-env.log" QS_CALL_LOG="$tmp/qs-called" PATH="$tmp/bin:$PATH" WAYLAND_DISPLAY=wayland-1 XDG_RUNTIME_DIR=relative-runtime "$tmp/omanixy-shell" shell ping
 assert_failure "omanixy-shell XDG_RUNTIME_DIR is not a directory: $tmp/missing-runtime" env IPC_LOG="$tmp/ipc.log" IPC_ENV_LOG="$tmp/ipc-env.log" QS_CALL_LOG="$tmp/qs-called" PATH="$tmp/bin:$PATH" WAYLAND_DISPLAY=wayland-1 XDG_RUNTIME_DIR="$tmp/missing-runtime" "$tmp/omanixy-shell" shell ping
 
 rm -f "$tmp/qs-called"

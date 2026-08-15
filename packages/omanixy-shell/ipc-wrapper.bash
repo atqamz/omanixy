@@ -33,13 +33,13 @@ fi
 export OMARCHY_PATH='@OMARCHY_PATH@'
 
 [[ -n ${WAYLAND_DISPLAY:-} ]] || fail 'omanixy-shell requires WAYLAND_DISPLAY from the graphical session'
+[[ -n ${XDG_RUNTIME_DIR:-} ]] || fail 'omanixy-shell requires XDG_RUNTIME_DIR from the graphical session'
+[[ $XDG_RUNTIME_DIR == /* ]] || fail 'omanixy-shell requires an absolute XDG_RUNTIME_DIR from the graphical session'
+[[ -d $XDG_RUNTIME_DIR ]] || fail "omanixy-shell XDG_RUNTIME_DIR is not a directory: $XDG_RUNTIME_DIR"
 
 if [[ $WAYLAND_DISPLAY == /* ]]; then
   wayland_socket=$WAYLAND_DISPLAY
 else
-  [[ -n ${XDG_RUNTIME_DIR:-} ]] || fail 'omanixy-shell requires XDG_RUNTIME_DIR for a relative WAYLAND_DISPLAY'
-  [[ $XDG_RUNTIME_DIR == /* ]] || fail 'omanixy-shell requires an absolute XDG_RUNTIME_DIR for a relative WAYLAND_DISPLAY'
-  [[ -d $XDG_RUNTIME_DIR ]] || fail "omanixy-shell XDG_RUNTIME_DIR is not a directory: $XDG_RUNTIME_DIR"
   wayland_socket="$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY"
 fi
 

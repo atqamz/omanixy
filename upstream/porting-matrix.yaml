@@ -5,8 +5,21 @@ items:
       project: basecamp/omarchy
       revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
       paths:
-        - shell/shell.qml
-        - bin/omarchy-launch-shell
+        - path: shell/shell.qml
+          role: runtime entrypoint
+          consumption: runtime
+        - path: shell/
+          role: runtime shell tree and first-party plugin discovery
+          consumption: runtime
+        - path: config/omarchy/shell.json
+          role: upstream default shell configuration
+          consumption: runtime-fallback-and-migration
+        - path: themes/tokyo-night/
+          role: Tokyo Night source for the baseline theme seed
+          consumption: build-time
+        - path: bin/omarchy-launch-shell
+          role: upstream reference only
+          consumption: reference-only
     omanixy:
       implementation: systemd --user service
       service: omanixy-shell.service

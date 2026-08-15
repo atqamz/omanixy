@@ -53,6 +53,10 @@ let
     set -euo pipefail
     source=$1
     destination=$2
+    cleanup() {
+      ${coreutils}/rm -f -- "$destination"
+    }
+    trap cleanup EXIT
     ${pkgs.jq}/bin/jq \
       --argjson safetyDisabledPlugins '${safetyDisabledPluginsJson}' \
       '
@@ -69,6 +73,7 @@ let
           error("disabledPlugins must be a JSON array")
         end
       ' "$source" > "$destination"
+    trap - EXIT
   '';
   runtimeTheme = runtime.passthru.theme;
 in
@@ -119,9 +124,15 @@ in
           /nix/store/*)
             if [ -f "$config_target" ]; then
               config_tmp="$config_file.omanixy.$$"
-              run ${migrateStoreConfig} "$config_target" "$config_tmp"
-              run ${coreutils}/chmod u+rw -- "$config_tmp"
-              run ${coreutils}/mv -f -- "$config_tmp" "$config_file"
+              (
+                config_tmp_cleanup() {
+                  run ${coreutils}/rm -f -- "$config_tmp"
+                }
+                trap config_tmp_cleanup EXIT
+                run ${migrateStoreConfig} "$config_target" "$config_tmp" || exit $?
+                run ${coreutils}/chmod u+rw -- "$config_tmp" || exit $?
+                run ${coreutils}/mv -f -- "$config_tmp" "$config_file" || exit $?
+              ) || exit $?
             else
               run ${coreutils}/rm -f -- "$config_file"
             fi

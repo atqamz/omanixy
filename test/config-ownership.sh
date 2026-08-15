@@ -7,10 +7,12 @@ home=${3:?Home Manager test home required}
 custom_home=${4:?custom Home Manager test home required}
 store_home=${5:?store-link test home required}
 store_config=${6:?store-backed source config required}
+malformed_store_config=${7:?malformed store-backed source config required}
 mkdir -p "$home"
 mkdir -p "$custom_home"
 mkdir -p "$store_home/.config/omarchy"
-trap 'rm -rf "$home" "$custom_home" "$store_home" "${home}-broken-store-link"' EXIT
+malformed_store_home="${home}-malformed-store-link"
+trap 'rm -rf "$home" "$custom_home" "$store_home" "${home}-broken-store-link" "$malformed_store_home"' EXIT
 
 run_activation_at() {
   activation_home=$1
@@ -125,5 +127,16 @@ printf '%s\n' '{"storeLinkMaterialized":true}' > "$store_file"
 HOME="$store_home" USER=omanixy-test XDG_RUNTIME_DIR="$store_home/runtime" \
   bash -c 'run() { "$@"; }; source "$1"' bash "$activation"
 grep -Fqx '{"storeLinkMaterialized":true}' "$store_file"
+
+mkdir -p "$malformed_store_home/.config/omarchy"
+ln -s "$malformed_store_config" "$malformed_store_home/.config/omarchy/shell.json"
+malformed_status=0
+HOME="$malformed_store_home" USER=omanixy-test XDG_RUNTIME_DIR="$malformed_store_home/runtime" \
+  bash -c 'run() { "$@"; }; source "$1"' bash "$activation" || malformed_status=$?
+test "$malformed_status" -ne 0
+test -L "$malformed_store_home/.config/omarchy/shell.json"
+test "$(readlink "$malformed_store_home/.config/omarchy/shell.json")" = "$malformed_store_config"
+grep -Fqx '{"disabledPlugins":' "$malformed_store_config"
+! compgen -G "$malformed_store_home/.config/omarchy/shell.json.omanixy.*" >/dev/null
 
 printf 'configuration ownership checks passed\n'

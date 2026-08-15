@@ -64,8 +64,10 @@ It does not authorize emulating the complete Omarchy filesystem.
 
 ## Porting ledger
 
-`upstream/porting-matrix.yaml` contains only the durable runtime lifecycle
-decision made by issue #2.
+`upstream/porting-matrix.yaml` contains the durable runtime lifecycle decision
+made by issue #2 and the narrow source contracts consumed by that baseline.
+It distinguishes runtime shell and configuration paths, the build-time Tokyo
+Night theme source, and the upstream launcher inspected for reference only.
 Issue #3 owns the comprehensive contract audit and all broader ledger
 population.
 

@@ -61,6 +61,7 @@
           runtime = runtimeFor system;
           runtimeClosureInfo = pkgs.closureInfo { rootPaths = [ runtime ]; };
           storeConfig = "${runtime.passthru.omarchySource}/config/omarchy/shell.json";
+          malformedStoreConfig = pkgs.writeText "omanixy-malformed-store-shell-config" ''{"disabledPlugins":'';
           homeConfiguration = homeConfigurationFor system { };
           customHomeConfiguration = homeConfigurationFor system {
             programs.omanixy.shell.config = {
@@ -96,6 +97,9 @@
                 };
               }).activationPackage
               true
+          );
+          unsupportedPlatform = builtins.tryEval (
+            builtins.deepSeq (runtimeFor "x86_64-darwin") true
           );
           nixosConfiguration = nixpkgs.lib.nixosSystem {
             inherit system;
@@ -152,9 +156,10 @@
           config-ownership = pkgs.runCommand "omanixy-config-ownership" {
             activation = activationScript;
             customActivation = customActivationScript;
+            malformedStoreConfig = malformedStoreConfig;
             nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.diffutils pkgs.jq ];
           } ''
-            ${pkgs.bash}/bin/bash ${./test/config-ownership.sh} "$activation" "$customActivation" /build/omanixy-test /build/omanixy-custom-test /build/omanixy-store-link-test ${storeConfig}
+            ${pkgs.bash}/bin/bash ${./test/config-ownership.sh} "$activation" "$customActivation" /build/omanixy-test /build/omanixy-custom-test /build/omanixy-store-link-test ${storeConfig} "$malformedStoreConfig"
             touch "$out"
           '';
           service-unit = pkgs.runCommand "omanixy-service-unit" {
@@ -186,10 +191,12 @@
             invalidConfiguration = if invalidHomeConfiguration.success then "true" else "false";
             invalidDisabledPluginsType = if invalidDisabledPluginsType.success then "true" else "false";
             invalidDisabledPluginMember = if invalidDisabledPluginMember.success then "true" else "false";
+            unsupportedPlatform = if unsupportedPlatform.success then "true" else "false";
           } ''
             test "$invalidConfiguration" = false
             test "$invalidDisabledPluginsType" = false
             test "$invalidDisabledPluginMember" = false
+            test "$unsupportedPlatform" = false
             touch "$out"
           '';
           home-manager-evaluation = pkgs.runCommand "omanixy-home-manager-evaluation" {
