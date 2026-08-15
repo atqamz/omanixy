@@ -43,8 +43,10 @@ The porting matrix is a compatibility ledger, not a percentage-complete
 tracker.
 The number of `exact` entries is never a project quality score.
 Issue #3 owns the real contract audit and matrix population.
-The current empty `upstream/porting-matrix.yaml` is therefore intentional and
-does not represent fabricated support claims.
+Issue #2 records the narrow runtime source contracts needed to make the
+validated Quattro baseline auditable.
+Those entries do not represent the comprehensive compatibility audit owned by
+issue #3.
 
 ## Adapters and downstream patches
 

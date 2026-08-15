@@ -11,8 +11,8 @@ Omanixy owns the boundary.
 
 The target architecture consumes a reviewed and pinned upstream Quattro shell
 rather than broadly reimplementing its presentation in Nix.
-Issue #2 owns selecting and validating the concrete Quattro and Quickshell
-runtime pair.
+Issue #2 selected and validated the concrete Quattro and Quickshell runtime
+pair.
 It provides generic, composable NixOS and Home Manager integration for public
 consumers.
 
@@ -133,7 +133,7 @@ before committing.
 - Never silently copy behavior from a newer Omarchy version.
 - Upstream upgrades are dedicated GitHub issues with their own review and
   commits.
-- Issue #2 selects and validates the concrete Quattro and Quickshell runtime
+- Issue #2 selected and validated the concrete Quattro and Quickshell runtime
   pair.
 - Issue #3 owns the contract audit and compatibility ledger.
 - A narrow adapter is preferred over a downstream presentation fork.
