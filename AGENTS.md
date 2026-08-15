@@ -2,11 +2,23 @@
 
 ## Project
 
-Omanixy is an opinionated but overridable NixOS and Home Manager
-implementation inspired by a pinned Omarchy release.
+Omanixy is the Nix-native integration layer for the Omarchy Quattro desktop
+shell.
 
-The project mirrors Omarchy's intended user experience where practical, but
-expresses it through composable NixOS and Home Manager modules.
+Omarchy owns presentation.
+NixOS owns the operating system.
+Omanixy owns the boundary.
+
+The target architecture consumes a reviewed and pinned upstream Quattro shell
+rather than broadly reimplementing its presentation in Nix.
+Issue #2 owns selecting and validating the concrete Quattro and Quickshell
+runtime pair.
+It provides generic, composable NixOS and Home Manager integration for public
+consumers.
+
+The repository remains named `omanixy`.
+Use `omanixy-shell` only for runtime or service terminology, such as
+`omanixy-shell.service`.
 
 ## Authority
 
@@ -105,8 +117,14 @@ before committing.
 - Expose options instead of requiring users to copy internal modules.
 - Keep modules independently importable where practical.
 - Avoid modifying unrelated user configuration.
-- Separate packages, configuration, services, keybindings, and themes.
-- Document behavior that cannot match Omarchy exactly.
+- Keep public modules independent of Universe, personal paths, and
+  machine-specific policy.
+- Keep user/session integration in Home Manager and privileged/system
+  capability integration in the NixOS module.
+- Do not broadly reimplement upstream Quattro QML or the complete Omarchy
+  Hyprland configuration.
+- Inspect upstream contracts rather than copying incidental scripts.
+- Document behavior that is `exact`, `adapted`, `omitted`, or `blocked`.
 - Mark each porting-matrix item `exact`, `adapted`, `omitted`, or `blocked`.
 
 ## Upstream Policy
@@ -115,3 +133,9 @@ before committing.
 - Every port references the pinned release and revision.
 - Never silently copy behavior from a newer Omarchy version.
 - Upstream upgrades are dedicated tasks with their own review and commits.
+- Issue #2 selects and validates the concrete Quattro and Quickshell runtime
+  pair.
+- Issue #3 owns the contract audit and compatibility ledger.
+- A narrow adapter is preferred over a downstream presentation fork.
+- Universe is a downstream consumer and must never become a public module
+  dependency.

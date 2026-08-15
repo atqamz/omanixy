@@ -6,7 +6,7 @@ test -s flake.nix
 test -s justfile
 test -s upstream/omarchy.yaml
 test -s upstream/porting-matrix.yaml
-test -s tasks/OMX-001-bootstrap.md
+test -s tasks/done/OMX-001-bootstrap.md
 test -x scripts/verify
 test -x scripts/task-context
 test -x scripts/upstream-diff

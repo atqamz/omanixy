@@ -1,5 +1,5 @@
 {
-  description = "Composable NixOS and Home Manager implementation inspired by Omarchy";
+  description = "Nix-native integration layer for the Omarchy Quattro desktop shell";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
