@@ -51,16 +51,18 @@ issue revalidates both inputs together.
 
 ## Source consumption
 
-The intended runtime consumes the reviewed upstream shell source as a
-source-only flake input where technically possible.
-Omanixy should run it from a read-only Nix store path rather than vendor a
-second QML tree.
+The runtime consumes the reviewed upstream shell from a deterministic,
+immutable compatibility root derived from the source-only flake input.
+The root symlinks the exact pinned `shell/` tree and the upstream files needed
+by supported startup and app-discovery paths, then adds only the audited menu
+and helper surface.
 Runtime-writable configuration and state must be materialized outside the
 store.
 
-An `OMARCHY_PATH` value pointing at an immutable Nix store source can be an
-intentional compatibility interface.
-It does not authorize emulating the complete Omarchy filesystem.
+`OMARCHY_PATH` points at this compatibility root as an intentional source
+compatibility interface.
+It does not authorize emulating the complete Omarchy filesystem or copying the
+upstream `bin/` tree.
 
 ## Porting ledger
 
