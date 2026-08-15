@@ -62,6 +62,7 @@ run_adapter() {
     TEST_DESKTOP_DATABASE_FAIL="${TEST_DESKTOP_DATABASE_FAIL:-}" \
     TEST_DESKTOP_DATABASE_FAIL_ONCE="${TEST_DESKTOP_DATABASE_FAIL_ONCE:-}" \
     TEST_DESKTOP_DATABASE_STATE="${TEST_DESKTOP_DATABASE_STATE:-}" \
+    TEST_HYPRCTL_FAIL_SECOND="${TEST_HYPRCTL_FAIL_SECOND:-}" \
     COMPAT_ADAPTER_NAME="$command" \
     bash "$adapter" "$@"
 }
@@ -654,6 +655,9 @@ cat > "$bin/hyprctl" <<'EOF'
 if [[ $* == 'monitors all -j' || $* == 'monitors -j' ]]; then
   printf '%s\n' '[{"name":"eDP-1","focused":true,"disabled":false,"width":1920,"height":1080,"scale":1.25,"mirrorOf":"none"}]'
 else
+  if [[ ${TEST_HYPRCTL_FAIL_SECOND:-} == 1 && -s $HYPRCTL_LOG && $1 == keyword ]]; then
+    exit 1
+  fi
   printf '%s\n' "$*" >> "$HYPRCTL_LOG"
 fi
 EOF
@@ -680,6 +684,23 @@ grep -Fqx -- 'local omarchy_gdk_scale = 2' "$home/.config/hypr/monitors.lua"
 grep -Fqx -- 'local unrelated = "preserve me"' "$home/.config/hypr/monitors.lua"
 sed -n '8p' "$test_root/monitor" > "$test_root/monitor-entry"
 jq -e 'type == "array" and .[0].name == "eDP-1"' "$test_root/monitor-entry" >/dev/null
+chmod 500 "$home/.config/hypr"
+if HYPRCTL_LOG="$test_root/hyprctl" HOME="$home" PATH="$bin:$PATH" \
+  run_adapter omarchy-hyprland-monitor-scaling 2 2>"$test_root/error"; then
+  printf '%s\n' 'monitor configuration failure unexpectedly succeeded' >&2
+  exit 1
+fi
+chmod 700 "$home/.config/hypr"
+grep -q 'previous live scale was restored' "$test_root/error"
+grep -Fqx -- 'keyword monitor eDP-1,preferred,auto,auto,1.25' "$test_root/hyprctl"
+chmod 500 "$home/.config/hypr"
+if TEST_HYPRCTL_FAIL_SECOND=1 HYPRCTL_LOG="$test_root/hyprctl-rollback" HOME="$home" PATH="$bin:$PATH" \
+  run_adapter omarchy-hyprland-monitor-scaling 2 2>"$test_root/error"; then
+  printf '%s\n' 'monitor rollback failure unexpectedly succeeded' >&2
+  exit 1
+fi
+chmod 700 "$home/.config/hypr"
+grep -q 'live-scale rollback failed' "$test_root/error"
 
 ln -s "$adapter" "$bin/omarchy-network-speedtest"
 if HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-network-speedtest invalid 2>"$test_root/error"; then

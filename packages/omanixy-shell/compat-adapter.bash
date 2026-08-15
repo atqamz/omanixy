@@ -1013,9 +1013,10 @@ monitor_scaling() {
   (($# <= 1)) || fail 'Usage: omarchy-hyprland-monitor-scaling [SCALE]' 2
   need hyprctl
   need jq
-  local info name="" config_mode
+  local info name="" old_scale config_mode
   info=$(timed 3 'focused monitor lookup' hyprctl monitors -j | jq -e -c '.[] | select(.focused == true)') || fail "$name: focused monitor is unavailable"
   name=$(jq -r .name <<<"$info")
+  old_scale=$(jq -er '.scale | numbers' <<<"$info") || fail "$name: focused monitor scale is unavailable"
   if (($# == 0)); then jq -r .scale <<<"$info"; return; fi
   if [[ ! $1 =~ ^[0-9]+(\.[0-9]+)?$ ]] || ! awk -v scale="$1" 'BEGIN { exit !(scale >= 1 && scale <= 4) }'; then
     fail 'Monitor scale must be between 1 and 4' 2
@@ -1023,8 +1024,12 @@ monitor_scaling() {
   config_mode=$(monitor_config_mode)
   timed 3 'monitor scaling update' hyprctl keyword monitor "$name,preferred,auto,auto,$1" >/dev/null ||
     fail "$name: Hyprland rejected monitor scale"
-  persist_monitor_scale "$config_mode" "$1" ||
-    fail "$name: monitor scale changed, but the Hyprland configuration could not be updated"
+  if ! persist_monitor_scale "$config_mode" "$1"; then
+    if timed 3 'monitor scaling rollback' hyprctl keyword monitor "$name,preferred,auto,auto,$old_scale" >/dev/null; then
+      fail "$name: monitor scale configuration failed; previous live scale was restored"
+    fi
+    fail "$name: monitor scale configuration failed and live-scale rollback failed"
+  fi
 }
 
 display_text_size() {
