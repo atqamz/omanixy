@@ -48,6 +48,28 @@ let
   };
   configJson = builtins.toJSON effectiveConfig;
   configSeed = pkgs.writeText "omanixy-shell-config" configJson;
+  safetyDisabledPluginsJson = builtins.toJSON safetyDisabledPlugins;
+  migrateStoreConfig = pkgs.writeShellScript "omanixy-migrate-store-shell-config" ''
+    set -euo pipefail
+    source=$1
+    destination=$2
+    ${pkgs.jq}/bin/jq \
+      --argjson safetyDisabledPlugins '${safetyDisabledPluginsJson}' \
+      '
+        if .disabledPlugins == null then
+          .disabledPlugins = $safetyDisabledPlugins
+        elif (.disabledPlugins | type) == "array" then
+          .disabledPlugins = (
+            reduce $safetyDisabledPlugins[] as $plugin (
+              .disabledPlugins;
+              if index($plugin) == null then . + [$plugin] else . end
+            )
+          )
+        else
+          error("disabledPlugins must be a JSON array")
+        end
+      ' "$source" > "$destination"
+  '';
   runtimeTheme = runtime.passthru.theme;
 in
 {
@@ -97,7 +119,7 @@ in
           /nix/store/*)
             if [ -f "$config_target" ]; then
               config_tmp="$config_file.omanixy.$$"
-              run ${coreutils}/cp -- "$config_target" "$config_tmp"
+              run ${migrateStoreConfig} "$config_target" "$config_tmp"
               run ${coreutils}/chmod u+rw -- "$config_tmp"
               run ${coreutils}/mv -f -- "$config_tmp" "$config_file"
             else
@@ -151,7 +173,7 @@ in
         Description = lib.mkDefault "Omanixy Quattro shell";
         Documentation = lib.mkDefault [ "https://github.com/atqamz/omanixy" ];
         PartOf = lib.mkDefault [ "graphical-session.target" ];
-        After = lib.mkDefault [ "graphical-session-pre.target" ];
+        After = lib.mkDefault [ "graphical-session.target" ];
         StartLimitIntervalSec = lib.mkDefault "60s";
         StartLimitBurst = lib.mkDefault 5;
       };

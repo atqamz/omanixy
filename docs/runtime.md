@@ -68,8 +68,9 @@ executables, and the small utility closure required by the baseline.
 ## Service lifecycle
 
 Home Manager installs `omanixy-shell.service` for `systemd --user`.
-It is wanted by `graphical-session.target`, ordered after
-`graphical-session-pre.target`, and is part of the graphical session.
+It is wanted by `graphical-session.target`, ordered after that target so UWSM
+can establish the compositor session first, and is part of the graphical
+session.
 Systemd is the only supervisor.
 The service uses `Restart=on-failure`, `RestartSec=2s`, and a five-start limit
 within 60 seconds.
@@ -121,6 +122,12 @@ Home Manager activation side effects run through its `run` helper, so
 changing user state.
 Later activations preserve existing regular files, including runtime-mutated
 or manually edited content.
+Manually removing a safety-disabled plugin from an ordinary user-owned file is
+an explicit opt-in to that unsupported surface; Omanixy does not overwrite the
+file or claim that the feature is safe or implemented.
+Store-backed shell configuration symlinks are the one migration case where
+Omanixy preserves the upstream JSON while adding its mandatory safety floor
+before materializing the file.
 If an older activation left a writable-state symlink into the store, the
 activation copies its contents out to ordinary user storage before continuing.
 It never writes runtime state into the store.
@@ -151,8 +158,11 @@ It invokes the exact packaged runtime, forwards positional arguments without
 shell reparsing, adds the upstream-compatible empty payload for
 `shell summon` and `shell toggle` calls with a plugin target, and uses a
 bounded timeout.
-It requires the authoritative `WAYLAND_DISPLAY` and `XDG_RUNTIME_DIR`
-provided by the graphical session and validates that exact Wayland socket.
+It requires the authoritative `WAYLAND_DISPLAY` provided by the graphical
+session and validates that exact Wayland socket.
+An absolute `WAYLAND_DISPLAY` is used directly as the socket path.
+For a relative display name, it requires an existing absolute
+`XDG_RUNTIME_DIR` and resolves only that directory.
 It never selects a socket by mtime or guesses among multiple sessions.
 Missing or stale session environment fails with a diagnostic before Quickshell
 is invoked.

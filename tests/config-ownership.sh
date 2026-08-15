@@ -103,6 +103,24 @@ store_file="$store_home/.config/omarchy/shell.json"
 test ! -L "$store_file"
 test -w "$store_file"
 jq empty "$store_file"
+for plugin in \
+  omarchy.background \
+  omarchy.battery \
+  omarchy.clipboard \
+  omarchy.idle \
+  omarchy.lock \
+  omarchy.media \
+  omarchy.nightlight \
+  omarchy.notifications \
+  omarchy.polkit; do
+  jq -e --arg plugin "$plugin" '.disabledPlugins | index($plugin) != null' "$store_file" >/dev/null
+done
+jq -e '
+  .version == 1
+  and .idle.screensaver == 150
+  and .bar.layout.left[0].id == "omarchy.menu"
+  and .plugins == []
+' "$store_file" >/dev/null
 printf '%s\n' '{"storeLinkMaterialized":true}' > "$store_file"
 HOME="$store_home" USER=omanixy-test XDG_RUNTIME_DIR="$store_home/runtime" \
   bash -c 'run() { "$@"; }; source "$1"' bash "$activation"

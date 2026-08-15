@@ -4,6 +4,7 @@ set -euo pipefail
 repo=${1:?repository path required}
 flake=$repo/flake.nix
 metadata=$repo/upstream/omarchy.yaml
+lockfile=$repo/flake.lock
 
 omarchy_revision=f0020448ca87329199de7cb12f2015ebc4a3e5e7
 quickshell_revision=28771c7c74b42e20afca0b1b63980cb46515537c
@@ -18,7 +19,18 @@ grep -Fq "source: github:NixOS/nixpkgs/$nixpkgs_revision" "$metadata"
 grep -Fq "revision: $omarchy_revision" "$metadata"
 grep -Fq "revision: $quickshell_revision" "$metadata"
 grep -Fq "revision: $nixpkgs_revision" "$metadata"
-grep -Fq "\"rev\": \"$nixpkgs_revision\"" "$repo/flake.lock"
+grep -Fq "\"rev\": \"$nixpkgs_revision\"" "$lockfile"
+jq -e \
+  --arg omarchy "$omarchy_revision" \
+  --arg quickshell "$quickshell_revision" \
+  --arg nixpkgs "$nixpkgs_revision" \
+  '
+    .nodes.omarchy.locked.rev == $omarchy
+    and .nodes.omarchy.original.rev == $omarchy
+    and .nodes.quickshell.locked.rev == $quickshell
+    and .nodes.quickshell.original.rev == $quickshell
+    and .nodes.nixpkgs.locked.rev == $nixpkgs
+  ' "$lockfile" >/dev/null
 grep -Fq "validated_quattro_pair: true" "$metadata"
 grep -Fq 'track: quattro' "$metadata"
 ! grep -Fq 'release:' "$metadata"

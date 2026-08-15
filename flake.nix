@@ -77,6 +77,26 @@
               }).activationPackage
               true
           );
+          invalidDisabledPluginsType = builtins.tryEval (
+            builtins.deepSeq
+              (homeConfigurationFor system {
+                programs.omanixy.shell.config = {
+                  version = 1;
+                  disabledPlugins = "omarchy.lock";
+                };
+              }).activationPackage
+              true
+          );
+          invalidDisabledPluginMember = builtins.tryEval (
+            builtins.deepSeq
+              (homeConfigurationFor system {
+                programs.omanixy.shell.config = {
+                  version = 1;
+                  disabledPlugins = [ "omarchy.lock" 1 ];
+                };
+              }).activationPackage
+              true
+          );
           nixosConfiguration = nixpkgs.lib.nixosSystem {
             inherit system;
             modules = [
@@ -111,7 +131,7 @@
         in
         {
           pin-invariants = pkgs.runCommand "omanixy-pin-invariants" {
-            nativeBuildInputs = [ pkgs.bash pkgs.gnugrep pkgs.ripgrep ];
+            nativeBuildInputs = [ pkgs.bash pkgs.gnugrep pkgs.jq pkgs.ripgrep ];
           } ''
             ${pkgs.bash}/bin/bash ${./tests/pin-invariants.sh} ${./.}
             touch "$out"
@@ -164,8 +184,12 @@
           '';
           configuration-contract = pkgs.runCommand "omanixy-configuration-contract" {
             invalidConfiguration = if invalidHomeConfiguration.success then "true" else "false";
+            invalidDisabledPluginsType = if invalidDisabledPluginsType.success then "true" else "false";
+            invalidDisabledPluginMember = if invalidDisabledPluginMember.success then "true" else "false";
           } ''
             test "$invalidConfiguration" = false
+            test "$invalidDisabledPluginsType" = false
+            test "$invalidDisabledPluginMember" = false
             touch "$out"
           '';
           home-manager-evaluation = pkgs.runCommand "omanixy-home-manager-evaluation" {
