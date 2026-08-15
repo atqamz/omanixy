@@ -53,8 +53,9 @@ Import the Home Manager module and enable the shell:
 options.
 The structured config is the escape hatch for upstream schema changes rather
 than a Nix option for every QML property.
-Omanixy always appends its #4 safety floor to `disabledPlugins`, even when a
-custom whole-file config omits that field.
+Omanixy seeds the safety floor in `disabledPlugins` and enforces the same
+immutable floor in the compatibility-root plugin registry, even when a custom
+whole-file config omits or removes those entries.
 The raw config escape hatch cannot enable unfinished lock, polkit, idle,
 notification, or related security-sensitive surfaces.
 The NixOS module is valid and intentionally has no privileged declarations for
@@ -88,6 +89,9 @@ The service explicitly sets `OMARCHY_PATH`, `QS_DISABLE_FILE_WATCHER`, and
 `QS_NO_RELOAD_POPUP`.
 The latter two preserve Quattro's deliberate explicit-restart behavior for
 the immutable source model.
+The safe menu's Logout action uses `uwsm stop` and is visible only when the
+current graphical session is UWSM-active, so it does not terminate unrelated
+user-manager sessions or workloads.
 
 ## Source and runtime closure
 
@@ -96,9 +100,11 @@ Quattro is consumed from a deterministic immutable compatibility root through
 The root contains only the pinned source files required by the supported
 runtime graph, including shared QML libraries, shell services, the baseline
 bar widgets, and reachable panels and overlays.
-It applies narrow patches for the unsupported Custom DNS terminal action,
-enforcing the disabled-plugin floor on bar widgets, and routing the unsupported
-clock timezone middle-click action to the supported clock panel.
+It applies seven narrow patch sites: the disabled-plugin floor on bar widgets,
+enterprise Wi-Fi filtering through the network panel's model, removal of the
+Custom DNS provider/action/pill, hiding the unsupported speed-test action,
+clock middle-click routing, the native bar transparency fallback, and an inert
+launcher-delete action.
 Unsupported first-party plugin directories are not copied into the view.
 The root supplies Omanixy's safe fallback shell configuration, launcher-hides
 file, audited default menu, and helper view.
@@ -115,9 +121,18 @@ Omanixy never copies the upstream `bin/` tree or creates a mutable Omarchy
 filesystem.
 
 The closure contains the selected Quickshell, its Qt/QML dependencies,
-`hyprctl`, `inotifywait`, and the explicit utilities used by supported
-audio, network, Wi-Fi QR and bounded speed-test, Bluetooth, power, monitor,
-screenshot, clipboard, emoji, weather, and launcher contracts.
+`hyprctl`, `inotifywait`, and only the feature-group utilities selected by the
+consumer.
+The feature groups are `network`, `audio`, `bluetooth`, `screenshot`,
+`clipboard`, `power`, `monitor`, `weather`, `notification`, and `launcher`.
+Selecting `bluetooth` also selects `audio` because the pinned Bluetooth panel
+uses the audio default-device contract when connecting a device.
+The default enables all groups needed by the safe baseline.
+When a group is omitted, its helpers and menu actions are omitted and its
+baseline bar widgets are added to the immutable disabled-plugin floor.
+The clipboard group also floors the clipboard and emoji plugin IDs so a custom
+configuration cannot re-enable those panels without selecting their runtime
+dependencies.
 The upstream package list, Arch tools, `pacman`, `yay`, and
 `atqamz/universe` are not dependencies.
 The generated wrappers do not append the host `PATH`.
@@ -138,7 +153,13 @@ fails on any drift.
 The fixture test also proves deterministic output, dynamic-command retention,
 menu-field coverage, narrow compatibility-bin construction, and fail-closed changes for
 new helpers, executables, absolute paths, services, and PAM paths.
-Static audit is a pin-drift and review guard.
+Static audit is a pin-drift and review guard, not semantic proof of every
+runtime behavior.
+The structured `upstream/compatibility-contracts.json` manifest closes each
+adapted helper to its pinned consumer, implementation, focused test, and
+referenced upstream implementation hash.
+The closure check fails on missing edges, helper hash drift, unexpected
+compatibility-bin entries, or newly reachable unlisted contracts.
 Behavioral adapter tests and live smoke are separate evidence.
 
 ## Configuration and state ownership
@@ -148,7 +169,7 @@ The ownership model is deliberately whole-file and idempotent:
 | Path | Ownership |
 | --- | --- |
 | `~/.config/omarchy/shell.json` | Declaratively seeded, then fully user-owned and writable |
-| `~/.config/omarchy/shell.toml` | Optional fully user-owned theme override |
+| `~/.config/omarchy/shell.toml` | User-owned theme/config file; the monitor text-size adapter updates only `[font].base-size`, while preserving unrelated content |
 | `~/.config/omarchy/plugins/` | User-local plugin directory |
 | `~/.local/state/omarchy/current/theme/` | Seeded generated theme state, then runtime writable |
 | `/nix/store/.../omarchy-quattro-...` | Declaratively immutable upstream source |
@@ -156,14 +177,19 @@ The ownership model is deliberately whole-file and idempotent:
 | `/nix/store/.../omanixy-shell-theme-...` | Immutable theme seed |
 
 First activation creates `shell.json` and the minimal theme seed.
+The generated baseline is versioned in `upstream/shell-baseline.json` with the
+upstream-required `version: 1` plus an `omanixyBaselineVersion` marker.
+An exact known old Omanixy baseline migrates idempotently to the current marker
+and widget set; customized, malformed, or otherwise unknown files remain
+user-owned and are not rewritten.
 Home Manager activation side effects run through its `run` helper, so
 `home-manager switch --dry-run` logs planned writes without creating or
 changing user state.
 Later activations preserve existing regular files, including runtime-mutated
 or manually edited content.
-Manually removing a safety-disabled plugin from an ordinary user-owned file is
-an explicit opt-in to that unsupported surface; Omanixy does not overwrite the
-file or claim that the feature is safe or implemented.
+Manually removing a safety-disabled plugin from an ordinary user-owned file does
+not re-enable that surface; the compatibility-root registry applies the same
+immutable floor at runtime.
 First-party plugins omitted from the immutable compatibility view remain
 unavailable even if a user removes their disabled ID.
 Store-backed shell configuration symlinks are the one migration case where
@@ -233,7 +259,8 @@ The default menu is intentionally smaller than the upstream Omarchy menu.
 Every actionable baseline row is backed by a native command, an audited
 adapter, or a host-owned session action.
 Existing writable `shell.json` files are not overwritten when new defaults are
-added.
+added unless they are an exact known generated baseline covered by the versioned
+migration.
 
 The compatibility helpers are not a general Omarchy CLI.
 They implement only the invocation forms reached by supported Quattro

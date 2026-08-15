@@ -20,9 +20,10 @@
   outputs = { self, nixpkgs, omarchy, quickshell, home-manager, ... }:
     let
       supportedSystems = [ "x86_64-linux" "aarch64-linux" ];
-      nixpkgsRevision = "241313f4e8e508cb9b13278c2b0fa25b9ca27163";
+      contractSource = builtins.fromJSON (builtins.readFile ./upstream/compatibility-contracts.json);
+      nixpkgsRevision = contractSource.pins.nixpkgs;
       forEachSystem = nixpkgs.lib.genAttrs supportedSystems;
-      runtimeFor = system:
+      runtimeFor = system: features:
         assert nixpkgs.lib.assertOneOf "omanixy supported system" system supportedSystems;
         import ./packages/omanixy-shell {
           inherit omarchy;
@@ -30,6 +31,7 @@
           pkgs = nixpkgs.legacyPackages.${system};
           quickshellSrc = quickshell;
           inherit nixpkgsRevision supportedSystems;
+          inherit features;
         };
       homeConfigurationFor = system: extra: home-manager.lib.homeManagerConfiguration {
         pkgs = nixpkgs.legacyPackages.${system};
@@ -47,18 +49,20 @@
     in
     {
       homeManagerModules.default = { pkgs, ... }: {
-        _module.args.omanixyRuntime = runtimeFor pkgs.stdenv.hostPlatform.system;
+        _module.args.omanixyRuntimeFor = features: runtimeFor pkgs.stdenv.hostPlatform.system features;
         imports = [ ./modules/home/default.nix ];
       };
       nixosModules.default = ./modules/nixos/default.nix;
       packages = forEachSystem (system: {
-        omanixy-shell = runtimeFor system;
+        omanixy-shell = runtimeFor system null;
       });
       formatter = forEachSystem (system: nixpkgs.legacyPackages.${system}.nixpkgs-fmt);
       checks = forEachSystem (system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
-          runtime = runtimeFor system;
+          runtime = runtimeFor system null;
+          clipboardRuntime = runtimeFor system [ "clipboard" ];
+          bluetoothRuntime = runtimeFor system [ "bluetooth" ];
           runtimeClosureInfo = pkgs.closureInfo { rootPaths = [ runtime ]; };
           compatibilityRoot = runtime.passthru.omarchyCompatibilityRoot;
           storeConfig = "${runtime.passthru.omarchySource}/config/omarchy/shell.json";
@@ -100,7 +104,7 @@
               true
           );
           unsupportedPlatform = builtins.tryEval (
-            builtins.deepSeq (runtimeFor "x86_64-darwin") true
+            builtins.deepSeq (runtimeFor "x86_64-darwin" null) true
           );
           nixosConfiguration = nixpkgs.lib.nixosSystem {
             inherit system;
@@ -154,7 +158,30 @@
               closurePaths = "${runtimeClosureInfo}/store-paths";
               nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.gnused pkgs.findutils pkgs.jq pkgs.python3 ];
             } ''
-            ${pkgs.bash}/bin/bash ${./test/runtime-closure.sh} ${runtime} "$closurePaths" ${runtime.passthru.quickshell} ${runtime.passthru.omarchySource} ${compatibilityRoot} ${runtime.passthru.compatibilityBin}
+            ${pkgs.bash}/bin/bash ${./test/runtime-closure.sh} ${runtime} "$closurePaths" ${runtime.passthru.quickshell} ${runtime.passthru.omarchySource} ${compatibilityRoot} ${runtime.passthru.compatibilityBin} ${./upstream/compatibility-contracts.json}
+            touch "$out"
+          '';
+          feature-dependencies = pkgs.runCommand "omanixy-feature-dependencies"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.jq ];
+            } ''
+            test -e ${clipboardRuntime.passthru.compatibilityBin}/bin/omarchy-menu-emoji-insert
+            test ! -e ${clipboardRuntime.passthru.compatibilityBin}/bin/omarchy-network-status
+            test -e ${bluetoothRuntime.passthru.compatibilityBin}/bin/omarchy-audio-output-set-default
+            clipboard_path=$(sed -n 's/^export PATH="\(.*\)"$/\1/p' ${clipboardRuntime}/bin/omanixy-shell-runtime)
+            PATH="$clipboard_path" command -v wl-copy >/dev/null
+            if PATH="$clipboard_path" command -v nmcli >/dev/null; then
+              exit 1
+            fi
+            bluetooth_path=$(sed -n 's/^export PATH="\(.*\)"$/\1/p' ${bluetoothRuntime}/bin/omanixy-shell-runtime)
+            PATH="$bluetooth_path" command -v pactl >/dev/null
+            jq -e '
+              has("trigger.emoji")
+              and (has("apps") | not)
+              and (has("trigger.screenshot") | not)
+              and (has("system.logout") | not)
+            ' ${clipboardRuntime.passthru.safeMenu} >/dev/null
+            jq -e '.disabledPlugins | index("omarchy.network") != null and index("omarchy.audio") != null' ${clipboardRuntime.passthru.safeShellConfig} >/dev/null
             touch "$out"
           '';
           config-ownership = pkgs.runCommand "omanixy-config-ownership"
@@ -164,7 +191,7 @@
               malformedStoreConfig = malformedStoreConfig;
               nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.diffutils pkgs.jq ];
             } ''
-            ${pkgs.bash}/bin/bash ${./test/config-ownership.sh} "$activation" "$customActivation" /build/omanixy-test /build/omanixy-custom-test /build/omanixy-store-link-test ${storeConfig} "$malformedStoreConfig"
+            ${pkgs.bash}/bin/bash ${./test/config-ownership.sh} "$activation" "$customActivation" /build/omanixy-test /build/omanixy-custom-test /build/omanixy-store-link-test ${storeConfig} "$malformedStoreConfig" ${./upstream/shell-baseline.json}
             touch "$out"
           '';
           service-unit = pkgs.runCommand "omanixy-service-unit"
@@ -173,7 +200,7 @@
             } ''
             unit_dir=$(mktemp -d)
             cp ${serviceUnit} "$unit_dir/omanixy-shell.service"
-            ${pkgs.bash}/bin/bash ${./test/service-unit.sh} "$unit_dir/omanixy-shell.service" ${runtime} ${runtime.passthru.omarchySource} ${compatibilityRoot}
+            ${pkgs.bash}/bin/bash ${./test/service-unit.sh} "$unit_dir/omanixy-shell.service" ${runtime} ${compatibilityRoot}
             printf '%s\n' '[Unit]' > "$unit_dir/sysinit.target"
             printf '%s\n' '[Unit]' > "$unit_dir/basic.target"
             XDG_RUNTIME_DIR="$unit_dir" \
@@ -228,6 +255,24 @@
             ${pkgs.bash}/bin/bash ${./test/quattro-contract-audit.sh} ${./.}
             touch "$out"
           '';
+          contract-closure = pkgs.runCommand "omanixy-contract-closure"
+            {
+              nativeBuildInputs = [ pkgs.coreutils pkgs.jq pkgs.python3 ];
+            } ''
+            ${pkgs.python3}/bin/python3 ${./scripts/check-contract-closure} \
+              ${./.} ${runtime.passthru.omarchySource} ${compatibilityRoot} ${runtime.passthru.compatibilityBin} \
+              ${./upstream/compatibility-contracts.json} ${./upstream/quattro-contracts.json} \
+              ${./test/compat-adapters.sh} ${./packages/omanixy-shell/compat-adapter.bash} ${./scripts/audit-quattro-contracts}
+            touch "$out"
+          '';
+          contract-closure-adversarial = pkgs.runCommand "omanixy-contract-closure-adversarial"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.jq pkgs.python3 ];
+            } ''
+            PYTHON=${pkgs.python3}/bin/python3 ${pkgs.bash}/bin/bash ${./test/contract-closure.sh} \
+              ${./.} ${runtime.passthru.omarchySource} ${compatibilityRoot} ${runtime.passthru.compatibilityBin}
+            touch "$out"
+          '';
           compat-adapters = pkgs.runCommand "omanixy-compat-adapters"
             {
               nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gawk pkgs.gnugrep pkgs.gnused pkgs.jq pkgs.procps pkgs.util-linux ];
@@ -241,6 +286,13 @@
               nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.gnused pkgs.jq pkgs.python3 ];
             } ''
             ${pkgs.bash}/bin/bash ${./test/safe-menu-contract.sh} ${runtime} ${compatibilityRoot}
+            touch "$out"
+          '';
+          qml-patch-behavior = pkgs.runCommand "omanixy-qml-patch-behavior"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.nodejs ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/qml-patch-behavior.sh} ${compatibilityRoot}
             touch "$out"
           '';
         });

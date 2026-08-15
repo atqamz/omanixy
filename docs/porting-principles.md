@@ -39,13 +39,21 @@ The taxonomy describes compatibility, not stability.
 A feature may be `adapted` and still be experimental, or `omitted` because
 omission is the correct architecture rather than unfinished work.
 
+`maturity: validated` has a stricter meaning than "implemented".
+It requires pinned consumer evidence, a deterministic identity for any
+referenced upstream implementation, focused behavioral evidence for the
+applicable contract, and a passing contract-closure check.
+For `exact`, `omitted`, and `blocked` entries, the evidence proves the native
+capability or the documented reachability boundary rather than an adapter
+implementation.
+
 The porting matrix is a compatibility ledger, not a percentage-complete
 tracker.
 The number of `exact` entries is never a project quality score.
 Issue #2 records the narrow runtime source contracts needed to make the
 validated Quattro baseline auditable.
-Issue #3 established the comprehensive contract audit and populated the
-ledger.
+Issue #3 defines the comprehensive contract audit and ledger; this branch
+implements the pinned baseline and its reviewed compatibility edges.
 
 The contract scanner is a static pin-drift guard.
 It records direct commands, dynamic command expressions, menu fields, absolute

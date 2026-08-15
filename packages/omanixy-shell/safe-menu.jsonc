@@ -1,20 +1,23 @@
 {
-  "apps": {"label": "Apps", "provider": "apps"},
+  "apps": {"label": "Apps", "provider": "apps", "when": "command -v uwsm >/dev/null && timeout 2s uwsm check is-active >/dev/null && command -v uwsm-app >/dev/null && command -v gtk-launch >/dev/null"},
   "trigger": {"label": "Trigger"},
   "trigger.emoji": {
     "label": "Emoji",
-    "action": "omarchy-shell shell summon omarchy.emojis"
+    "action": "omarchy-shell shell summon omarchy.emojis",
+    "when": "command -v wl-copy >/dev/null && command -v wtype >/dev/null"
   },
   "trigger.screenshot": {
     "label": "Screenshot",
-    "action": "omarchy-capture-screenshot"
+    "action": "omarchy-capture-screenshot",
+    "when": "command -v grim >/dev/null && command -v slurp >/dev/null && command -v hyprpicker >/dev/null"
   },
   "system": {"label": "System"},
-  "system.suspend": {"label": "Suspend", "action": "systemctl suspend"},
+  "system.suspend": {"label": "Suspend", "action": "systemctl suspend", "when": "test -r /sys/power/state"},
   "system.logout": {
     "label": "Logout",
-    "action": "loginctl terminate-user \"$USER\""
+    "action": "uwsm stop",
+    "when": "command -v uwsm >/dev/null && timeout 2s uwsm check is-active >/dev/null"
   },
-  "system.reboot": {"label": "Reboot", "action": "systemctl reboot"},
-  "system.shutdown": {"label": "Shutdown", "action": "systemctl poweroff"}
+  "system.reboot": {"label": "Reboot", "action": "systemctl reboot", "when": "test -S /run/systemd/private"},
+  "system.shutdown": {"label": "Shutdown", "action": "systemctl poweroff", "when": "test -S /run/systemd/private"}
 }

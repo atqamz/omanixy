@@ -4,6 +4,7 @@
 , quickshellSrc
 , nixpkgsRevision
 , supportedSystems
+, features ? null
 }:
 
 assert lib.assertOneOf "omanixy supported system" pkgs.stdenv.hostPlatform.system supportedSystems;
@@ -11,8 +12,36 @@ assert lib.assertOneOf "omanixy supported system" pkgs.stdenv.hostPlatform.syste
 let
   inherit (pkgs) stdenvNoCC;
 
-  omarchyRevision = "f0020448ca87329199de7cb12f2015ebc4a3e5e7";
-  quickshellRevision = "28771c7c74b42e20afca0b1b63980cb46515537c";
+  baselineSource = builtins.fromJSON (builtins.readFile ../../upstream/shell-baseline.json);
+  contractSource = builtins.fromJSON (builtins.readFile ../../upstream/compatibility-contracts.json);
+  omarchyRevision = contractSource.pins.omarchy;
+  quickshellRevision = contractSource.pins.quickshell;
+  baselineConfig = builtins.removeAttrs baselineSource [ "featurePlugins" "featureDependencies" "migrations" ];
+  blockedPluginIds = builtins.toJSON baselineConfig.disabledPlugins;
+  featureRuntimeInputs = with pkgs; {
+    core = [ bash coreutils findutils gawk gnugrep gnused inotify-tools jq quickshell systemd util-linux ];
+    network = [ iproute2 iputils iw networkmanager qrencode ];
+    audio = [ pipewire pulseaudio wireplumber ];
+    bluetooth = [ bluez util-linux ];
+    screenshot = [ grim hyprland hyprpicker procps slurp ];
+    clipboard = [ wl-clipboard wtype xdg-utils ];
+    power = [ power-profiles-daemon upower ];
+    monitor = [ brightnessctl fontconfig glib gtk3 libnotify procps ];
+    weather = [ curl ];
+    notification = [ libnotify ];
+    launcher = [ desktop-file-utils gtk3 uwsm ];
+  };
+  allFeatures = builtins.attrNames featureRuntimeInputs;
+  featureDependencies = baselineSource.featureDependencies or { };
+  requestedFeatures = [ "core" ] ++ (if features == null then allFeatures else features);
+  selectedFeatures = lib.unique (lib.concatMap
+    (feature: [ feature ] ++ (featureDependencies.${feature} or [ ]))
+    requestedFeatures);
+  featureNamesValid = lib.assertMsg
+    (builtins.isList requestedFeatures
+      && lib.all (feature: builtins.elem feature allFeatures) requestedFeatures
+      && lib.all (feature: builtins.elem feature allFeatures) selectedFeatures)
+    "omanixy features must be a list of known feature names";
 
   quickshell = pkgs.quickshell.overrideAttrs (old: {
     pname = "quickshell-omanixy";
@@ -65,58 +94,26 @@ let
     '';
   };
 
-  safeMenu = pkgs.writeText "omanixy-safe-omarchy-menu.jsonc" (builtins.readFile ./safe-menu.jsonc);
+  omittedFeaturePlugins = lib.concatLists (map
+    (feature: baselineSource.featurePlugins.${feature} or [ ])
+    (lib.filter (feature: !builtins.elem feature selectedFeatures) (builtins.attrNames baselineSource.featurePlugins)));
+  selectedBaselineConfig = baselineConfig // {
+    disabledPlugins = lib.unique (baselineConfig.disabledPlugins ++ omittedFeaturePlugins);
+  };
+  safeMenuSource = builtins.fromJSON (builtins.readFile ./safe-menu.jsonc);
+  safeMenuFeature = {
+    apps = "launcher";
+    "system.logout" = "launcher";
+    "trigger.emoji" = "clipboard";
+    "trigger.screenshot" = "screenshot";
+  };
+  selectedSafeMenu = lib.filterAttrs
+    (name: _: !(builtins.hasAttr name safeMenuFeature)
+      || builtins.elem safeMenuFeature.${name} selectedFeatures)
+    safeMenuSource;
+  safeMenu = pkgs.writeText "omanixy-safe-omarchy-menu.jsonc" (builtins.toJSON selectedSafeMenu);
 
-  safeShellConfig = pkgs.writeText "omanixy-safe-shell.json" ''
-    {
-      "version": 1,
-      "bar": {
-        "position": "top",
-        "transparent": false,
-        "centerAnchor": "omarchy.clock",
-        "layout": {
-          "left": [
-            { "id": "omarchy.menu" },
-            { "id": "omarchy.workspaces" }
-          ],
-          "center": [
-            { "id": "omarchy.clock", "format": "dddd HH:mm" },
-            { "id": "omarchy.weather" }
-          ],
-          "right": [
-            { "id": "omarchy.tray" },
-            { "id": "omarchy.media" },
-            { "id": "omarchy.bluetooth" },
-            { "id": "omarchy.network" },
-            { "id": "omarchy.audio" },
-            { "id": "omarchy.monitor" },
-            { "id": "omarchy.power" }
-          ]
-        }
-      },
-      "disabledPlugins": [
-        "omarchy.active-window",
-        "omarchy.agents",
-        "omarchy.background",
-        "omarchy.battery",
-        "omarchy.dev-gallery",
-        "omarchy.disk-speedtest",
-        "omarchy.dropbox",
-        "omarchy.idle",
-        "omarchy.image-picker",
-        "omarchy.indicators",
-        "omarchy.keyboard-layout",
-        "omarchy.lock",
-        "omarchy.microphone",
-        "omarchy.nightlight",
-        "omarchy.notifications",
-        "omarchy.polkit",
-        "omarchy.reminders",
-        "omarchy.system-update",
-        "omarchy.tailscale"
-      ]
-    }
-  '';
+  safeShellConfig = pkgs.writeText "omanixy-safe-shell.json" (builtins.toJSON selectedBaselineConfig);
 
   omarchyCompatibilityRoot = stdenvNoCC.mkDerivation {
     pname = "omanixy-omarchy-compat-root";
@@ -127,6 +124,9 @@ let
       mkdir -p "$out/shell"
       cp -R ${omarchySource}/shell/Commons "$out/shell/Commons"
       cp -R ${omarchySource}/shell/Ui "$out/shell/Ui"
+      chmod u+w "$out/shell/Ui"
+      chmod u+w "$out/shell/Ui/SpeedTestOverlay.qml"
+      rm -f "$out/shell/Ui/SpeedTestOverlay.qml"
       cp -R ${omarchySource}/shell/services "$out/shell/services"
       install -Dm644 ${omarchySource}/shell/shell.qml "$out/shell/shell.qml"
       mkdir -p "$out/shell/plugins/bar/widgets"
@@ -140,7 +140,7 @@ let
       for plugin in clipboard emojis menu osd; do
         cp -R "${omarchySource}/shell/plugins/$plugin" "$out/shell/plugins/$plugin"
       done
-      for plugin in audio bluetooth clock monitor network power speedtest weather wifiqr; do
+      for plugin in audio bluetooth clock monitor network power weather wifiqr; do
         mkdir -p "$out/shell/plugins/panels/$plugin"
         cp -R "${omarchySource}/shell/plugins/panels/$plugin/." "$out/shell/plugins/panels/$plugin"
       done
@@ -148,16 +148,81 @@ let
       cp -R ${omarchySource}/shell/plugins/services/media "$out/shell/plugins/services/media"
 
       chmod u+w "$out/shell/services" "$out/shell/services/PluginRegistry.qml"
-      sed -i '/^    if (manifest) {$/i\    if (isDisabled(config, key)) return false' \
+      chmod u+w "$out/shell/plugins/menu" "$out/shell/plugins/menu/Menu.qml"
+      chmod u+w "$out/shell/plugins/bar" "$out/shell/plugins/bar/Bar.qml"
+      chmod u+w "$out/shell/plugins/panels/network/Model.js" "$out/shell/plugins/panels/network/Panel.qml"
+      registry_file="$out/shell/services/PluginRegistry.qml"
+      registry_temporary="$registry_file.omanixy"
+      ${pkgs.gawk}/bin/awk -v blocked='${blockedPluginIds}' '
+        { print }
+        /^  property bool scanning: false$/ {
+          print "  readonly property var omanixyBlockedPlugins = " blocked
+        }
+      ' "$registry_file" > "$registry_temporary"
+      mv -f -- "$registry_temporary" "$registry_file"
+      sed -i '/^    if (manifest) {$/i\    if (isDisabled(config, key) || omanixyBlockedPlugins.indexOf(Util.canonicalWidgetId(String(key))) !== -1) return false' \
         "$out/shell/services/PluginRegistry.qml"
-      sed -i '/^      if (!network) continue$/a\      if (network.security === WifiSecurityType.Wpa2Eap || network.security === WifiSecurityType.WpaEap) continue' \
-        "$out/shell/plugins/panels/network/Panel.qml"
+      substituteInPlace "$out/shell/plugins/panels/network/Model.js" \
+        --replace-fail 'function isProtected(security, openSecurity) {' \
+          'function isEnterpriseSecurity(security, wpa2Eap, wpaEap) {
+  return security === wpa2Eap || security === wpaEap
+}
+
+function supportedDnsProviders() {
+  return ["DHCP", "Cloudflare", "Google"]
+}
+
+function filterWifiNetworks(networks, wpa2Eap, wpaEap) {
+  var visible = []
+  var values = Array.isArray(networks) ? networks : []
+  for (var i = 0; i < values.length; i++) {
+    if (values[i] && !isEnterpriseSecurity(values[i].security, wpa2Eap, wpaEap))
+      visible.push(values[i])
+  }
+  return visible
+}
+
+function isProtected(security, openSecurity) {' \
+        --replace-fail '    isProtected: isProtected,' \
+          '    isEnterpriseSecurity: isEnterpriseSecurity,
+    filterWifiNetworks: filterWifiNetworks,
+    supportedDnsProviders: supportedDnsProviders,
+    isProtected: isProtected,'
+      substituteInPlace "$out/shell/plugins/panels/network/Panel.qml" \
+        --replace-fail 'readonly property var dnsProviders: ["DHCP", "Cloudflare", "Google", "Custom"]' \
+          'readonly property var dnsProviders: Model.supportedDnsProviders()' \
+        --replace-fail 'function syncWifiNetworks() {
+    var nets = []
+    var networks = wifiNetworkObjects || []' \
+          'function syncWifiNetworks() {
+    var nets = []
+    var networks = Model.filterWifiNetworks(wifiNetworkObjects, WifiSecurityType.Wpa2Eap, WifiSecurityType.WpaEap)' \
+        --replace-fail 'return net.security !== WifiSecurityType.Wpa2Eap && net.security !== WifiSecurityType.WpaEap' \
+          'return !Model.isEnterpriseSecurity(net.security, WifiSecurityType.Wpa2Eap, WifiSecurityType.WpaEap)'
       substituteInPlace "$out/shell/plugins/panels/clock/BarWidget.qml" \
         --replace-fail 'else if (b === Qt.MiddleButton) { if (root.bar) root.bar.run("omarchy-menu-timezone") }' \
           'else if (b === Qt.MiddleButton) root.togglePanel()'
+      substituteInPlace "$out/shell/plugins/bar/Bar.qml" \
+        --replace-fail 'function refreshTransparentForeground() {
+    if (!requestedTransparent || transparentForegroundProc.running) return
+
+    transparentForegroundProc.command = [
+      "omarchy-bar-text-color",
+      root.position,
+      String(root.barSize),
+      colorHex(root.themeForeground),
+      colorHex(root.themeContrastForeground)
+    ]
+    transparentForegroundProc.running = true
+  }' \
+          'function refreshTransparentForeground() {
+    if (!requestedTransparent) return
+    transparentForeground = themeForeground
+    useTransparentForeground = true
+    transparent = true
+  }'
+      sed -i '/^  Process {$/,/^  }$/d' "$out/shell/plugins/bar/Bar.qml"
       substituteInPlace "$out/shell/plugins/panels/network/Panel.qml" \
-        --replace-fail 'readonly property var dnsProviders: ["DHCP", "Cloudflare", "Google", "Custom"]' \
-          'readonly property var dnsProviders: ["DHCP", "Cloudflare", "Google"]' \
         --replace-fail 'readonly property int count: 4' \
           'readonly property int count: 3' \
         --replace-fail 'if (provider === "Custom") {
@@ -166,7 +231,17 @@ let
       root.close()
       return
     }' \
-          'if (provider === "Custom") return'
+          'if (provider === "Custom") return' \
+        --replace-fail 'readonly property bool canRunSpeedTest: !!info.iface' \
+          'readonly property bool canRunSpeedTest: false'
+      substituteInPlace "$out/shell/plugins/menu/Menu.qml" \
+        --replace-fail 'if (event.key === Qt.Key_Delete) {
+            root.requestDeleteSelected()
+            event.accepted = true
+          }' \
+          'if (event.key === Qt.Key_Delete) {
+            event.accepted = true
+          }'
       shell_file="$out/shell/plugins/panels/network/Panel.qml"
       temporary="$shell_file.omanixy"
       chmod u+w "''${shell_file%/*}"
@@ -187,7 +262,7 @@ let
       ' "$shell_file" > "$temporary"
       mv -f -- "$temporary" "$shell_file"
       install -Dm644 ${safeShellConfig} "$out/config/omarchy/shell.json"
-      ln -s ${omarchySource}/default/omarchy/launcher.hides "$out/default/omarchy/launcher.hides"
+      install -Dm644 ${omarchySource}/default/omarchy/launcher.hides "$out/default/omarchy/launcher.hides"
       install -Dm644 ${safeMenu} "$out/default/omarchy/omarchy-menu.jsonc"
       for helper in ${lib.concatStringsSep " " compatibilityHelpers}; do
         cat > "$out/bin/$helper" <<EOF
@@ -199,47 +274,13 @@ EOF
       done
     '';
     passthru = {
-      inherit omarchySource safeMenu safeShellConfig;
+      inherit omarchySource safeMenu safeShellConfig selectedFeatures compatibilityHelpers;
     };
   };
 
-  runtimeInputs = with pkgs; [
-    bash
-    coreutils
-    curl
-    desktop-file-utils
-    brightnessctl
-    bluez
-    findutils
-    gawk
-    gnugrep
-    gnused
-    grim
-    gtk3
-    inotify-tools
-    fontconfig
-    hyprland
-    iproute2
-    iputils
-    iw
-    jq
-    libnotify
-    networkmanager
-    pipewire
-    power-profiles-daemon
-    procps
-    qrencode
-    quickshell
-    systemd
-    upower
-    util-linux
-    wireplumber
-    wl-clipboard
-    wtype
-    xdg-utils
-  ];
+  runtimeInputs = assert featureNamesValid; lib.unique (lib.concatMap (feature: featureRuntimeInputs.${feature}) selectedFeatures);
 
-  compatibilityHelpers = [
+  allCompatibilityHelpers = [
     "omarchy-shell"
     "omarchy-audio-input-set-default"
     "omarchy-audio-output-set-default"
@@ -262,7 +303,6 @@ EOF
     "omarchy-network-password"
     "omarchy-network-qr"
     "omarchy-network-status"
-    "omarchy-network-speedtest"
     "omarchy-notification-send"
     "omarchy-powerprofiles-list"
     "omarchy-powerprofiles-set"
@@ -270,7 +310,50 @@ EOF
     "omarchy-system-stats"
     "omarchy-weather-location"
     "omarchy-weather-status"
-    "uwsm-app"
+  ];
+  helperFeatures = {
+    omarchy-audio-input-set-default = "audio";
+    omarchy-audio-output-set-default = "audio";
+    omarchy-audio-output-sink = "audio";
+    omarchy-audio-sink-availability = "audio";
+    omarchy-battery-status = "power";
+    omarchy-bluetooth-device = "bluetooth";
+    omarchy-bluetooth-power = "bluetooth";
+    omarchy-brightness-display = "monitor";
+    omarchy-capture-screenshot = "screenshot";
+    omarchy-clipboard-open = "clipboard";
+    omarchy-clipboard-paste-file = "clipboard";
+    omarchy-clipboard-paste-text = "clipboard";
+    omarchy-display-text-size = "monitor";
+    omarchy-dns = "network";
+    omarchy-hyprland-monitor-scaling = "monitor";
+    omarchy-menu-emoji-insert = "clipboard";
+    omarchy-monitor-state = "monitor";
+    omarchy-network-band = "network";
+    omarchy-network-password = "network";
+    omarchy-network-qr = "network";
+    omarchy-network-status = "network";
+    omarchy-notification-send = "notification";
+    omarchy-powerprofiles-list = "power";
+    omarchy-powerprofiles-set = "power";
+    omarchy-remove-launcher-entry = "launcher";
+    omarchy-system-stats = "core";
+    omarchy-weather-location = "weather";
+    omarchy-weather-status = "weather";
+  };
+  compatibilityHelpers = lib.filter
+    (helper: builtins.elem (helperFeatures.${helper} or "core") selectedFeatures)
+    allCompatibilityHelpers;
+  adapterSources = [
+    ./adapters/common.bash
+    ./adapters/weather.bash
+    ./adapters/audio.bash
+    ./adapters/network.bash
+    ./adapters/power.bash
+    ./adapters/display.bash
+    ./adapters/notification.bash
+    ./adapters/clipboard.bash
+    ./compat-adapter.bash
   ];
 
   ipc = pkgs.writeShellApplication {
@@ -290,7 +373,7 @@ EOF
     text = builtins.replaceStrings
       [ "@IPC@" ]
       [ "${ipc}/bin/omanixy-shell" ]
-      (builtins.readFile ./compat-adapter.bash);
+      (builtins.concatStringsSep "\n" (map builtins.readFile adapterSources));
   };
 
   compatibilityBin = stdenvNoCC.mkDerivation {
@@ -325,15 +408,19 @@ pkgs.symlinkJoin {
     ln -s ${quickshell}/bin/quickshell "$out/bin/quickshell"
     ln -s ${quickshell}/bin/qs "$out/bin/qs"
     ln -s ${pkgs.inotify-tools}/bin/inotifywait "$out/bin/inotifywait"
+    ${lib.optionalString (builtins.elem "monitor" selectedFeatures || builtins.elem "screenshot" selectedFeatures) ''
     ln -s ${pkgs.hyprland}/bin/hyprctl "$out/bin/hyprctl"
+    ''}
+    ${lib.optionalString (builtins.elem "launcher" selectedFeatures) ''
     ln -s ${pkgs.gtk3}/bin/gtk-launch "$out/bin/gtk-launch"
+    ''}
     for helper in ${lib.concatStringsSep " " compatibilityHelpers}; do
       ln -s ${compatibilityBin}/bin/$helper "$out/bin/$helper"
     done
     ln -s ${theme} "$out/share/omarchy-theme"
   '';
   passthru = {
-    inherit omarchyRevision quickshellRevision nixpkgsRevision omarchySource omarchyCompatibilityRoot compatibilityBin quickshell theme supportedSystems;
+    inherit omarchyRevision quickshellRevision nixpkgsRevision omarchySource omarchyCompatibilityRoot compatibilityBin quickshell theme supportedSystems safeMenu safeShellConfig selectedFeatures compatibilityHelpers;
     buildProvenance = {
       inherit omarchyRevision quickshellRevision nixpkgsRevision;
     };

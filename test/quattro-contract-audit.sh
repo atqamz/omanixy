@@ -28,6 +28,8 @@ absolute_path=\$OMARCHY_PATH
   printf '%s\n' 'root.bar.run("omarchy-bar-helper --flag")'
 } > "$fixture/shell/services/Dynamic.qml"
 printf '%s\n' 'FileView { path: Quickshell.env("XDG_STATE_HOME") + "/omarchy/fixture.json"; watchChanges: true }' > "$fixture/shell/services/State.qml"
+printf '%s\n' 'Process { command: ["env-tool", "$CUSTOM_RUNTIME_VARIABLE"] }' >> "$fixture/shell/services/State.qml"
+printf '%s\n' 'FileView { path: Quickshell.env("lowercase_runtime_variable") }' >> "$fixture/shell/services/State.qml"
 printf '%s\n' 'import Quickshell.Networking' 'import Quickshell.Services.Mpris' '/etc/pam.d/fixture; /etc/fixture.conf; org.freedesktop.Fixture' > "$fixture/shell/services/Native.qml"
 printf '%s\n' '{"fixture": {"action": "omarchy-menu-helper --flag", "when": "fixture-guard", "checked": "fixture-check", "provider": "fixture-provider"}}' > "$fixture/default/omarchy/omarchy-menu.jsonc"
 printf '%s\n' 'omarchy-unreachable' > "$fixture/bin/omarchy-unreachable"
@@ -48,6 +50,8 @@ jq -e '.menu_commands | map(.field) | sort == ["action", "checked", "provider", 
 jq -e '.security_contracts | map(.name) | index("/etc/pam.d/fixture") != null' "$output" >/dev/null
 jq -e '.filesystem_contracts | map(.name) | index("/etc/fixture.conf") != null' "$output" >/dev/null
 jq -e '.native_quickshell_modules | sort == ["Quickshell.Networking", "Quickshell.Services.Mpris"]' "$output" >/dev/null
+jq -e '.environment_variables | index("CUSTOM_RUNTIME_VARIABLE") != null' "$output" >/dev/null
+jq -e '.environment_variables | index("lowercase_runtime_variable") != null' "$output" >/dev/null
 
 if cmp "$output" "$snapshot" >/dev/null 2>&1; then
   printf '%s\n' 'fixture unexpectedly matched the pinned snapshot' >&2

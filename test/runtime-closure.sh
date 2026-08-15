@@ -7,9 +7,10 @@ quickshell_path=${3:?selected Quickshell store path required}
 omarchy_path=${4:?selected Omarchy source store path required}
 compatibility_root=${5:?compatibility root store path required}
 compatibility_bin=${6:?compatibility bin store path required}
-omarchy_revision=f0020448ca87329199de7cb12f2015ebc4a3e5e7
+manifest=${7:?compatibility manifest path required}
+omarchy_revision=$(jq -er '.pins.omarchy' "$manifest")
 omarchy_short_revision=${omarchy_revision:0:12}
-quickshell_revision=28771c7c74b42e20afca0b1b63980cb46515537c
+quickshell_revision=$(jq -er '.pins.quickshell' "$manifest")
 quickshell_short_revision=${quickshell_revision:0:7}
 
 unit_path() {
@@ -28,6 +29,10 @@ PATH="$runtime_path" command -v update-desktop-database >/dev/null
 PATH="$runtime_path" command -v wpctl >/dev/null
 PATH="$runtime_path" command -v wl-paste >/dev/null
 PATH="$runtime_path" command -v omanixy-compat-adapter >/dev/null
+uwsm_app=$(PATH="$runtime_path" command -v uwsm-app)
+uwsm=$(PATH="$runtime_path" command -v uwsm)
+[[ $uwsm_app == *uwsm-*/bin/uwsm-app ]]
+[[ $uwsm == *uwsm-*/bin/uwsm ]]
 runtime_source=$(sed -n 's/^export OMARCHY_PATH=//p' "$runtime/bin/omanixy-shell-runtime")
 test -n "$runtime_source"
 test "$runtime_source" = "$compatibility_root"
@@ -43,10 +48,13 @@ test ! -e "$runtime_source/shell/plugins/lock"
 test ! -e "$runtime_source/shell/plugins/notifications"
 test ! -e "$runtime_source/shell/plugins/panels/dropbox"
 test ! -e "$runtime_source/shell/plugins/panels/tailscale"
+test ! -e "$runtime_source/shell/plugins/panels/speedtest"
+test ! -e "$runtime_source/shell/Ui/SpeedTestOverlay.qml"
 test ! -e "$runtime_source/shell/plugins/bar/widgets/SystemUpdate.qml"
 test -f "$runtime_source/shell/plugins/panels/network/Panel.qml"
-test -f "$runtime_source/shell/plugins/panels/speedtest/Panel.qml"
-grep -Fq 'network.security === WifiSecurityType.Wpa2Eap' "$runtime_source/shell/plugins/panels/network/Panel.qml"
+grep -Fq 'Model.filterWifiNetworks' "$runtime_source/shell/plugins/panels/network/Panel.qml"
+grep -Fq 'function filterWifiNetworks' "$runtime_source/shell/plugins/panels/network/Model.js"
+grep -Fq 'readonly property bool canRunSpeedTest: false' "$runtime_source/shell/plugins/panels/network/Panel.qml"
 grep -Fq 'else if (b === Qt.MiddleButton) root.togglePanel()' \
   "$runtime_source/shell/plugins/panels/clock/BarWidget.qml"
 if grep -Fq 'omarchy-menu-timezone' "$runtime_source/shell/plugins/panels/clock/BarWidget.qml"; then
@@ -56,9 +64,11 @@ if grep -Fq 'omarchy-launch-floating-terminal-with-presentation' \
   "$runtime_source/shell/plugins/panels/network/Panel.qml"; then
   exit 1
 fi
-grep -Fq 'if (isDisabled(config, key)) return false' "$runtime_source/shell/services/PluginRegistry.qml"
+grep -Fq 'omanixyBlockedPlugins.indexOf(Util.canonicalWidgetId(String(key))) !== -1' \
+  "$runtime_source/shell/services/PluginRegistry.qml"
 jq -e '
   .version == 1
+  and .omanixyBaselineVersion == 2
   and .bar.layout.left[0].id == "omarchy.menu"
   and .bar.layout.center[0].id == "omarchy.clock"
   and .bar.layout.right[-1].id == "omarchy.power"
@@ -71,7 +81,7 @@ diff -u \
 test -x "$runtime_source/bin/omarchy-menu-emoji-insert"
 test -x "$runtime_source/bin/omarchy-clipboard-open"
 test ! -e "$runtime_source/bin/omarchy-update"
-grep -Fq 'readonly property var dnsProviders: ["DHCP", "Cloudflare", "Google"]' \
+grep -Fq 'readonly property var dnsProviders: Model.supportedDnsProviders()' \
   "$runtime_source/shell/plugins/panels/network/Panel.qml"
 if grep -Fq 'provider: "Custom"' "$runtime_source/shell/plugins/panels/network/Panel.qml"; then
   exit 1
@@ -82,15 +92,15 @@ test -f "$runtime/share/omarchy-theme/shell.toml"
 
 grep -Fxq "$runtime" "$closure_paths"
 grep -Fxq "$quickshell_path" "$closure_paths"
-grep -Fxq "$omarchy_path" "$closure_paths"
+if grep -Fxq "$omarchy_path" "$closure_paths"; then
+  exit 1
+fi
 grep -Fxq "$compatibility_root" "$closure_paths"
 grep -Fxq "$compatibility_bin" "$closure_paths"
 if grep -E '/(pacman|yay|universe)([-/]|$)|/home/atqa([-/]|$)' "$closure_paths"; then
   exit 1
 fi
-if grep -E '/pulseaudio([-/]|$)' "$closure_paths"; then
-  exit 1
-fi
+grep -E '/[^/]*-(lib)?pulseaudio([-/]|$)' "$closure_paths"
 
 [[ $(basename "$omarchy_path") == *"$omarchy_short_revision"* ]]
 [[ $(basename "$quickshell_path") == *"$quickshell_short_revision"* ]]
@@ -98,5 +108,8 @@ test -x "$runtime/bin/omarchy-network-qr"
 test -x "$runtime/bin/omarchy-network-password"
 test "$(unit_path "$runtime/bin/omarchy-network-qr")" = "$(unit_path "$compatibility_bin/bin/omarchy-network-qr")"
 test "$(unit_path "$runtime/bin/omarchy-network-password")" = "$(unit_path "$compatibility_bin/bin/omarchy-network-password")"
+if grep -Fq 'root.requestDeleteSelected()' "$runtime_source/shell/plugins/menu/Menu.qml"; then
+  exit 1
+fi
 
 printf '%s\n' 'runtime closure invariants passed'

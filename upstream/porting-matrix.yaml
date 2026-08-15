@@ -145,8 +145,9 @@ items:
       - test/compat-adapters.sh
       - test/safe-menu-contract.sh
     notes:
-      - Launching uses a narrow uwsm-app and gtk-launch compatibility path.
-      - Removal rejects missing entries and does not implement package removal.
+      - Launching uses the pinned UWSM client and gtk-launch inside the session-scoped app-graphical.slice.
+      - The compatibility root keeps the upstream remove helper as a directly tested user-entry contract, but the baseline Menu Delete action is patched inert because Nix-managed system entries are not removable by Omanixy.
+      - Removal rejects missing, system-owned, symlink, and traversal targets and does not implement package removal.
 
   - id: menu.baseline
     classification: adapted
@@ -304,7 +305,8 @@ items:
       - test/compat-adapters.sh
     notes:
       - Default selection uses wpctl; node names and sink availability come from pw-dump metadata.
-      - Stream movement, tuning, and EasyEffects-specific behavior is omitted because the supported panel does not require it.
+      - Defaults are also updated through pactl and active application streams are moved, excluding EasyEffects filter-chain streams as pinned upstream does.
+      - Output sink resolution follows EasyEffects/DSP virtual sinks to the physical sink used for effective loudness.
 
   - id: network.native
     classification: exact
@@ -411,7 +413,7 @@ items:
       - Password output is a private stdout contract for the wifiqr panel and is never exposed in menu output or process arguments.
 
   - id: network.speedtest
-    classification: adapted
+    classification: omitted
     maturity: validated
     upstream:
       project: basecamp/omarchy
@@ -426,24 +428,19 @@ items:
         - path: bin/omarchy-network-speedtest
           role: reference contract
           consumption: audited-reference
-    requirement: Measure one bounded download or upload phase and emit numeric Mbps samples for the Quattro overlay.
+    requirement: Do not expose a third-party benchmark or report interface-counter deltas as a precise speed test without a separately reviewed design.
     ownership:
       presentation: omarchy
-      adapter: omanixy
-      backend: host network
+      adapter: none
+      backend: not supported
     dependencies:
-      runtime:
-        - curl
-        - iproute2
-        - jq
-      host:
-        - active network interface
-    helper: omarchy-network-speedtest
+      runtime: []
+      host: []
     tests:
-      - test/compat-adapters.sh
+      - test/runtime-closure.sh
     notes:
-      - Each phase is bounded to five seconds and endpoint discovery is bounded to four seconds.
-      - The adapter does not install or own a network service.
+      - The pinned network panel speed-test action is hidden and the speed-test plugin is not copied into the compatibility root.
+      - No third-party endpoint, token, background worker, or fabricated sample is retained in the issue #3 runtime.
 
   - id: bluetooth.native-state
     classification: exact
@@ -561,6 +558,9 @@ items:
       - omarchy-system-stats
     tests:
       - test/compat-adapters.sh
+    notes:
+      - The validated scope is the no-argument invocation consumed by the pinned power panel; the upstream --bar-widget telemetry form remains omitted from the compatibility helper.
+      - Memory values interpret /proc/meminfo kB as KiB and label the converted values GiB; CPU is a bounded delta over two /proc/stat samples.
 
   - id: monitor.display
     classification: adapted
@@ -592,6 +592,9 @@ items:
     tests:
       - test/compat-adapters.sh
     notes:
+      - Scaling captures and preserves the current width, height, and refresh rate instead of selecting a synthetic preferred mode.
+      - Text-size changes update the Quattro base size, GTK text scaling, and supported terminal font settings atomically where those backends exist.
+      - The adapter also preserves the pinned up/down monitor-scaling forms and cleans fractional requests against the current mode dimensions.
       - DDC and hardware-specific external-display behavior is not claimed by the brightness adapter.
 
   - id: screenshot
@@ -604,7 +607,7 @@ items:
         - path: default/omarchy/omarchy-menu.jsonc
           role: no-argument screenshot action
           consumption: audited-reference
-    requirement: Capture a full-screen Wayland screenshot for the supported baseline menu action.
+    requirement: Capture the pinned no-argument smart selection screenshot over frozen Wayland content, copy it to the clipboard, and report cancellation without a false output path.
     ownership:
       presentation: omarchy
       adapter: omanixy
@@ -612,14 +615,21 @@ items:
     dependencies:
       runtime:
         - grim
+        - hyprland
+        - hyprpicker
+        - jq
+        - slurp
+        - procps
         - wl-clipboard
       host:
         - Wayland
     helper: omarchy-capture-screenshot
     tests:
+      - test/compat-adapters.sh
       - test/safe-menu-contract.sh
     notes:
-      - Region, window, OCR, QR, screen recording, editor, and notification workflows are omitted.
+      - Smart selection, region, window, fullscreen, clipboard, and save forms are bounded adaptations; OCR, QR, screen recording, editor, and notification workflows are omitted.
+      - A capture succeeds when the file was saved even if the optional clipboard copy fails; the helper reports that diagnostic on stderr, matching the pinned helper's best-effort clipboard behavior.
 
   - id: clipboard
     classification: adapted
@@ -681,6 +691,9 @@ items:
     helper: omarchy-menu-emoji-insert
     tests:
       - test/compat-adapters.sh
+    notes:
+      - Empty selection remains a successful no-op and wtype failure remains best effort, matching the pinned helper.
+      - The adapter reports clipboard setup, ownership cleanup, and wl-copy failures because insertion cannot be claimed when the selected emoji was not made available to the paste action.
 
   - id: weather
     classification: adapted
@@ -742,7 +755,7 @@ items:
       - test/compat-adapters.sh
     notes:
       - This adapter does not install, configure, or supervise a notification daemon.
-      - The adapter preserves the pinned client options for app name, glyph, urgency, image, exec hint, replacement id, persistence, and other notify-send arguments without enabling the notification daemon plugin.
+      - The supported client subset is the weather consumer plus app name, glyph, urgency, image, exec hint, replacement id, persistence, and notify-send options covered by the focused adapter matrix; this is not a claim of broad Omarchy notification ABI compatibility.
 
   - id: background.theme-workflow
     classification: omitted

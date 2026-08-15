@@ -3,8 +3,7 @@ set -euo pipefail
 
 unit=${1:?rendered service unit required}
 runtime=${2:?runtime package path required}
-omarchy_source=${3:?Omarchy source path required}
-compatibility_root=${4:?compatibility root path required}
+compatibility_root=${3:?compatibility root path required}
 
 unit_values() {
   local key=$1

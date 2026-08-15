@@ -8,6 +8,8 @@ policy:
   update_strategy: explicit-upstream-upgrade-issue
   integration_target: omarchy-quattro
   current_pin_role: validated-quattro-runtime
+  maturity_definition:
+    validated: pinned_consumer_evidence_and_reference_hash_and_focused_behavioral_test_and_contract_closure
   runtime_pair:
     status: validated
     omarchy:

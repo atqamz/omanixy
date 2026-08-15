@@ -246,7 +246,7 @@ For the pinned Quattro revision, the runtime uses an immutable compatibility
 view because some reachable consumers construct absolute
 `OMARCHY_PATH/bin/...` paths.
 The view contains only the pinned source files required by the supported
-runtime graph, three narrow compatibility patches, the safe fallback
+runtime graph, seven narrow compatibility patch sites, the safe fallback
 configuration, the audited default menu, and the helper surface.
 It preserves `passthru.omarchySource` as the exact source identity and exposes
 the view separately as `passthru.omarchyCompatibilityRoot`.
@@ -317,8 +317,8 @@ following work:
 
 - #2 selects and validates the exact Quattro and Quickshell runtime pair and
   implements the user service;
-- #3 established the shell contract audit and populated the compatibility
-  ledger with traceable adapters;
+- #3 defines the shell contract audit and compatibility ledger with traceable
+  adapters;
 - #4 handles lock, PAM, polkit, idle, notification, and session security;
 - #5 defines SemVer and release automation;
 - #6 proves standalone reuse and migrates Universe downstream.

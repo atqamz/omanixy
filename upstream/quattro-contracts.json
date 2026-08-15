@@ -75,6 +75,12 @@
       "path": "shell/plugins/agents/Panel.qml"
     },
     {
+      "invocation": "command-array",
+      "line": 147,
+      "name": "omarchy-agent-usage-update",
+      "path": "shell/plugins/agents/Main.qml"
+    },
+    {
       "invocation": "literal",
       "line": 147,
       "name": "omarchy-agent-usage-update",
@@ -123,6 +129,12 @@
       "path": "shell/plugins/panels/bluetooth/Panel.qml"
     },
     {
+      "invocation": "command-array",
+      "line": 597,
+      "name": "omarchy-audio-output-sink",
+      "path": "shell/plugins/panels/audio/Panel.qml"
+    },
+    {
       "invocation": "literal",
       "line": 597,
       "name": "omarchy-audio-output-sink",
@@ -132,6 +144,12 @@
       "invocation": "source",
       "line": 597,
       "name": "omarchy-audio-output-sink",
+      "path": "shell/plugins/panels/audio/Panel.qml"
+    },
+    {
+      "invocation": "command-array",
+      "line": 588,
+      "name": "omarchy-audio-sink-availability",
       "path": "shell/plugins/panels/audio/Panel.qml"
     },
     {
@@ -206,6 +224,12 @@
       "path": "shell/plugins/services/battery/Service.qml"
     },
     {
+      "invocation": "command-array",
+      "line": 210,
+      "name": "omarchy-battery-status",
+      "path": "shell/plugins/panels/power/Panel.qml"
+    },
+    {
       "invocation": "literal",
       "line": 210,
       "name": "omarchy-battery-status",
@@ -216,6 +240,18 @@
       "line": 210,
       "name": "omarchy-battery-status",
       "path": "shell/plugins/panels/power/Panel.qml"
+    },
+    {
+      "invocation": "command-array",
+      "line": 267,
+      "name": "omarchy-bluetooth-device",
+      "path": "shell/plugins/panels/bluetooth/Panel.qml"
+    },
+    {
+      "invocation": "command-array",
+      "line": 637,
+      "name": "omarchy-bluetooth-power",
+      "path": "shell/plugins/panels/bluetooth/Panel.qml"
     },
     {
       "invocation": "literal",
@@ -276,6 +312,12 @@
       "line": 411,
       "name": "omarchy-brightness-display",
       "path": "shell/plugins/lock/Service.qml"
+    },
+    {
+      "invocation": "command-array",
+      "line": 247,
+      "name": "omarchy-brightness-display",
+      "path": "shell/plugins/panels/monitor/Panel.qml"
     },
     {
       "invocation": "literal",
@@ -801,6 +843,12 @@
       "path": "default/omarchy/omarchy-menu.jsonc"
     },
     {
+      "invocation": "command-array",
+      "line": 99,
+      "name": "omarchy-disk-speedtest",
+      "path": "shell/plugins/panels/disk-speedtest/Panel.qml"
+    },
+    {
       "invocation": "literal",
       "line": 99,
       "name": "omarchy-disk-speedtest",
@@ -811,6 +859,12 @@
       "line": 99,
       "name": "omarchy-disk-speedtest",
       "path": "shell/plugins/panels/disk-speedtest/Panel.qml"
+    },
+    {
+      "invocation": "command-array",
+      "line": 336,
+      "name": "omarchy-display-text-size",
+      "path": "shell/plugins/panels/monitor/Panel.qml"
     },
     {
       "invocation": "literal",
@@ -1111,6 +1165,12 @@
       "line": 0,
       "name": "omarchy-launch-about",
       "path": "default/omarchy/omarchy-menu.jsonc"
+    },
+    {
+      "invocation": "command-array",
+      "line": 376,
+      "name": "omarchy-launch-browser",
+      "path": "shell/plugins/panels/tailscale/Service.qml"
     },
     {
       "invocation": "literal",
@@ -2244,6 +2304,12 @@
       "path": "default/omarchy/omarchy-menu.jsonc"
     },
     {
+      "invocation": "command-array",
+      "line": 388,
+      "name": "omarchy-monitor-state",
+      "path": "shell/plugins/panels/monitor/Panel.qml"
+    },
+    {
       "invocation": "literal",
       "line": 388,
       "name": "omarchy-monitor-state",
@@ -2254,6 +2320,12 @@
       "line": 388,
       "name": "omarchy-monitor-state",
       "path": "shell/plugins/panels/monitor/Panel.qml"
+    },
+    {
+      "invocation": "command-array",
+      "line": 479,
+      "name": "omarchy-network-band",
+      "path": "shell/plugins/panels/network/Panel.qml"
     },
     {
       "invocation": "literal",
@@ -2264,6 +2336,12 @@
     {
       "invocation": "source",
       "line": 479,
+      "name": "omarchy-network-band",
+      "path": "shell/plugins/panels/network/Panel.qml"
+    },
+    {
+      "invocation": "command-array",
+      "line": 644,
       "name": "omarchy-network-band",
       "path": "shell/plugins/panels/network/Panel.qml"
     },
@@ -2280,6 +2358,12 @@
       "path": "shell/plugins/panels/network/Panel.qml"
     },
     {
+      "invocation": "command-array",
+      "line": 863,
+      "name": "omarchy-network-band",
+      "path": "shell/plugins/panels/network/Panel.qml"
+    },
+    {
       "invocation": "literal",
       "line": 863,
       "name": "omarchy-network-band",
@@ -2290,6 +2374,12 @@
       "line": 863,
       "name": "omarchy-network-band",
       "path": "shell/plugins/panels/network/Panel.qml"
+    },
+    {
+      "invocation": "command-array",
+      "line": 153,
+      "name": "omarchy-network-password",
+      "path": "shell/plugins/panels/wifiqr/Panel.qml"
     },
     {
       "invocation": "literal",
@@ -2301,11 +2391,23 @@
       "invocation": "source",
       "line": 153,
       "name": "omarchy-network-password",
+      "path": "shell/plugins/panels/wifiqr/Panel.qml"
+    },
+    {
+      "invocation": "command-array",
+      "line": 128,
+      "name": "omarchy-network-qr",
       "path": "shell/plugins/panels/wifiqr/Panel.qml"
     },
     {
       "invocation": "source",
       "line": 128,
+      "name": "omarchy-network-qr",
+      "path": "shell/plugins/panels/wifiqr/Panel.qml"
+    },
+    {
+      "invocation": "command-array",
+      "line": 129,
       "name": "omarchy-network-qr",
       "path": "shell/plugins/panels/wifiqr/Panel.qml"
     },
@@ -2316,6 +2418,12 @@
       "path": "shell/plugins/panels/wifiqr/Panel.qml"
     },
     {
+      "invocation": "command-array",
+      "line": 102,
+      "name": "omarchy-network-speedtest",
+      "path": "shell/plugins/panels/speedtest/Panel.qml"
+    },
+    {
       "invocation": "literal",
       "line": 102,
       "name": "omarchy-network-speedtest",
@@ -2328,6 +2436,12 @@
       "path": "shell/plugins/panels/speedtest/Panel.qml"
     },
     {
+      "invocation": "command-array",
+      "line": 812,
+      "name": "omarchy-network-status",
+      "path": "shell/plugins/panels/network/Panel.qml"
+    },
+    {
       "invocation": "literal",
       "line": 812,
       "name": "omarchy-network-status",
@@ -2338,6 +2452,12 @@
       "line": 812,
       "name": "omarchy-network-status",
       "path": "shell/plugins/panels/network/Panel.qml"
+    },
+    {
+      "invocation": "command-array",
+      "line": 174,
+      "name": "omarchy-network-status",
+      "path": "shell/plugins/panels/speedtest/Panel.qml"
     },
     {
       "invocation": "literal",
@@ -2768,6 +2888,12 @@
       "path": "default/omarchy/omarchy-menu.jsonc"
     },
     {
+      "invocation": "command-array",
+      "line": 216,
+      "name": "omarchy-powerprofiles-list",
+      "path": "shell/plugins/panels/power/Panel.qml"
+    },
+    {
       "invocation": "literal",
       "line": 216,
       "name": "omarchy-powerprofiles-list",
@@ -2777,6 +2903,12 @@
       "invocation": "source",
       "line": 216,
       "name": "omarchy-powerprofiles-list",
+      "path": "shell/plugins/panels/power/Panel.qml"
+    },
+    {
+      "invocation": "command-array",
+      "line": 168,
+      "name": "omarchy-powerprofiles-set",
       "path": "shell/plugins/panels/power/Panel.qml"
     },
     {
@@ -2796,6 +2928,12 @@
       "line": 168,
       "name": "omarchy-powerprofiles-set",
       "path": "shell/plugins/panels/power/Panel.qml"
+    },
+    {
+      "invocation": "command-array",
+      "line": 51,
+      "name": "omarchy-powerprofiles-set",
+      "path": "shell/plugins/services/battery/Service.qml"
     },
     {
       "invocation": "literal",
@@ -2831,6 +2969,12 @@
       "path": "default/omarchy/omarchy-menu.jsonc"
     },
     {
+      "invocation": "command-array",
+      "line": 23,
+      "name": "omarchy-reminder",
+      "path": "shell/plugins/bar/indicators/Reminder.qml"
+    },
+    {
       "invocation": "literal",
       "line": 23,
       "name": "omarchy-reminder",
@@ -2843,6 +2987,12 @@
       "path": "shell/plugins/bar/indicators/Reminder.qml"
     },
     {
+      "invocation": "command-array",
+      "line": 42,
+      "name": "omarchy-reminder",
+      "path": "shell/plugins/bar/indicators/Reminder.qml"
+    },
+    {
       "invocation": "literal",
       "line": 42,
       "name": "omarchy-reminder",
@@ -2851,6 +3001,12 @@
     {
       "invocation": "source",
       "line": 42,
+      "name": "omarchy-reminder",
+      "path": "shell/plugins/bar/indicators/Reminder.qml"
+    },
+    {
+      "invocation": "command-array",
+      "line": 56,
       "name": "omarchy-reminder",
       "path": "shell/plugins/bar/indicators/Reminder.qml"
     },
@@ -2971,6 +3127,12 @@
       "path": "shell/plugins/menu/BarWidget.qml"
     },
     {
+      "invocation": "command-array",
+      "line": 174,
+      "name": "omarchy-shell",
+      "path": "shell/services/AppLibrary.qml"
+    },
+    {
       "invocation": "literal",
       "line": 174,
       "name": "omarchy-shell",
@@ -2979,6 +3141,12 @@
     {
       "invocation": "source",
       "line": 174,
+      "name": "omarchy-shell",
+      "path": "shell/services/AppLibrary.qml"
+    },
+    {
+      "invocation": "command-array",
+      "line": 245,
       "name": "omarchy-shell",
       "path": "shell/services/AppLibrary.qml"
     },
@@ -3023,6 +3191,12 @@
       "path": "default/omarchy/omarchy-menu.jsonc"
     },
     {
+      "invocation": "command-array",
+      "line": 222,
+      "name": "omarchy-system-stats",
+      "path": "shell/plugins/panels/power/Panel.qml"
+    },
+    {
       "invocation": "literal",
       "line": 222,
       "name": "omarchy-system-stats",
@@ -3039,6 +3213,12 @@
       "line": 406,
       "name": "omarchy-system-wake",
       "path": "shell/plugins/lock/Service.qml"
+    },
+    {
+      "invocation": "command-array",
+      "line": 145,
+      "name": "omarchy-tailscale-send",
+      "path": "shell/plugins/panels/tailscale/Service.qml"
     },
     {
       "invocation": "literal",
@@ -3188,6 +3368,12 @@
       "path": "shell/plugins/bar/widgets/SystemUpdate.qml"
     },
     {
+      "invocation": "command-array",
+      "line": 41,
+      "name": "omarchy-update-available",
+      "path": "shell/plugins/bar/widgets/SystemUpdate.qml"
+    },
+    {
       "invocation": "literal",
       "line": 41,
       "name": "omarchy-update-available",
@@ -3218,6 +3404,12 @@
       "path": "shell/plugins/bar/indicators/Dictation.qml"
     },
     {
+      "invocation": "command-array",
+      "line": 253,
+      "name": "omarchy-weather-location",
+      "path": "shell/plugins/panels/weather/Panel.qml"
+    },
+    {
       "invocation": "literal",
       "line": 253,
       "name": "omarchy-weather-location",
@@ -3230,6 +3422,12 @@
       "path": "shell/plugins/panels/weather/Panel.qml"
     },
     {
+      "invocation": "command-array",
+      "line": 255,
+      "name": "omarchy-weather-location",
+      "path": "shell/plugins/panels/weather/Panel.qml"
+    },
+    {
       "invocation": "literal",
       "line": 255,
       "name": "omarchy-weather-location",
@@ -3238,6 +3436,12 @@
     {
       "invocation": "source",
       "line": 255,
+      "name": "omarchy-weather-location",
+      "path": "shell/plugins/panels/weather/Panel.qml"
+    },
+    {
+      "invocation": "command-array",
+      "line": 257,
       "name": "omarchy-weather-location",
       "path": "shell/plugins/panels/weather/Panel.qml"
     },
@@ -4305,10 +4509,13 @@
     }
   ],
   "environment_variables": [
+    "BASH_REMATCH",
+    "CLIPBOARD_STATE",
     "DESKTOP_SESSION",
     "HOME",
     "HOST",
     "HOSTNAME",
+    "IMAGE_DIR",
     "LOGNAME",
     "OMARCHY_BACKGROUND_SELECTION_FILE",
     "OMARCHY_DEBUG_BAR_ICONS",
@@ -4319,6 +4526,7 @@
     "OMARCHY_MENU_FONT",
     "OMARCHY_PATH",
     "OMARCHY_STOCK_BACKGROUNDS_DIR",
+    "STATE_DIR",
     "USER",
     "XDG_CACHE_HOME",
     "XDG_CURRENT_DESKTOP",

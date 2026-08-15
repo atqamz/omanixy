@@ -101,7 +101,8 @@ architecture contract is implemented by the runtime baseline and remains the
 boundary for the compatibility audit, security integration, releases, and
 standalone adoption.
 Issue #2 selected and validated the concrete Quattro and Quickshell pair.
-Issue #3 established the compatibility ledger and narrow adapters.
+Issue #3 defines the compatibility ledger and narrow adapters; this branch
+implements the pinned baseline and its reviewed compatibility edges.
 Issue #4 owns the remaining security work.
 
 See [architecture.md](architecture.md) for the component contract and

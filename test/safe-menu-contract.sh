@@ -83,16 +83,15 @@ jq -e '
     "apps", "system", "system.logout", "system.reboot", "system.shutdown",
     "system.suspend", "trigger", "trigger.emoji", "trigger.screenshot"
   ]
-  and .apps == {label: "Apps", provider: "apps"}
+  and .apps == {label: "Apps", provider: "apps", when: "command -v uwsm >/dev/null && timeout 2s uwsm check is-active >/dev/null && command -v uwsm-app >/dev/null && command -v gtk-launch >/dev/null"}
   and .trigger == {label: "Trigger"}
   and .system == {label: "System"}
-  and .["trigger.emoji"] == {label: "Emoji", action: "omarchy-shell shell summon omarchy.emojis"}
-  and .["trigger.screenshot"] == {label: "Screenshot", action: "omarchy-capture-screenshot"}
-  and .["system.suspend"] == {label: "Suspend", action: "systemctl suspend"}
-  and .["system.logout"] == {label: "Logout", action: "loginctl terminate-user \"$USER\""}
-  and .["system.reboot"] == {label: "Reboot", action: "systemctl reboot"}
-  and .["system.shutdown"] == {label: "Shutdown", action: "systemctl poweroff"}
-  and ([.. | objects | select(has("when") or has("checked"))] | length) == 0
+  and .["trigger.emoji"] == {label: "Emoji", action: "omarchy-shell shell summon omarchy.emojis", when: "command -v wl-copy >/dev/null && command -v wtype >/dev/null"}
+  and .["trigger.screenshot"] == {label: "Screenshot", action: "omarchy-capture-screenshot", when: "command -v grim >/dev/null && command -v slurp >/dev/null && command -v hyprpicker >/dev/null"}
+  and .["system.suspend"] == {label: "Suspend", action: "systemctl suspend", when: "test -r /sys/power/state"}
+  and .["system.logout"] == {label: "Logout", action: "uwsm stop", when: "command -v uwsm >/dev/null && timeout 2s uwsm check is-active >/dev/null"}
+  and .["system.reboot"] == {label: "Reboot", action: "systemctl reboot", when: "test -S /run/systemd/private"}
+  and .["system.shutdown"] == {label: "Shutdown", action: "systemctl poweroff", when: "test -S /run/systemd/private"}
 ' "$normalized_menu" >/dev/null
 
 for forbidden in omarchy-update pacman yay paru omarchy-theme omarchy-pkg omarchy-lock omarchy-polkit; do

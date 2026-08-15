@@ -12,12 +12,12 @@ from pathlib import Path
 
 TEXT_SUFFIXES = {".qml", ".js", ".sh"}
 MENU_FIELDS = ("action", "when", "checked", "provider")
-ENV_RE = re.compile(r"\b[A-Z][A-Z0-9_]{2,}\b")
+ENV_RE = re.compile(r"\$(?:\{)?([A-Z][A-Z0-9_]*)(?:\})?")
 HELPER_RE = re.compile(r"(?<![A-Za-z0-9_-])(omarchy-[a-z0-9][a-z0-9-]*)(?![A-Za-z0-9_-])")
 ABSOLUTE_HELPER_RE = re.compile(
     r"(?:\$OMARCHY_PATH|\bomarchyPath\b)[^\n]*?/bin/(omarchy-[a-z0-9][a-z0-9-]*)"
 )
-ENV_CALL_RE = re.compile(r"\.env\(\s*[\"']([A-Z][A-Z0-9_]*)[\"']\s*\)")
+ENV_CALL_RE = re.compile(r"\.env\(\s*[\"']([A-Za-z_][A-Za-z0-9_]*)[\"']\s*\)")
 IMPORT_RE = re.compile(r"^\s*import\s+(Quickshell(?:\.[A-Za-z0-9_.]+)?)\b", re.MULTILINE)
 SERVICE_RE = re.compile(
     r"(?:NetworkManager|BlueZ|UPower|MPRIS|PipeWire|WirePlumber|"
@@ -168,8 +168,7 @@ def main() -> int:
 
         for line_index, line in enumerate(lines, 1):
             for variable in ENV_RE.findall(line):
-                if variable.startswith(("OMARCHY", "XDG_", "WAYLAND", "HYPRLAND", "DBUS", "DESKTOP", "HOME")):
-                    environments.add(variable)
+                environments.add(variable)
             for match in ENV_CALL_RE.finditer(line):
                 environments.add(match.group(1))
 
@@ -193,7 +192,7 @@ def main() -> int:
             path_matches.extend(
                 f"{variable} + {suffix}"
                 for variable, suffix in re.findall(
-                    r"Quickshell\.env\(\s*[\"']([A-Z][A-Z0-9_]*)[\"']\s*\)\s*\+\s*[\"']([^\"']+)",
+                    r"Quickshell\.env\(\s*[\"']([A-Za-z_][A-Za-z0-9_]*)[\"']\s*\)\s*\+\s*[\"']([^\"']+)",
                     line,
                 )
             )
@@ -222,6 +221,9 @@ def main() -> int:
                 line,
             ):
                 dynamic.append(record(relative, line_index, line.strip(), invocation="shell-eval"))
+
+            for match in re.finditer(r"\[\s*[\"'](omarchy-[a-z0-9][a-z0-9-]*)[\"']", line):
+                helpers.append(record(relative, line_index, match.group(1), invocation="command-array"))
 
             for match in re.finditer(
                 r"(?:\bbar\.run|(?:Quickshell|Util)\.exec(?:Detached)?)\(\s*"

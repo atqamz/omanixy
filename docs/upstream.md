@@ -56,12 +56,34 @@ immutable compatibility root derived from the source-only flake input.
 The root contains the pinned runtime entrypoint, shared QML libraries, service
 objects, and the selected plugin files required by the supported baseline and
 its reachable panels.
-It applies three narrow compatibility patches: it hides the unsupported Custom
-DNS terminal action, makes the disabled-plugin floor apply to bar widgets, and
-routes the unsupported clock timezone middle-click action to the supported
-clock panel.
+It applies seven narrow compatibility patch sites:
+
+- `shell/services/PluginRegistry.qml` applies the disabled-plugin floor to bar
+  widgets so blocked first-party widgets cannot be re-enabled through layout
+  entries.
+- `shell/plugins/panels/network/Panel.qml` and its `Model.js` filter enterprise
+  Wi-Fi entries because the pinned panel otherwise exposes an unsupported
+  credential flow.
+- `shell/plugins/panels/network/Panel.qml` also removes the Custom DNS
+  provider, action, and pill because the corresponding Omarchy terminal
+  workflow is not a generic NixOS contract.
+- `shell/plugins/panels/network/Panel.qml` hides the speed-test action because
+  the pinned third-party benchmark cannot be represented honestly by a narrow
+  generic adapter.
+- `shell/plugins/panels/clock/BarWidget.qml` routes middle-click to the
+  supported clock panel instead of the unavailable timezone command.
+- `shell/plugins/bar/Bar.qml` replaces the Omarchy helper-backed transparent
+  foreground path with the native theme color and removes its helper process.
+- `shell/plugins/menu/Menu.qml` makes the unsupported system-wide launcher
+  deletion action inert rather than presenting a false deletion affordance.
+
+Each patch is tied to a pinned source location, has a focused compatibility
+assertion, and is kept smaller than the upstream feature it excludes.
 Unsupported first-party plugin directories are absent rather than merely
 advertised as disabled.
+The screenshot adapter preserves the pinned smart picker, including frozen
+selection geometry, monitor transforms, tiny-click snapping, and the
+best-effort clipboard result after a successful capture.
 The root also supplies Omanixy's safe fallback shell configuration, audited
 menu, launcher-hides file, and helper surface.
 Runtime-writable configuration and state must be materialized outside the
@@ -91,7 +113,10 @@ Its deterministic checked-in output is
 The flake check regenerates it from the exact source and fails closed when a
 new helper, executable, absolute helper path, environment variable, service,
 PAM path, or menu command appears.
-The audit is a static drift guard, not proof of runtime completeness.
+The audit is a static discovery guard, not proof of semantic completeness.
+The structured compatibility manifest adds referenced-helper hashes, consumer
+edges, adapter ownership, and focused-test edges, while closure checks make
+those relationships fail closed.
 Focused adapter tests provide behavioral evidence and Wayland/Hyprland smoke
 provides integration evidence.
 

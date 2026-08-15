@@ -1,66 +1,27 @@
 { config
 , lib
-, omanixyRuntime
+, omanixyRuntimeFor
 , pkgs
 , ...
 }:
 
 let
   cfg = config.programs.omanixy;
-  runtime = omanixyRuntime;
+  runtime = omanixyRuntimeFor cfg.features;
   coreutils = "${pkgs.coreutils}/bin";
-  disabledPluginsFloor = [
-    "omarchy.active-window"
-    "omarchy.agents"
-    "omarchy.background"
-    "omarchy.battery"
-    "omarchy.dev-gallery"
-    "omarchy.disk-speedtest"
-    "omarchy.dropbox"
-    "omarchy.idle"
-    "omarchy.image-picker"
-    "omarchy.indicators"
-    "omarchy.keyboard-layout"
-    "omarchy.lock"
-    "omarchy.microphone"
-    "omarchy.nightlight"
-    "omarchy.notifications"
-    "omarchy.polkit"
-    "omarchy.reminders"
-    "omarchy.system-update"
-    "omarchy.tailscale"
-  ];
-  baselineConfig = {
-    version = 1;
-    bar = {
-      position = "top";
-      transparent = false;
-      centerAnchor = "omarchy.clock";
-      layout = {
-        left = [
-          { id = "omarchy.menu"; }
-          { id = "omarchy.workspaces"; }
-        ];
-        center = [
-          {
-            id = "omarchy.clock";
-            format = "dddd HH:mm";
-          }
-          { id = "omarchy.weather"; }
-        ];
-        right = [
-          { id = "omarchy.tray"; }
-          { id = "omarchy.media"; }
-          { id = "omarchy.bluetooth"; }
-          { id = "omarchy.network"; }
-          { id = "omarchy.audio"; }
-          { id = "omarchy.monitor"; }
-          { id = "omarchy.power"; }
-        ];
-      };
-    };
-    disabledPlugins = disabledPluginsFloor;
-  };
+  baselineSource = builtins.fromJSON (builtins.readFile ../../upstream/shell-baseline.json);
+  baselineConfig = builtins.removeAttrs baselineSource [ "featurePlugins" "featureDependencies" "migrations" ];
+  featurePlugins = baselineSource.featurePlugins;
+  featureDependencies = baselineSource.featureDependencies or { };
+  requestedFeatures = [ "core" ] ++ cfg.features;
+  selectedFeatures = lib.unique (lib.concatMap
+    (feature: [ feature ] ++ (featureDependencies.${feature} or [ ]))
+    requestedFeatures);
+  disabledFeaturePlugins = lib.concatLists (map
+    (feature: featurePlugins.${feature} or [ ])
+    (lib.filter (feature: !builtins.elem feature selectedFeatures) (builtins.attrNames featurePlugins)));
+  disabledPluginsFloor = lib.unique (baselineConfig.disabledPlugins ++ disabledFeaturePlugins);
+  legacyBaselineConfig = baselineSource.migrations."1";
   configuredDisabledPlugins = cfg.shell.config.disabledPlugins or [ ];
   effectiveConfig = cfg.shell.config // {
     disabledPlugins = lib.unique (disabledPluginsFloor ++ configuredDisabledPlugins);
@@ -68,6 +29,16 @@ let
   configJson = builtins.toJSON effectiveConfig;
   configSeed = pkgs.writeText "omanixy-shell-config" configJson;
   disabledPluginsFloorJson = builtins.toJSON disabledPluginsFloor;
+  legacyBaselineJson = builtins.toJSON legacyBaselineConfig;
+  migrateGeneratedConfig = pkgs.writeShellScript "omanixy-migrate-generated-shell-config" ''
+    set -euo pipefail
+    file=$1
+    temporary=$2
+    ${pkgs.jq}/bin/jq \
+      --argjson legacy '${legacyBaselineJson}' \
+      --argjson current '${builtins.toJSON baselineConfig}' \
+      'if . == $legacy then $current else empty end' "$file" > "$temporary"
+  '';
   migrateStoreConfig = pkgs.writeShellScript "omanixy-migrate-store-shell-config" ''
     set -euo pipefail
     source=$1
@@ -100,17 +71,25 @@ in
   options.programs.omanixy = {
     enable = lib.mkEnableOption "the Omanixy Quattro shell";
 
+    features = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ "audio" "bluetooth" "clipboard" "launcher" "monitor" "network" "notification" "power" "screenshot" "weather" ];
+      description = "Optional Omanixy compatibility feature groups whose runtime dependencies and helpers are included; Bluetooth also enables the audio group required by its default-device action.";
+    };
+
     shell.config = lib.mkOption {
       type = lib.types.attrsOf lib.types.json;
       default = baselineConfig;
       defaultText = lib.literalExpression "<safe Quattro baseline>";
       description = ''
         Whole-file upstream-compatible Quattro shell.json configuration.
-        Omanixy always adds its disabled-plugin floor to disabledPlugins, so this
-        option cannot enable unfinished issue #4 security surfaces or unsupported
-        first-party Quattro plugins in the baseline.
+        Omanixy includes its disabled-plugin floor in generated config and the
+        compatibility-root registry enforces it at runtime, so this option
+        cannot enable unfinished issue #4 security surfaces or unsupported
+        first-party Quattro plugins.
         The file is seeded on first activation and remains user-owned after
-        that; it is not deep-merged or overwritten by later activations.
+        that; only an exact known Omanixy-generated baseline is migrated to the
+        current baseline, while customized or malformed files remain untouched.
       '';
     };
   };
@@ -149,7 +128,7 @@ in
                 }
                 trap config_tmp_cleanup EXIT
                 run ${migrateStoreConfig} "$config_target" "$config_tmp" || exit $?
-                run ${coreutils}/chmod u+rw -- "$config_tmp" || exit $?
+                run ${coreutils}/chmod 600 -- "$config_tmp" || exit $?
                 run ${coreutils}/mv -f -- "$config_tmp" "$config_file" || exit $?
               ) || exit $?
             else
@@ -162,6 +141,16 @@ in
             fi
             ;;
         esac
+      fi
+
+      if [ -f "$config_file" ] && [ ! -L "$config_file" ]; then
+        config_tmp="$config_file.omanixy.$$"
+        if run ${migrateGeneratedConfig} "$config_file" "$config_tmp" && [ -s "$config_tmp" ]; then
+          run ${coreutils}/chmod 600 -- "$config_tmp"
+          run ${coreutils}/mv -f -- "$config_tmp" "$config_file"
+        else
+          run ${coreutils}/rm -f -- "$config_tmp"
+        fi
       fi
 
       if [ ! -e "$config_file" ]; then

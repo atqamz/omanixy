@@ -1,0 +1,168 @@
+#!/usr/bin/env python3
+"""Check the closed relationship between pinned contracts and Omanixy code."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+
+def die(message: str) -> None:
+    print(f"contract closure: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def read_json(path: Path) -> dict:
+    try:
+        value = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as error:
+        die(f"cannot read {path}: {error}")
+    if not isinstance(value, dict):
+        die(f"{path} is not a JSON object")
+    return value
+
+
+def names(snapshot: dict) -> set[str]:
+    values: set[str] = set()
+    for key in ("direct_omarchy_helpers", "absolute_helper_paths"):
+        for entry in snapshot.get(key, []):
+            if isinstance(entry, dict) and isinstance(entry.get("name"), str):
+                values.add(entry["name"])
+    return values
+
+
+def contains_contract(path: Path, contract: str) -> bool:
+    paths = [path] if path.is_file() else sorted(path.rglob("*"))
+    for candidate in paths:
+        if candidate.is_file():
+            try:
+                if contract in candidate.read_text(errors="replace"):
+                    return True
+            except OSError:
+                continue
+    return False
+
+
+def main() -> int:
+    if len(sys.argv) != 10:
+        print(
+            f"usage: {sys.argv[0]} REPO PINNED_SOURCE COMPAT_ROOT COMPAT_BIN MANIFEST SNAPSHOT TEST ADAPTER AUDITOR",
+            file=sys.stderr,
+        )
+        return 2
+
+    repo, source, root, compatibility_bin, manifest_path, snapshot_path, test_path, adapter_path, auditor_path = map(Path, sys.argv[1:])
+    manifest = read_json(manifest_path)
+    full_snapshot = read_json(snapshot_path)
+    helpers = manifest.get("helpers")
+    native = manifest.get("native")
+    if not isinstance(helpers, dict) or not isinstance(native, dict):
+        die("manifest helpers/native sections are invalid")
+    adapter_manifest_path = manifest.get("adapter")
+    adapter_hash = manifest.get("adapterHash")
+    if not isinstance(adapter_manifest_path, str) or not isinstance(adapter_hash, str):
+        die("manifest adapter identity is invalid")
+    adapter_name = Path(adapter_manifest_path).name
+    if adapter_path.name != adapter_name and not adapter_path.name.endswith("-" + adapter_name):
+        die(f"manifest adapter path does not match the checked adapter: {adapter_path} vs {manifest.get('adapter')}")
+    if hashlib.sha256(adapter_path.read_bytes()).hexdigest() != adapter_hash:
+        die("checked adapter dispatcher drifted")
+
+    pinned = manifest.get("pins")
+    if not isinstance(pinned, dict) or any(not isinstance(value, str) for value in pinned.values()):
+        die("manifest pin set is invalid")
+
+    full_names = names(full_snapshot)
+    declared = set(helpers) | set(native)
+    noise = set(manifest.get("scannerNoise", []))
+    missing_contracts = sorted((set(helpers) - full_names) - {"omarchy-shell"})
+    if missing_contracts:
+        die(f"ledger entries lack pinned-source evidence: {', '.join(missing_contracts)}")
+
+    adapter_text = adapter_path.read_text()
+    test_text = test_path.read_text()
+    for helper, contract in sorted(helpers.items()):
+        if not isinstance(contract, dict):
+            die(f"helper {helper} is not an object")
+        reference = contract.get("reference")
+        expected_hash = contract.get("hash")
+        if not isinstance(reference, str) or not isinstance(expected_hash, str):
+            die(f"helper {helper} has no implementation identity")
+        reference_path = source / reference
+        if not reference_path.is_file():
+            die(f"pinned helper reference is missing: {reference}")
+        actual_hash = hashlib.sha256(reference_path.read_bytes()).hexdigest()
+        if actual_hash != expected_hash:
+            die(f"pinned helper reference drifted: {reference}")
+        consumers = contract.get("consumer")
+        if not isinstance(consumers, list) or not consumers:
+            die(f"helper {helper} has no consumer evidence")
+        consumer_paths: list[Path] = []
+        for consumer in consumers:
+            if not isinstance(consumer, str) or not (source / consumer).exists():
+                die(f"helper {helper} has a missing consumer path: {consumer}")
+            consumer_paths.append(source / consumer)
+        if helper != "omarchy-shell" and not any(contains_contract(path, helper) for path in consumer_paths):
+            die(f"helper {helper} is not referenced by its pinned consumer evidence")
+        if helper != "omarchy-shell" and f"run_adapter {helper}" not in test_text:
+            die(f"helper {helper} has no focused adapter test invocation")
+        if helper not in adapter_text:
+            die(f"helper {helper} has no adapter dispatch")
+    for capability, contract in sorted(native.items()):
+        if not isinstance(contract, dict):
+            die(f"native entry {capability} is not an object")
+        reference = contract.get("reference")
+        expected_hash = contract.get("hash")
+        if not isinstance(reference, str) or not isinstance(expected_hash, str):
+            die(f"native entry {capability} has no implementation identity")
+        reference_path = source / reference
+        if not reference_path.is_file():
+            die(f"native reference is missing: {reference}")
+        actual_hash = hashlib.sha256(reference_path.read_bytes()).hexdigest()
+        if actual_hash != expected_hash:
+            die(f"native reference drifted: {reference}")
+        consumers = contract.get("consumer")
+        if not isinstance(consumers, list) or not consumers:
+            die(f"native entry {capability} has no consumer evidence")
+        for consumer in consumers:
+            if not isinstance(consumer, str) or not (source / consumer).exists():
+                die(f"native entry {capability} has a missing consumer path: {consumer}")
+        if capability not in reference_path.read_text():
+            die(f"native entry {capability} is absent from its pinned reference")
+        evidence = contract.get("evidence")
+        if not isinstance(evidence, str) or not evidence:
+            die(f"native entry {capability} has no native capability evidence")
+    if not (repo / "test/ipc-wrapper.sh").is_file():
+        die("omarchy-shell has no IPC behavioral test evidence")
+
+    root_snapshot = subprocess.run(
+        [sys.executable, str(auditor_path), str(root)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    reachable = names(json.loads(root_snapshot.stdout)) - noise
+    unknown = sorted(reachable - declared)
+    if unknown:
+        die(f"reachable contracts lack ledger disposition: {', '.join(unknown)}")
+    omitted_reachable = sorted((full_names - declared - noise) & reachable)
+    if omitted_reachable:
+        die(f"omitted pinned contracts are reachable: {', '.join(omitted_reachable)}")
+    for omitted in manifest.get("omittedReachability", []):
+        if not isinstance(omitted, str):
+            die("omitted reachability contains a non-string entry")
+        if omitted in reachable:
+            die(f"omitted contract is reachable: {omitted}")
+
+    actual_bin = {path.name for path in (compatibility_bin / "bin").iterdir() if path.is_symlink()}
+    if actual_bin != set(helpers):
+        die("runtime compatibility bin does not equal the adapted-helper ledger")
+    print(f"contract closure passed: {len(helpers)} adapted, {len(native)} native, {len(full_names - declared - noise)} omitted")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -6,14 +6,15 @@ flake=$repo/flake.nix
 metadata=$repo/upstream/omarchy.yaml
 matrix=$repo/upstream/porting-matrix.yaml
 lockfile=$repo/flake.lock
+manifest=$repo/upstream/compatibility-contracts.json
 
-omarchy_revision=f0020448ca87329199de7cb12f2015ebc4a3e5e7
-quickshell_revision=28771c7c74b42e20afca0b1b63980cb46515537c
-nixpkgs_revision=241313f4e8e508cb9b13278c2b0fa25b9ca27163
+omarchy_revision=$(jq -er '.pins.omarchy' "$manifest")
+quickshell_revision=$(jq -er '.pins.quickshell' "$manifest")
+nixpkgs_revision=$(jq -er '.pins.nixpkgs' "$manifest")
 
 grep -Fq "github:basecamp/omarchy/$omarchy_revision" "$flake"
 grep -Fq "github:quickshell-mirror/quickshell/$quickshell_revision" "$flake"
-grep -Fq "nixpkgsRevision = \"$nixpkgs_revision\"" "$flake"
+grep -Fq 'nixpkgsRevision = contractSource.pins.nixpkgs' "$flake"
 grep -Fq "source: github:basecamp/omarchy/$omarchy_revision" "$metadata"
 grep -Fq "source: github:quickshell-mirror/quickshell/$quickshell_revision" "$metadata"
 grep -Fq "source: github:NixOS/nixpkgs/$nixpkgs_revision" "$metadata"
@@ -32,6 +33,12 @@ jq -e \
     and .nodes.quickshell.original.rev == $quickshell
     and .nodes.nixpkgs.locked.rev == $nixpkgs
   ' "$lockfile" >/dev/null
+jq -e \
+  --arg adapter 'packages/omanixy-shell/compat-adapter.bash' \
+  --arg tests 'test/compat-adapters.sh' \
+  --arg adapter_hash "$(sha256sum "$repo/packages/omanixy-shell/compat-adapter.bash" | awk '{print $1}')" \
+  '.adapter == $adapter and .adapterHash == $adapter_hash and .behavioralTests == $tests and (.helpers | type) == "object"' \
+  "$manifest" >/dev/null
 grep -Fq "validated_quattro_pair: true" "$metadata"
 grep -Fq 'track: quattro' "$metadata"
 ! grep -Fq 'release:' "$metadata"
