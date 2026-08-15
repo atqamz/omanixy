@@ -15,11 +15,18 @@ run_scan() {
 }
 
 mkdir -p "$fixture/shell/services" "$fixture/default/omarchy" "$fixture/config/omarchy" "$fixture/bin"
-printf '%s\n' 'Process { command: ["omarchy-fixture-helper", "--verbose"] }' > "$fixture/shell/services/Fixture.qml"
-printf '%s\n' 'Process { command: ["$OMARCHY_PATH/bin/omarchy-fixture-absolute"] }' >> "$fixture/shell/services/Fixture.qml"
-printf '%s\n' 'Quickshell.execDetached(["fixture-tool", "arg"]); Util.execDetached(dynamicCommand);' > "$fixture/shell/services/Dynamic.qml"
-printf '%s\n' 'Process { command: dynamicCondition ? ["omarchy-dynamic-helper"] : ["dynamic-external"] }' >> "$fixture/shell/services/Dynamic.qml"
-printf '%s\n' 'root.bar.run("omarchy-bar-helper --flag")' >> "$fixture/shell/services/Dynamic.qml"
+absolute_path=\$OMARCHY_PATH
+{
+  printf '%s\n' 'Process { command: ["omarchy-fixture-helper", "--verbose"] }'
+  printf '%s\n' "Process { command: [\"${absolute_path}/bin/omarchy-fixture-absolute\"] }"
+} > "$fixture/shell/services/Fixture.qml"
+{
+  printf '%s\n' 'Quickshell.execDetached(["fixture-tool", "arg"]); Util.execDetached(dynamicCommand);'
+  printf '%s\n' 'Process { command: dynamicCondition ? ["omarchy-dynamic-helper"] : ["dynamic-external"] }'
+  printf '%s\n' 'Util.exec(dynamicCommand); Process { command: ["bash", "-c", dynamicShell] }'
+  printf '%s\n' 'Process { command: ["bash", "-lc", dynamicLoginShell] }'
+  printf '%s\n' 'root.bar.run("omarchy-bar-helper --flag")'
+} > "$fixture/shell/services/Dynamic.qml"
 printf '%s\n' 'FileView { path: Quickshell.env("XDG_STATE_HOME") + "/omarchy/fixture.json"; watchChanges: true }' > "$fixture/shell/services/State.qml"
 printf '%s\n' 'import Quickshell.Networking' 'import Quickshell.Services.Mpris' '/etc/pam.d/fixture; /etc/fixture.conf; org.freedesktop.Fixture' > "$fixture/shell/services/Native.qml"
 printf '%s\n' '{"fixture": {"action": "omarchy-menu-helper --flag", "when": "fixture-guard", "checked": "fixture-check", "provider": "fixture-provider"}}' > "$fixture/default/omarchy/omarchy-menu.jsonc"
@@ -34,7 +41,7 @@ jq -e '.direct_shell_commands | map(.name) | index("omarchy-bar-helper") != null
 jq -e '.external_executables | map(.name) | index("fixture-tool") != null' "$output" >/dev/null
 jq -e '.absolute_helper_paths | map(.name) | index("omarchy-unreachable") == null' "$output" >/dev/null
 jq -e '.absolute_helper_paths | map(.name) | index("omarchy-fixture-absolute") != null' "$output" >/dev/null
-jq -e '.dynamic_commands | length == 2' "$output" >/dev/null
+jq -e '.dynamic_commands | length == 5' "$output" >/dev/null
 jq -e '.direct_omarchy_helpers | map(.name) | index("omarchy-dynamic-helper") != null' "$output" >/dev/null
 jq -e '.external_executables | map(.name) | index("dynamic-external") != null' "$output" >/dev/null
 jq -e '.menu_commands | map(.field) | sort == ["action", "checked", "provider", "when"]' "$output" >/dev/null
@@ -48,10 +55,12 @@ if cmp "$output" "$snapshot" >/dev/null 2>&1; then
 fi
 
 cp "$output" "$repeat"
-printf '%s\n' 'Process { command: ["omarchy-new-helper", "new-external"] }' > "$fixture/shell/services/Drift.qml"
-printf '%s\n' 'Process { command: ["new-external"] }' >> "$fixture/shell/services/Drift.qml"
-printf '%s\n' '/etc/pam.d/new-service; org.freedesktop.NewService' >> "$fixture/shell/services/Drift.qml"
-printf '%s\n' 'Quickshell.execDetached(["$OMARCHY_PATH/bin/omarchy-new-absolute"])' >> "$fixture/shell/services/Drift.qml"
+{
+  printf '%s\n' 'Process { command: ["omarchy-new-helper", "new-external"] }'
+  printf '%s\n' 'Process { command: ["new-external"] }'
+  printf '%s\n' '/etc/pam.d/new-service; org.freedesktop.NewService'
+  printf '%s\n' "Quickshell.execDetached([\"${absolute_path}/bin/omarchy-new-absolute\"])"
+} > "$fixture/shell/services/Drift.qml"
 sed -i 's/}}$/},"drift":{"action":"omarchy-menu-new"}}/' "$fixture/default/omarchy/omarchy-menu.jsonc"
 if cmp "$repeat" <(run_scan "$fixture") >/dev/null 2>&1; then
   printf '%s\n' 'new contracts did not change the audit snapshot' >&2

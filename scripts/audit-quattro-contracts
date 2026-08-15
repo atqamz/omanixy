@@ -207,15 +207,21 @@ def main() -> int:
                 expression = re.split(r"\bcommand\s*[:=]", line, maxsplit=1)[1].strip()
                 if expression:
                     dynamic.append(record(relative, line_index, expression, invocation="dynamic"))
-            if re.search(r"(?:Quickshell|Util)\.execDetached\(\s*[A-Za-z_]", line):
+            if re.search(r"(?:Quickshell|Util)\.exec(?:Detached)?\(\s*[A-Za-z_]", line):
                 dynamic.append(record(relative, line_index, line.strip(), invocation="dynamic"))
-            if re.search(r"\bcommand\s*[:=].*\?", line) or re.search(r"(?:Quickshell|Util)\.execDetached\(\s*[A-Za-z_]", line):
+            if re.search(r"\bcommand\s*[:=].*\?", line) or re.search(r"(?:Quickshell|Util)\.exec(?:Detached)?\(\s*[A-Za-z_]", line):
                 for command_match in re.finditer(r"\[\s*[\"']([^\"']+)", line):
                     name = command_match.group(1)
                     if name.startswith("omarchy-"):
                         helpers.append(record(relative, line_index, name, invocation="dynamic"))
                     elif not name.startswith(("$", "/")):
                         external.append(record(relative, line_index, name, invocation="dynamic"))
+
+            if re.search(
+                r"\bcommand\s*[:=].*\[\s*[\"'](?:bash|sh)[\"']\s*,\s*[\"']-(?:l)?c[\"']",
+                line,
+            ):
+                dynamic.append(record(relative, line_index, line.strip(), invocation="shell-eval"))
 
             for match in re.finditer(
                 r"(?:\bbar\.run|(?:Quickshell|Util)\.exec(?:Detached)?)\(\s*"
@@ -242,7 +248,7 @@ def main() -> int:
             absolute_helpers.append(record(relative, line_number(text, match.start()), match.group(1), form="OMARCHY_PATH/bin"))
 
         for match in re.finditer(
-            r"(?:\bcommand\s*[:=]\s*|(?:Quickshell|Util)\.execDetached\s*\(\s*|"
+            r"(?:\bcommand\s*[:=]\s*|(?:Quickshell|Util)\.exec(?:Detached)?\s*\(\s*|"
             r"Util\.exec\s*\(\s*|bar\.run\s*\(\s*)\[\s*[\"']([^\"']+)",
             text,
             re.DOTALL,

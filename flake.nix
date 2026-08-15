@@ -230,7 +230,7 @@
           '';
           compat-adapters = pkgs.runCommand "omanixy-compat-adapters"
             {
-              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gawk pkgs.gnugrep pkgs.gnused pkgs.jq ];
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gawk pkgs.gnugrep pkgs.gnused pkgs.jq pkgs.procps pkgs.util-linux ];
             } ''
             bash -n ${./packages/omanixy-shell/compat-adapter.bash}
             ${pkgs.bash}/bin/bash ${./test/compat-adapters.sh} ${./.}

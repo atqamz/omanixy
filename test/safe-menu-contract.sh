@@ -9,7 +9,18 @@ trap 'rm -rf "$test_root"' EXIT
 normalized_menu="$test_root/menu.json"
 
 test -f "$menu"
-test ! -e "$compatibility_root/bin"
+for helper in \
+  omarchy-remove-launcher-entry \
+  omarchy-menu-emoji-insert \
+  omarchy-clipboard-open \
+  omarchy-clipboard-paste-file \
+  omarchy-clipboard-paste-text; do
+  test -x "$compatibility_root/bin/$helper"
+done
+test ! -e "$compatibility_root/bin/omarchy-update"
+app_library="$compatibility_root/shell/services/AppLibrary.qml"
+grep -Fq 'Util.execDetached("uwsm-app -- gtk-launch ' "$app_library"
+test "$(grep -Fc 'uwsm-app --' "$app_library")" -eq 1
 
 python3 - "$menu" "$normalized_menu" <<'PY'
 import json
@@ -66,6 +77,23 @@ json_text = re.sub(r",(\s*[}\]])", r"\1", "".join(output))
 with open(sys.argv[2], "w", encoding="utf-8") as destination:
     json.dump(json.loads(json_text), destination)
 PY
+
+jq -e '
+  (keys | sort) == [
+    "apps", "system", "system.logout", "system.reboot", "system.shutdown",
+    "system.suspend", "trigger", "trigger.emoji", "trigger.screenshot"
+  ]
+  and .apps == {label: "Apps", provider: "apps"}
+  and .trigger == {label: "Trigger"}
+  and .system == {label: "System"}
+  and .["trigger.emoji"] == {label: "Emoji", action: "omarchy-shell shell summon omarchy.emojis"}
+  and .["trigger.screenshot"] == {label: "Screenshot", action: "omarchy-capture-screenshot"}
+  and .["system.suspend"] == {label: "Suspend", action: "systemctl suspend"}
+  and .["system.logout"] == {label: "Logout", action: "loginctl terminate-user \"$USER\""}
+  and .["system.reboot"] == {label: "Reboot", action: "systemctl reboot"}
+  and .["system.shutdown"] == {label: "Shutdown", action: "systemctl poweroff"}
+  and ([.. | objects | select(has("when") or has("checked"))] | length) == 0
+' "$normalized_menu" >/dev/null
 
 for forbidden in omarchy-update pacman yay paru omarchy-theme omarchy-pkg omarchy-lock omarchy-polkit; do
   jq -e --arg forbidden "$forbidden" \

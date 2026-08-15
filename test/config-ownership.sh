@@ -60,14 +60,25 @@ HOME="$custom_home" USER=omanixy-test XDG_RUNTIME_DIR="$custom_home/runtime" \
   bash -c 'run() { "$@"; }; source "$1"' bash "$custom_activation"
 grep -Fq '"custom":true' "$custom_home/.config/omarchy/shell.json"
 for plugin in \
+  omarchy.active-window \
   omarchy.agents \
   omarchy.background \
   omarchy.battery \
+  omarchy.dev-gallery \
+  omarchy.disk-speedtest \
+  omarchy.dropbox \
   omarchy.idle \
+  omarchy.image-picker \
+  omarchy.indicators \
+  omarchy.keyboard-layout \
   omarchy.lock \
+  omarchy.microphone \
   omarchy.nightlight \
   omarchy.notifications \
-  omarchy.polkit; do
+  omarchy.polkit \
+  omarchy.reminders \
+  omarchy.system-update \
+  omarchy.tailscale; do
   jq -e --arg plugin "$plugin" '.disabledPlugins | index($plugin) != null' "$custom_home/.config/omarchy/shell.json" >/dev/null
 done
 
@@ -105,14 +116,25 @@ test ! -L "$store_file"
 test -w "$store_file"
 jq empty "$store_file"
 for plugin in \
+  omarchy.active-window \
   omarchy.agents \
   omarchy.background \
   omarchy.battery \
+  omarchy.dev-gallery \
+  omarchy.disk-speedtest \
+  omarchy.dropbox \
   omarchy.idle \
+  omarchy.image-picker \
+  omarchy.indicators \
+  omarchy.keyboard-layout \
   omarchy.lock \
+  omarchy.microphone \
   omarchy.nightlight \
   omarchy.notifications \
-  omarchy.polkit; do
+  omarchy.polkit \
+  omarchy.reminders \
+  omarchy.system-update \
+  omarchy.tailscale; do
   jq -e --arg plugin "$plugin" '.disabledPlugins | index($plugin) != null' "$store_file" >/dev/null
 done
 jq -e '
@@ -135,6 +157,8 @@ test "$malformed_status" -ne 0
 test -L "$malformed_store_home/.config/omarchy/shell.json"
 test "$(readlink "$malformed_store_home/.config/omarchy/shell.json")" = "$malformed_store_config"
 grep -Fqx '{"disabledPlugins":' "$malformed_store_config"
-! compgen -G "$malformed_store_home/.config/omarchy/shell.json.omanixy.*" >/dev/null
+if compgen -G "$malformed_store_home/.config/omarchy/shell.json.omanixy.*" >/dev/null; then
+  exit 1
+fi
 
 printf 'configuration ownership checks passed\n'

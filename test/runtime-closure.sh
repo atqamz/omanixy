@@ -21,16 +21,61 @@ test -x "$runtime/bin/omanixy-shell-runtime"
 test -x "$runtime/bin/quickshell"
 test -x "$runtime/bin/inotifywait"
 test -x "$runtime/bin/hyprctl"
+runtime_path=$(sed -n 's/^export PATH="\(.*\)"$/\1/p' "$runtime/bin/omanixy-shell-runtime")
+test -n "$runtime_path"
+PATH="$runtime_path" command -v pkill >/dev/null
+PATH="$runtime_path" command -v update-desktop-database >/dev/null
+PATH="$runtime_path" command -v wpctl >/dev/null
+PATH="$runtime_path" command -v wl-paste >/dev/null
+PATH="$runtime_path" command -v omanixy-compat-adapter >/dev/null
 runtime_source=$(sed -n 's/^export OMARCHY_PATH=//p' "$runtime/bin/omanixy-shell-runtime")
 test -n "$runtime_source"
 test "$runtime_source" = "$compatibility_root"
 test -f "$runtime_source/shell/shell.qml"
 test -f "$runtime_source/config/omarchy/shell.json"
 test -f "$runtime_source/default/omarchy/omarchy-menu.jsonc"
-test -L "$runtime_source/shell"
-test -L "$runtime_source/config/omarchy/shell.json"
+test -d "$runtime_source/shell"
+test ! -L "$runtime_source/shell"
+test ! -L "$runtime_source/config/omarchy/shell.json"
+test ! -e "$runtime_source/shell/plugins/agents"
+test ! -e "$runtime_source/shell/plugins/background"
+test ! -e "$runtime_source/shell/plugins/lock"
+test ! -e "$runtime_source/shell/plugins/notifications"
+test ! -e "$runtime_source/shell/plugins/panels/dropbox"
+test ! -e "$runtime_source/shell/plugins/panels/tailscale"
+test ! -e "$runtime_source/shell/plugins/bar/widgets/SystemUpdate.qml"
+test -f "$runtime_source/shell/plugins/panels/network/Panel.qml"
+test -f "$runtime_source/shell/plugins/panels/speedtest/Panel.qml"
+grep -Fq 'network.security === WifiSecurityType.Wpa2Eap' "$runtime_source/shell/plugins/panels/network/Panel.qml"
+grep -Fq 'else if (b === Qt.MiddleButton) root.togglePanel()' \
+  "$runtime_source/shell/plugins/panels/clock/BarWidget.qml"
+if grep -Fq 'omarchy-menu-timezone' "$runtime_source/shell/plugins/panels/clock/BarWidget.qml"; then
+  exit 1
+fi
+if grep -Fq 'omarchy-launch-floating-terminal-with-presentation' \
+  "$runtime_source/shell/plugins/panels/network/Panel.qml"; then
+  exit 1
+fi
+grep -Fq 'if (isDisabled(config, key)) return false' "$runtime_source/shell/services/PluginRegistry.qml"
+jq -e '
+  .version == 1
+  and .bar.layout.left[0].id == "omarchy.menu"
+  and .bar.layout.center[0].id == "omarchy.clock"
+  and .bar.layout.right[-1].id == "omarchy.power"
+  and (.disabledPlugins | index("omarchy.system-update") != null)
+' "$runtime_source/config/omarchy/shell.json" >/dev/null
 test ! -e "$runtime_source/config/hypr"
-test ! -e "$runtime_source/bin"
+diff -u \
+  <(find "$runtime_source/bin" -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | sort) \
+  <(find "$compatibility_bin/bin" -mindepth 1 -maxdepth 1 -type l -printf '%f\n' | sort)
+test -x "$runtime_source/bin/omarchy-menu-emoji-insert"
+test -x "$runtime_source/bin/omarchy-clipboard-open"
+test ! -e "$runtime_source/bin/omarchy-update"
+grep -Fq 'readonly property var dnsProviders: ["DHCP", "Cloudflare", "Google"]' \
+  "$runtime_source/shell/plugins/panels/network/Panel.qml"
+if grep -Fq 'provider: "Custom"' "$runtime_source/shell/plugins/panels/network/Panel.qml"; then
+  exit 1
+fi
 test "$runtime_source" != "$runtime"
 test -f "$runtime/share/omarchy-theme/colors.toml"
 test -f "$runtime/share/omarchy-theme/shell.toml"
@@ -40,8 +85,12 @@ grep -Fxq "$quickshell_path" "$closure_paths"
 grep -Fxq "$omarchy_path" "$closure_paths"
 grep -Fxq "$compatibility_root" "$closure_paths"
 grep -Fxq "$compatibility_bin" "$closure_paths"
-! grep -E '/(pacman|yay|universe)([-/]|$)|/home/atqa([-/]|$)' "$closure_paths"
-! grep -E '/pulseaudio([-/]|$)' "$closure_paths"
+if grep -E '/(pacman|yay|universe)([-/]|$)|/home/atqa([-/]|$)' "$closure_paths"; then
+  exit 1
+fi
+if grep -E '/pulseaudio([-/]|$)' "$closure_paths"; then
+  exit 1
+fi
 
 [[ $(basename "$omarchy_path") == *"$omarchy_short_revision"* ]]
 [[ $(basename "$quickshell_path") == *"$quickshell_short_revision"* ]]
