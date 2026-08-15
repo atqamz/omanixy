@@ -227,7 +227,7 @@
             touch "$out"
           '';
           safe-menu-contract = pkgs.runCommand "omanixy-safe-menu-contract" {
-            nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.gnused pkgs.jq ];
+            nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.gnused pkgs.jq pkgs.python3 ];
           } ''
             ${pkgs.bash}/bin/bash ${./test/safe-menu-contract.sh} ${runtime} ${compatibilityRoot}
             touch "$out"

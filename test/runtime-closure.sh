@@ -37,6 +37,7 @@ grep -Fxq "$omarchy_path" "$closure_paths"
 grep -Fxq "$compatibility_root" "$closure_paths"
 grep -Fxq "$compatibility_bin" "$closure_paths"
 ! grep -E '/(pacman|yay|universe)([-/]|$)|/home/atqa([-/]|$)' "$closure_paths"
+! grep -E '/pulseaudio([-/]|$)' "$closure_paths"
 
 runtime_text=$(cat "$runtime/bin/omanixy-shell" "$runtime/bin/omanixy-shell-runtime")
 ! grep -E '/home/atqa|atqamz/universe|pacman|yay' <<<"$runtime_text"

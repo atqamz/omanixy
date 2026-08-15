@@ -106,7 +106,6 @@ let
     networkmanager
     pipewire
     power-profiles-daemon
-    pulseaudio
     qrencode
     quickshell
     systemd

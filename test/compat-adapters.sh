@@ -58,24 +58,33 @@ grep -q 'Invalid coordinates' "$test_root/error"
 printf '%s\n' 'audio' > "$log"
 cat > "$bin/wpctl" <<EOF
 #!/usr/bin/env bash
-printf 'wpctl %s\n' "\$*" >> "$log"
-EOF
-cat > "$bin/pactl" <<EOF
-#!/usr/bin/env bash
-if [[ \$1 == get-default-sink ]]; then
+if [[ \$1 == get-default ]]; then
   printf '%s\n' alsa_output.pci-1
-elif [[ \$1 == list && \$2 == sinks ]]; then
-  printf 'Sink #42\\n\\tName: alsa_output.pci-1\\n\\tPorts:\\n\\t\\tanalog-output-speaker: Speakers (priority 100, available)\\n\\tActive Port: analog-output-speaker\\n\\n'
-  printf 'Sink #43\\n\\tName: alsa_output.usb-1\\n\\tPorts:\\n\\t\\tanalog-output-headphones: Headphones (priority 100, not available)\\n\\tActive Port: analog-output-headphones\\n'
-  exit 0
+else
+  printf 'wpctl %s\n' "\$*" >> "$log"
 fi
-printf 'pactl %s\n' "\$*" >> "$log"
 EOF
-chmod +x "$bin/wpctl" "$bin/pactl"
-sed -i "1c#!$(command -v bash)" "$bin/wpctl" "$bin/pactl"
-HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-audio-output-set-default 42 'sink with spaces'
+cat > "$bin/pw-dump" <<'EOF'
+#!/usr/bin/env bash
+cat <<'JSON'
+[
+  {"id":42,"type":"PipeWire:Interface:Node","info":{"props":{"media.class":"Audio/Sink","node.name":"alsa_output.pci-1"}}},
+  {"id":43,"type":"PipeWire:Interface:Node","info":{"props":{"media.class":"Audio/Sink","node.name":"alsa_output.usb-1"}}},
+  {"id":44,"type":"PipeWire:Interface:Node","info":{"props":{"media.class":"Audio/Source","node.name":"alsa_input.pci-1"}}},
+  {"id":142,"type":"PipeWire:Interface:Port","info":{"props":{"port.node":42,"port.direction":"out","port.availability":"yes"}}},
+  {"id":143,"type":"PipeWire:Interface:Port","info":{"props":{"port.node":43,"port.direction":"out","port.availability":"no"}}}
+]
+JSON
+EOF
+chmod +x "$bin/wpctl" "$bin/pw-dump"
+sed -i "1c#!$(command -v bash)" "$bin/wpctl" "$bin/pw-dump"
+HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-audio-output-set-default 42 alsa_output.pci-1
 grep -q '^wpctl set-default 42$' "$log"
-grep -q '^pactl set-default-sink sink with spaces$' "$log"
+if HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-audio-output-set-default 42 'sink with spaces' 2>"$test_root/error"; then
+  printf '%s\n' 'mismatched PipeWire output unexpectedly succeeded' >&2
+  exit 1
+fi
+grep -q 'does not match PipeWire metadata' "$test_root/error"
 
 ln -s "$adapter" "$bin/omarchy-audio-sink-availability"
 HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-audio-sink-availability > "$test_root/sinks"
@@ -85,8 +94,8 @@ ln -s "$adapter" "$bin/omarchy-audio-output-sink"
 HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-audio-output-sink > "$test_root/default-sink"
 grep -Fqx -- 'alsa_output.pci-1' "$test_root/default-sink"
 ln -s "$adapter" "$bin/omarchy-audio-input-set-default"
-HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-audio-input-set-default 43 source-with-spaces
-grep -q '^pactl set-default-source source-with-spaces$' "$log"
+HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-audio-input-set-default 44 alsa_input.pci-1
+grep -q '^wpctl set-default 44$' "$log"
 
 if HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-audio-output-set-default 2>"$test_root/error"; then
   printf '%s\n' 'invalid audio arguments unexpectedly succeeded' >&2

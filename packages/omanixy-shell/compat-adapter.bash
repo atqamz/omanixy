@@ -57,83 +57,73 @@ weather_location() {
   esac
 }
 
+pipewire_dump() {
+  timeout 2s pw-dump
+}
+
+pipewire_node_name() {
+  local node_id=$1
+  local media_class=$2
+  pipewire_dump | jq -er --argjson node_id "$node_id" --arg media_class "$media_class" '
+    .[] |
+    select(.type == "PipeWire:Interface:Node" and .id == $node_id and .info.props["media.class"] == $media_class) |
+    .info.props["node.name"] // empty
+  '
+}
+
+pipewire_node_name_by_name() {
+  local node_name=$1
+  local media_class=$2
+  pipewire_dump | jq -er --arg node_name "$node_name" --arg media_class "$media_class" '
+    .[] |
+    select(.type == "PipeWire:Interface:Node" and .info.props["node.name"] == $node_name and .info.props["media.class"] == $media_class) |
+    .info.props["node.name"] // empty
+  '
+}
+
 audio_output_set_default() {
   (($# == 2)) || fail 'Usage: omarchy-audio-output-set-default <node-id> <sink-name>' 2
   [[ $1 =~ ^[0-9]+$ && -n $2 ]] || fail 'Usage: omarchy-audio-output-set-default <node-id> <sink-name>' 2
   need wpctl
-  need pactl
+  need pw-dump
+  local resolved_name
+  resolved_name=$(pipewire_node_name "$1" Audio/Sink) || fail "$name: output node is unavailable"
+  [[ $resolved_name == "$2" ]] || fail "$name: output node name does not match PipeWire metadata"
   timeout 2s wpctl set-default "$1" || fail "$name: could not set PipeWire default output"
-  timeout 2s pactl set-default-sink "$2" || fail "$name: could not set PulseAudio-compatibility default output"
-  timeout 2s pactl list sink-inputs 2>/dev/null | awk '
-    /^Sink Input #/ { id = substr($3, 2) }
-    /application\.name = / {
-      app = $0
-      sub(/.*application\.name = "/, "", app)
-      sub(/"$/, "", app)
-      if (app != "EasyEffects") print id
-    }' | while read -r stream; do
-      [[ -n $stream ]] && timeout 2s pactl move-sink-input "$stream" "$2" 2>/dev/null || true
-    done
 }
 
 audio_input_set_default() {
   (($# == 2)) || fail 'Usage: omarchy-audio-input-set-default <node-id> <source-name>' 2
   [[ $1 =~ ^[0-9]+$ && -n $2 ]] || fail 'Usage: omarchy-audio-input-set-default <node-id> <source-name>' 2
   need wpctl
-  need pactl
+  need pw-dump
+  local resolved_name
+  resolved_name=$(pipewire_node_name "$1" Audio/Source) || fail "$name: input node is unavailable"
+  [[ $resolved_name == "$2" ]] || fail "$name: input node name does not match PipeWire metadata"
   timeout 2s wpctl set-default "$1" || fail "$name: could not set PipeWire default input"
-  timeout 2s pactl set-default-source "$2" || fail "$name: could not set PulseAudio-compatibility default input"
-  timeout 2s pactl list short source-outputs 2>/dev/null | awk '{ print $1 }' | while read -r stream; do
-    [[ -n $stream ]] && timeout 2s pactl move-source-output "$stream" "$2" 2>/dev/null || true
-  done
 }
 
 audio_output_sink() {
   (($# == 0)) || fail 'Usage: omarchy-audio-output-sink' 2
-  need pactl
-  timeout 2s pactl get-default-sink || fail "$name: default output is unavailable"
+  need wpctl
+  need pw-dump
+  local default_name
+  default_name=$(timeout 2s wpctl get-default) || fail "$name: default output is unavailable"
+  pipewire_node_name_by_name "$default_name" Audio/Sink || fail "$name: default output is unavailable"
 }
 
 audio_sink_availability() {
   (($# == 0)) || fail 'Usage: omarchy-audio-sink-availability' 2
-  need pactl
-  timeout 2s pactl list sinks | awk '
-    function emit_sink() {
-      if (name == "") return
-      print name "\t" ((port_count == 0 || available) ? 1 : 0)
-    }
-
-    /^Sink #/ {
-      emit_sink()
-      name = ""
-      in_ports = 0
-      port_count = 0
-      available = 0
-      next
-    }
-
-    /^[[:space:]]*Name:/ {
-      name = $2
-      next
-    }
-
-    /^[[:space:]]*Ports:$/ {
-      in_ports = 1
-      next
-    }
-
-    in_ports && /^\tActive Port:/ {
-      in_ports = 0
-      next
-    }
-
-    in_ports && /^\t\t/ {
-      port_count++
-      if ($0 !~ /not available/) available = 1
-      next
-    }
-
-    END { emit_sink() }
+  need pw-dump
+  pipewire_dump | jq -er '
+    map(select(.type == "PipeWire:Interface:Node" and .info.props["media.class"] == "Audio/Sink")) as $nodes |
+    map(select(.type == "PipeWire:Interface:Port")) as $ports |
+    $nodes[] |
+    .id as $id |
+    .info.props["node.name"] as $node |
+    ($ports | map(select(.info.props["port.node"] == $id and .info.props["port.direction"] == "out"))) as $node_ports |
+    [$node_ports[].info.props["port.availability"]?] as $availability |
+    "\($node)\t\(if (($availability | length) == 0 or any($availability[]; . != "no")) then 1 else 0 end)"
   '
 }
 

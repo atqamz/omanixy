@@ -274,10 +274,9 @@ items:
     ownership:
       presentation: omarchy
       adapter: omanixy
-      backend: host PipeWire and PulseAudio compatibility API
+      backend: host PipeWire and WirePlumber
     dependencies:
       runtime:
-        - pulseaudio
         - pipewire
       host:
         - PipeWire
@@ -290,7 +289,8 @@ items:
     tests:
       - test/compat-adapters.sh
     notes:
-      - Tuning and EasyEffects-specific upstream behavior is omitted because the supported panel does not require it.
+      - Default selection uses wpctl; node names and sink availability come from pw-dump metadata.
+      - Stream movement, tuning, and EasyEffects-specific behavior is omitted because the supported panel does not require it.
 
   - id: network.native
     classification: exact
