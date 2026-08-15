@@ -604,9 +604,37 @@ weather_status() {
 }
 
 notification_send() {
-  (($# >= 1 && $# <= 2)) || fail 'Usage: omarchy-notification-send <headline> [description]' 2
+  (($# >= 1)) || fail 'Usage: omarchy-notification-send <headline> [description] [-r id] [-p]' 2
+  local headline=$1 description="" replace_id="" persistent=false has_description=false
+  shift
+  if (($#)) && [[ $1 != -* ]]; then
+    description=$1
+    has_description=true
+    shift
+  fi
+  while (($#)); do
+    case $1 in
+      -r)
+        (($# >= 2)) || fail 'Usage: omarchy-notification-send <headline> [description] [-r id] [-p]' 2
+        [[ $2 =~ ^[0-9]+$ ]] || fail 'Notification replacement id must be numeric' 2
+        replace_id=$2
+        shift 2
+        ;;
+      -p)
+        persistent=true
+        shift
+        ;;
+      *)
+        fail 'Usage: omarchy-notification-send <headline> [description] [-r id] [-p]' 2
+        ;;
+    esac
+  done
   need notify-send
-  timeout 5s notify-send -a omanixy-action -u low "$@"
+  local notification_args=("$headline")
+  $has_description && notification_args+=("$description")
+  [[ -n $replace_id ]] && notification_args+=(-r "$replace_id")
+  $persistent && notification_args+=(-p)
+  timeout 5s notify-send -a omanixy-action -u low "${notification_args[@]}"
 }
 
 clipboard_paste_text() {

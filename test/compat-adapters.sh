@@ -144,13 +144,24 @@ grep -Fqx -- 'history text' "$test_root/opened-entry"
 
 cat > "$bin/notify-send" <<'EOF'
 #!/usr/bin/env bash
-printf '%s\n' "$*" > "$TEST_NOTIFICATION"
+printf '%s\n' "$@" > "$TEST_NOTIFICATION"
 EOF
 chmod +x "$bin/notify-send"
 sed -i "1c#!$(command -v bash)" "$bin/notify-send"
 TEST_NOTIFICATION="$test_root/notification" HOME="$home" PATH="$bin:$PATH" \
   run_adapter omarchy-notification-send 'Weather' 'Clear skies'
-grep -Fqx -- '-a omanixy-action -u low Weather Clear skies' "$test_root/notification"
+mapfile -t notification_args < "$test_root/notification"
+[[ ${notification_args[*]} == '-a omanixy-action -u low Weather Clear skies' ]]
+TEST_NOTIFICATION="$test_root/notification" HOME="$home" PATH="$bin:$PATH" \
+  run_adapter omarchy-notification-send 'Restart Foot' -r 42 -p
+mapfile -t notification_args < "$test_root/notification"
+[[ ${notification_args[*]} == '-a omanixy-action -u low Restart Foot -r 42 -p' ]]
+if TEST_NOTIFICATION="$test_root/notification" HOME="$home" PATH="$bin:$PATH" \
+  run_adapter omarchy-notification-send 'Restart Foot' -r invalid 2>"$test_root/error"; then
+  printf '%s\n' 'invalid notification replacement id unexpectedly succeeded' >&2
+  exit 1
+fi
+grep -q 'Notification replacement id must be numeric' "$test_root/error"
 
 cat > "$bin/curl" <<'EOF'
 #!/usr/bin/env bash

@@ -708,7 +708,10 @@ items:
         - path: shell/plugins/panels/weather/BarWidget.qml
           role: weather right-click notification client
           consumption: runtime
-    requirement: Send the single weather status notification invoked by the supported weather widget.
+        - path: bin/omarchy-display-text-size
+          role: Foot restart notification with replacement and persistence options
+          consumption: runtime
+    requirement: Send supported weather and Foot restart notifications through the host notification client.
     ownership:
       presentation: omarchy
       adapter: omanixy
@@ -723,6 +726,7 @@ items:
       - test/compat-adapters.sh
     notes:
       - This adapter does not install, configure, or supervise a notification daemon.
+      - The adapter accepts only the pinned consumers' headline, optional description, -r numeric replacement id, and -p forms.
 
   - id: background.theme-workflow
     classification: omitted
