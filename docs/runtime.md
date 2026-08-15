@@ -63,7 +63,8 @@ this baseline.
 The package output is
 `packages.${system}.omanixy-shell`.
 It contains the runtime entry point, the IPC wrapper, the selected Quickshell
-executables, and the small utility closure required by the baseline.
+executables, and only the audited compatibility helpers required by the
+baseline.
 
 ## Service lifecycle
 
@@ -90,18 +91,47 @@ the immutable source model.
 
 ## Source and runtime closure
 
-Quattro is consumed directly from the immutable store source through
+Quattro is consumed from a deterministic immutable compatibility root through
 `OMARCHY_PATH`.
-Omanixy does not copy the upstream QML tree or create a fake Omarchy
+The root symlinks the exact pinned `shell/` tree and the one upstream default
+config file Quattro reads, preserves the upstream launcher-hides file, and
+supplies only Omanixy's audited default menu.
+The runtime's hermetic `PATH` includes a separate immutable compatibility-bin
+store path containing only the audited helper links.
+The source identity exposed as `runtime.passthru.omarchySource` remains the
+unmodified exact pinned source.
+The compatibility root is exposed separately as
+`runtime.passthru.omarchyCompatibilityRoot`.
+The helper path is exposed as `runtime.passthru.compatibilityBin`.
+Omanixy never copies the upstream `bin/` tree or creates a mutable Omarchy
 filesystem.
 
 The closure contains the selected Quickshell, its Qt/QML dependencies,
-`hyprctl` for shell-specific Hyprland integration, `fc-match`,
-`inotifywait`, and the small command-line utilities used by the
-pinned shell bootstrap and plugin discovery.
+`hyprctl`, `inotifywait`, and the explicit utilities used by supported
+audio, network, Wi-Fi QR and bounded speed-test, Bluetooth, power, monitor,
+screenshot, clipboard, emoji, weather, and launcher contracts.
 The upstream package list, Arch tools, `pacman`, `yay`, and
 `atqamz/universe` are not dependencies.
 The generated wrappers do not append the host `PATH`.
+The runtime closure and compatibility-root checks fail if an unsupported
+Omarchy executable surface appears.
+
+## Contract audit
+
+`scripts/audit-quattro-contracts` statically scans the pinned source roots and
+writes the deterministic snapshot in
+`upstream/quattro-contracts.json`.
+It inventories direct commands, Omarchy helper names, absolute
+`OMARCHY_PATH/bin` references, dynamic commands, menu fields, filesystem
+contracts, environment variables, native Quickshell modules, service names,
+and security-sensitive contracts.
+The flake check regenerates the snapshot from the flake-pinned source and
+fails on any drift.
+The fixture test also proves deterministic output, dynamic-command retention,
+menu-field coverage, unreachable `bin/` exclusion, and fail-closed changes for
+new helpers, executables, absolute paths, services, and PAM paths.
+Static audit is a pin-drift and review guard.
+Behavioral adapter tests and live smoke are separate evidence.
 
 ## Configuration and state ownership
 
@@ -114,6 +144,7 @@ The ownership model is deliberately whole-file and idempotent:
 | `~/.config/omarchy/plugins/` | User-local plugin directory |
 | `~/.local/state/omarchy/current/theme/` | Seeded generated theme state, then runtime writable |
 | `/nix/store/.../omarchy-quattro-...` | Declaratively immutable upstream source |
+| `/nix/store/.../omanixy-omarchy-compat-root-...` | Immutable compatibility view with audited menu and helper links |
 | `/nix/store/.../omanixy-shell-theme-...` | Immutable theme seed |
 
 First activation creates `shell.json` and the minimal theme seed.
@@ -134,8 +165,11 @@ It never writes runtime state into the store.
 Disabling and re-enabling the module does not silently replace customization.
 
 Quattro's user plugin directory remains discoverable.
-Upstream first-party plugins are present in the pinned source, but the
-baseline only claims the core bar and IPC surface.
+The new-install baseline enables the native or adapted tray, media, audio,
+network, Bluetooth, monitor, power, weather, clipboard, emoji, launcher, and
+OSD paths covered by the ledger.
+The updater, agents, background/theme workflow, nightlight, low-battery
+automation, and issue #4 security plugins remain disabled or absent.
 Third-party and user-local QML are trusted, unsandboxed code running in the
 shell process.
 Omanixy does not provide a plugin installation or packaging framework.
@@ -183,16 +217,20 @@ omanixy-shell shell ping
 ## Baseline and deferred surfaces
 
 The baseline proves that Quickshell starts, Quattro loads from the pinned
-source, the core bar and Hyprland workspace surface render, configuration is
-loaded, plugin discovery initializes, and IPC ping works.
-Security-sensitive and host-capability-heavy plugins are disabled by the
-default seed, including the clipboard overlay, rather than being made to
-appear functional.
+compatibility root, the configured native and adapted widgets render, plugin
+discovery initializes, and IPC ping works.
+The default menu is intentionally smaller than the upstream Omarchy menu.
+Every actionable baseline row is backed by a native command, an audited
+adapter, or a host-owned session action.
+Existing writable `shell.json` files are not overwritten when new defaults are
+added.
 
-Issue #3 remains responsible for the comprehensive executable, file,
-environment, D-Bus, audio, network, Bluetooth, power, screenshot, clipboard,
-brightness, and source-drift contract work.
-The baseline does not emulate those helpers.
+The compatibility helpers are not a general Omarchy CLI.
+They implement only the invocation forms reached by supported Quattro
+consumers.
+Unsupported user-edited menu actions remain outside the Omanixy support
+claim and fail as explicit missing or rejected commands rather than reporting
+success.
 
 Issue #4 remains responsible for native locking, PAM, fingerprint, polkit,
 idle, notification ownership, and lock recovery hardening.

@@ -24,3 +24,13 @@ policy:
       hermetic_checks: true
       wayland_hyprland_smoke: true
   validated_quattro_pair: true
+contract_audit:
+  scanner: scripts/audit-quattro-contracts
+  snapshot: upstream/quattro-contracts.json
+  scope:
+    - shell/shell.qml
+    - shell/services/
+    - shell/plugins/
+    - config/omarchy/shell.json
+    - default/omarchy/omarchy-menu.jsonc
+  drift_policy: fail-closed-on-snapshot-change

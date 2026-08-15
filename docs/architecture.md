@@ -242,6 +242,15 @@ Runtime-writable state must be deliberately materialized outside the store.
 `OMARCHY_PATH` may be an intentional source compatibility interface without
 emulating the complete Omarchy filesystem.
 
+For the pinned Quattro revision, the runtime uses an immutable compatibility
+view because some reachable consumers construct absolute
+`OMARCHY_PATH/bin/...` paths.
+The view contains exact source symlinks plus only the audited default menu and
+helper surface.
+It preserves `passthru.omarchySource` as the exact source identity and exposes
+the view separately as `passthru.omarchyCompatibilityRoot`.
+It does not copy the upstream `bin/` tree or make the store mutable.
+
 ## Compatibility boundary
 
 A compatibility adapter is justified only when a supported upstream consumer
@@ -261,6 +270,11 @@ A downstream QML patch requires documented justification, proof that native
 integration and a narrow adapter are insufficient, minimal scope, focused
 regression coverage, and an explicit relationship to the pinned source.
 A narrow adapter is not a fork of the presentation layer.
+
+The compatibility view and default menu are review surfaces, not a general
+Omarchy filesystem or CLI.
+Every baseline menu action must resolve to a native capability, an audited
+adapter, or an explicit host session action.
 
 See [porting-principles.md](porting-principles.md) for the compatibility
 taxonomy and patch rules.

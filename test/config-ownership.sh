@@ -60,12 +60,11 @@ HOME="$custom_home" USER=omanixy-test XDG_RUNTIME_DIR="$custom_home/runtime" \
   bash -c 'run() { "$@"; }; source "$1"' bash "$custom_activation"
 grep -Fq '"custom":true' "$custom_home/.config/omarchy/shell.json"
 for plugin in \
+  omarchy.agents \
   omarchy.background \
   omarchy.battery \
-  omarchy.clipboard \
   omarchy.idle \
   omarchy.lock \
-  omarchy.media \
   omarchy.nightlight \
   omarchy.notifications \
   omarchy.polkit; do
@@ -106,12 +105,11 @@ test ! -L "$store_file"
 test -w "$store_file"
 jq empty "$store_file"
 for plugin in \
+  omarchy.agents \
   omarchy.background \
   omarchy.battery \
-  omarchy.clipboard \
   omarchy.idle \
   omarchy.lock \
-  omarchy.media \
   omarchy.nightlight \
   omarchy.notifications \
   omarchy.polkit; do

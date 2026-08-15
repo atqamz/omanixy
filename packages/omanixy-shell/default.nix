@@ -65,30 +65,90 @@ let
     '';
   };
 
+  safeMenu = pkgs.writeText "omanixy-safe-omarchy-menu.jsonc" (builtins.readFile ./safe-menu.jsonc);
+
+  omarchyCompatibilityRoot = stdenvNoCC.mkDerivation {
+    pname = "omanixy-omarchy-compat-root";
+    version = lib.substring 0 12 omarchyRevision;
+    dontUnpack = true;
+    installPhase = ''
+      mkdir -p "$out/config/omarchy" "$out/default/omarchy"
+      ln -s ${omarchySource}/shell "$out/shell"
+      ln -s ${omarchySource}/config/omarchy/shell.json "$out/config/omarchy/shell.json"
+      ln -s ${omarchySource}/default/omarchy/launcher.hides "$out/default/omarchy/launcher.hides"
+      install -Dm644 ${safeMenu} "$out/default/omarchy/omarchy-menu.jsonc"
+    '';
+    passthru = {
+      inherit omarchySource safeMenu;
+    };
+  };
+
   runtimeInputs = with pkgs; [
     bash
     coreutils
+    curl
+    brightnessctl
+    bluez
     findutils
     gawk
     gnugrep
     gnused
+    grim
+    gtk3
     inotify-tools
     fontconfig
     hyprland
+    iproute2
+    iputils
+    iw
+    jq
+    libnotify
+    networkmanager
+    pipewire
+    power-profiles-daemon
+    pulseaudio
+    qrencode
     quickshell
+    systemd
+    upower
+    util-linux
+    wl-clipboard
+    wtype
+    xdg-utils
   ];
 
-  runtime = pkgs.writeShellApplication {
-    name = "omanixy-shell-runtime";
-    runtimeInputs = runtimeInputs;
-    inheritPath = false;
-    text = ''
-      export OMARCHY_PATH=${lib.escapeShellArg "${omarchySource}"}
-      export QS_DISABLE_FILE_WATCHER=1
-      export QS_NO_RELOAD_POPUP=1
-      exec quickshell -n -p "$OMARCHY_PATH/shell"
-    '';
-  };
+  compatibilityHelpers = [
+    "omarchy-shell"
+    "omarchy-audio-input-set-default"
+    "omarchy-audio-output-set-default"
+    "omarchy-audio-output-sink"
+    "omarchy-audio-sink-availability"
+    "omarchy-battery-status"
+    "omarchy-bluetooth-device"
+    "omarchy-bluetooth-power"
+    "omarchy-brightness-display"
+    "omarchy-capture-screenshot"
+    "omarchy-clipboard-open"
+    "omarchy-clipboard-paste-file"
+    "omarchy-clipboard-paste-text"
+    "omarchy-display-text-size"
+    "omarchy-dns"
+    "omarchy-hyprland-monitor-scaling"
+    "omarchy-menu-emoji-insert"
+    "omarchy-monitor-state"
+    "omarchy-network-band"
+    "omarchy-network-qr"
+    "omarchy-network-status"
+    "omarchy-network-speedtest"
+    "omarchy-notification-send"
+    "omarchy-powerprofiles-list"
+    "omarchy-powerprofiles-set"
+    "omarchy-remove-launcher-entry"
+    "omarchy-system-stats"
+    "omarchy-weather-location"
+    "omarchy-weather-status"
+    "uwsm-app"
+  ];
 
   ipc = pkgs.writeShellApplication {
     name = "omanixy-shell";
@@ -96,8 +156,42 @@ let
     inheritPath = false;
     text = builtins.replaceStrings
       [ "@OMARCHY_PATH@" ]
-      [ (toString omarchySource) ]
+      [ (toString omarchyCompatibilityRoot) ]
       (builtins.readFile ./ipc-wrapper.bash);
+  };
+
+  compatAdapter = pkgs.writeShellApplication {
+    name = "omanixy-compat-adapter";
+    runtimeInputs = runtimeInputs;
+    inheritPath = false;
+    text = builtins.replaceStrings
+      [ "@IPC@" ]
+      [ "${ipc}/bin/omanixy-shell" ]
+      (builtins.readFile ./compat-adapter.bash);
+  };
+
+  compatibilityBin = stdenvNoCC.mkDerivation {
+    pname = "omanixy-compatibility-bin";
+    version = lib.substring 0 12 omarchyRevision;
+    dontUnpack = true;
+    installPhase = ''
+      mkdir -p "$out/bin"
+      for helper in ${lib.concatStringsSep " " compatibilityHelpers}; do
+        ln -s ${compatAdapter}/bin/omanixy-compat-adapter "$out/bin/$helper"
+      done
+    '';
+  };
+
+  runtime = pkgs.writeShellApplication {
+    name = "omanixy-shell-runtime";
+    runtimeInputs = runtimeInputs ++ [ compatibilityBin ];
+    inheritPath = false;
+    text = ''
+      export OMARCHY_PATH=${lib.escapeShellArg "${omarchyCompatibilityRoot}"}
+      export QS_DISABLE_FILE_WATCHER=1
+      export QS_NO_RELOAD_POPUP=1
+      exec quickshell -n -p "$OMARCHY_PATH/shell"
+    '';
   };
 in
 pkgs.symlinkJoin {
@@ -109,10 +203,14 @@ pkgs.symlinkJoin {
     ln -s ${quickshell}/bin/qs "$out/bin/qs"
     ln -s ${pkgs.inotify-tools}/bin/inotifywait "$out/bin/inotifywait"
     ln -s ${pkgs.hyprland}/bin/hyprctl "$out/bin/hyprctl"
+    ln -s ${pkgs.gtk3}/bin/gtk-launch "$out/bin/gtk-launch"
+    for helper in ${lib.concatStringsSep " " compatibilityHelpers}; do
+      ln -s ${compatibilityBin}/bin/$helper "$out/bin/$helper"
+    done
     ln -s ${theme} "$out/share/omarchy-theme"
   '';
   passthru = {
-    inherit omarchyRevision quickshellRevision nixpkgsRevision omarchySource quickshell theme supportedSystems;
+    inherit omarchyRevision quickshellRevision nixpkgsRevision omarchySource omarchyCompatibilityRoot compatibilityBin quickshell theme supportedSystems;
     buildProvenance = {
       inherit omarchyRevision quickshellRevision nixpkgsRevision;
     };

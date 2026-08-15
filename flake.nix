@@ -60,6 +60,7 @@
           pkgs = nixpkgs.legacyPackages.${system};
           runtime = runtimeFor system;
           runtimeClosureInfo = pkgs.closureInfo { rootPaths = [ runtime ]; };
+          compatibilityRoot = runtime.passthru.omarchyCompatibilityRoot;
           storeConfig = "${runtime.passthru.omarchySource}/config/omarchy/shell.json";
           malformedStoreConfig = pkgs.writeText "omanixy-malformed-store-shell-config" ''{"disabledPlugins":'';
           homeConfiguration = homeConfigurationFor system { };
@@ -148,9 +149,9 @@
           '';
           runtime-closure = pkgs.runCommand "omanixy-runtime-closure" {
             closurePaths = "${runtimeClosureInfo}/store-paths";
-            nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.gnused ];
+            nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.gnused pkgs.findutils ];
           } ''
-            ${pkgs.bash}/bin/bash ${./test/runtime-closure.sh} ${runtime} "$closurePaths" ${runtime.passthru.quickshell} ${runtime.passthru.omarchySource}
+            ${pkgs.bash}/bin/bash ${./test/runtime-closure.sh} ${runtime} "$closurePaths" ${runtime.passthru.quickshell} ${runtime.passthru.omarchySource} ${compatibilityRoot} ${runtime.passthru.compatibilityBin}
             touch "$out"
           '';
           config-ownership = pkgs.runCommand "omanixy-config-ownership" {
@@ -167,7 +168,7 @@
           } ''
             unit_dir=$(mktemp -d)
             cp ${serviceUnit} "$unit_dir/omanixy-shell.service"
-            ${pkgs.bash}/bin/bash ${./test/service-unit.sh} "$unit_dir/omanixy-shell.service" ${runtime} ${runtime.passthru.omarchySource}
+            ${pkgs.bash}/bin/bash ${./test/service-unit.sh} "$unit_dir/omanixy-shell.service" ${runtime} ${runtime.passthru.omarchySource} ${compatibilityRoot}
             printf '%s\n' '[Unit]' > "$unit_dir/sysinit.target"
             printf '%s\n' '[Unit]' > "$unit_dir/basic.target"
             XDG_RUNTIME_DIR="$unit_dir" \
@@ -207,6 +208,28 @@
           '';
           nixos-evaluation = pkgs.runCommand "omanixy-nixos-evaluation" { } ''
             test "${nixosConfiguration.config.system.stateVersion}" = 26.11
+            touch "$out"
+          '';
+          quattro-contract-audit = pkgs.runCommand "omanixy-quattro-contract-audit" {
+            nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.diffutils pkgs.jq pkgs.python3 ];
+          } ''
+            generated="$TMPDIR/quattro-contracts.json"
+            ${pkgs.python3}/bin/python3 ${./scripts/audit-quattro-contracts} ${runtime.passthru.omarchySource} > "$generated"
+            cmp "$generated" ${./upstream/quattro-contracts.json}
+            ${pkgs.bash}/bin/bash ${./test/quattro-contract-audit.sh} ${./.}
+            touch "$out"
+          '';
+          compat-adapters = pkgs.runCommand "omanixy-compat-adapters" {
+            nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gawk pkgs.gnugrep pkgs.gnused pkgs.jq ];
+          } ''
+            bash -n ${./packages/omanixy-shell/compat-adapter.bash}
+            ${pkgs.bash}/bin/bash ${./test/compat-adapters.sh} ${./.}
+            touch "$out"
+          '';
+          safe-menu-contract = pkgs.runCommand "omanixy-safe-menu-contract" {
+            nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.gnused pkgs.jq ];
+          } ''
+            ${pkgs.bash}/bin/bash ${./test/safe-menu-contract.sh} ${runtime} ${compatibilityRoot}
             touch "$out"
           '';
         });

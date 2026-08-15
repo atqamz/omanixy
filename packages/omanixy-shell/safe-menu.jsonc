@@ -1,0 +1,20 @@
+{
+  "apps": {"label": "Apps", "provider": "apps"},
+  "trigger": {"label": "Trigger"},
+  "trigger.emoji": {
+    "label": "Emoji",
+    "action": "omarchy-shell shell summon omarchy.emojis"
+  },
+  "trigger.screenshot": {
+    "label": "Screenshot",
+    "action": "omarchy-capture-screenshot"
+  },
+  "system": {"label": "System"},
+  "system.suspend": {"label": "Suspend", "action": "systemctl suspend"},
+  "system.logout": {
+    "label": "Logout",
+    "action": "loginctl terminate-user \"$USER\""
+  },
+  "system.reboot": {"label": "Reboot", "action": "systemctl reboot"},
+  "system.shutdown": {"label": "Shutdown", "action": "systemctl poweroff"}
+}

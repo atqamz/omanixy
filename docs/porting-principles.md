@@ -48,6 +48,14 @@ validated Quattro baseline auditable.
 Those entries do not represent the comprehensive compatibility audit owned by
 issue #3.
 
+The contract scanner is a static pin-drift guard.
+It records direct commands, dynamic command expressions, menu fields, absolute
+helper paths, filesystem and environment contracts, native Quickshell imports,
+service names, and security references from the pinned source roots.
+It intentionally excludes an unreachable upstream `bin/` tree.
+Behavioral adapter tests and live Wayland/Hyprland smoke are separate runtime
+evidence and do not get replaced by static scanning.
+
 ## Adapters and downstream patches
 
 A compatibility adapter is allowed only when a supported upstream component
@@ -86,12 +94,12 @@ Omarchy
    ↓
 Omanixy
    ↓
-Universe
+consumer NixOS and Home Manager configuration
 ```
 
-Universe can dogfood Omanixy and reveal missing generic capabilities.
-Those capabilities must be generalized before they become public Omanixy
-behavior.
+Universe is a downstream consumer and validation environment.
+It can reveal missing generic capabilities, but it is never a public Omanixy
+dependency.
 
 ## Pinned source discipline
 

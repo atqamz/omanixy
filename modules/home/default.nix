@@ -10,12 +10,11 @@ let
   runtime = omanixyRuntime;
   coreutils = "${pkgs.coreutils}/bin";
   safetyDisabledPlugins = [
+    "omarchy.agents"
     "omarchy.background"
     "omarchy.battery"
-    "omarchy.clipboard"
     "omarchy.idle"
     "omarchy.lock"
-    "omarchy.media"
     "omarchy.nightlight"
     "omarchy.notifications"
     "omarchy.polkit"
@@ -36,8 +35,17 @@ let
             id = "omarchy.clock";
             format = "dddd HH:mm";
           }
+          { id = "omarchy.weather"; }
         ];
-        right = [ ];
+        right = [
+          { id = "omarchy.tray"; }
+          { id = "omarchy.media"; }
+          { id = "omarchy.bluetooth"; }
+          { id = "omarchy.network"; }
+          { id = "omarchy.audio"; }
+          { id = "omarchy.monitor"; }
+          { id = "omarchy.power"; }
+        ];
       };
     };
     disabledPlugins = safetyDisabledPlugins;
@@ -194,7 +202,7 @@ in
         RestartSec = lib.mkDefault "2s";
         TimeoutStopSec = lib.mkDefault "10s";
         Environment = lib.mkDefault [
-          "OMARCHY_PATH=${runtime.passthru.omarchySource}"
+          "OMARCHY_PATH=${runtime.passthru.omarchyCompatibilityRoot}"
           "QS_DISABLE_FILE_WATCHER=1"
           "QS_NO_RELOAD_POPUP=1"
         ];
