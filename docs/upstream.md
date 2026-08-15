@@ -2,13 +2,12 @@
 
 Omanixy attributes the presentation source to
 [`basecamp/omarchy`](https://github.com/basecamp/omarchy).
-The repository currently pins release `v3.8.4` at revision
-`8fcc9d6048af4cb0e3af8512c78049857a3b53dd`.
-
-That revision is the current repository source baseline.
-This architecture change does not claim that it is a validated runtime
-Quattro and Quickshell compatibility pair.
-The actual Quattro runtime revision and Quickshell pairing belong to issue #2.
+The repository pins the reviewed Quattro source at revision
+`f0020448ca87329199de7cb12f2015ebc4a3e5e7`.
+The validated Quickshell pairing is revision
+`28771c7c74b42e20afca0b1b63980cb46515537c`.
+The pair and validation state are recorded in
+[`upstream/omarchy.yaml`](../upstream/omarchy.yaml).
 
 ## Pinning policy
 
@@ -47,8 +46,8 @@ the stable package available from Nixpkgs is not automatically suitable for
 every Quattro revision.
 
 Issue #2 owns selecting and testing the concrete pair.
-Until that work lands, metadata must not invent a Quattro SHA, claim runtime
-validation, or repin this repository to a moving `quattro` branch.
+The recorded pair is the release baseline until an explicit upstream upgrade
+issue revalidates both inputs together.
 
 ## Source consumption
 
@@ -65,10 +64,10 @@ It does not authorize emulating the complete Omarchy filesystem.
 
 ## Porting ledger
 
-`upstream/porting-matrix.yaml` is the future compatibility ledger.
-It is currently empty because issue #3 owns the contract audit and must add
-traceable entries from the supported upstream source.
-An empty ledger is more truthful than an inventory of unverified features.
+`upstream/porting-matrix.yaml` contains only the durable runtime lifecycle
+decision made by issue #2.
+Issue #3 owns the comprehensive contract audit and all broader ledger
+population.
 
 See [porting-principles.md](porting-principles.md) for the `exact`, `adapted`,
 `omitted`, and `blocked` taxonomy.

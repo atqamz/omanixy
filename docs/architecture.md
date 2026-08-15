@@ -35,9 +35,9 @@ Quickshell is the shell runtime that executes that presentation.
 Omanixy provides the declarative integration boundary.
 NixOS remains authoritative for the operating system and its capabilities.
 
-This is a target architecture, not a claim that the current repository
-baseline already runs a validated Quattro runtime.
-Issue #2 owns the concrete reviewed Quattro and Quickshell compatibility pair.
+Issue #2 provides the first validated Quattro runtime baseline.
+Later issues add compatibility adapters and security integrations without
+changing the ownership boundary.
 
 ## Project naming
 
@@ -183,11 +183,9 @@ Consumers that need system-level integration also import:
 }
 ```
 
-The intended public flake outputs are `homeManagerModules.default` and
-`nixosModules.default`.
-The architecture documents this contract.
-The current flake does not create empty modules just to make the examples
-evaluate before the implementation exists.
+The public flake outputs are `homeManagerModules.default`,
+`nixosModules.default`, `packages.${system}.omanixy-shell`, and meaningful
+runtime checks.
 
 The option design must provide:
 
@@ -275,10 +273,10 @@ The flake must expose a real public output only when it has a consumer need:
   output;
 - `nixosModules.default` is contracted as the public privileged/system
   integration output;
-- `packages.${system}` is deferred until issue #2 creates a runtime package
-  that benefits from direct package consumption;
-- `checks.${system}` is deferred until meaningful evaluation or runtime
-  contract checks exist;
+- `packages.${system}.omanixy-shell` provides direct runtime and IPC
+  consumption;
+- `checks.${system}` covers evaluation, closure, service, ownership, IPC, and
+  pin invariants;
 - a standalone Omanixy CLI is not part of the architecture contract.
 
 An internal runtime or IPC executable may exist when the runtime requires it.

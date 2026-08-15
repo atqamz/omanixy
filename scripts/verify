@@ -9,6 +9,7 @@ test -s docs/architecture.md
 test -s docs/project.md
 test -s docs/porting-principles.md
 test -s docs/upstream.md
+test -s docs/runtime.md
 test -s upstream/omarchy.yaml
 test -s upstream/porting-matrix.yaml
 test -x scripts/verify

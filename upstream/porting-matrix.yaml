@@ -1,1 +1,16 @@
-items: []
+items:
+  - id: shell.runtime
+    classification: adapted
+    upstream:
+      project: basecamp/omarchy
+      revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
+      paths:
+        - shell/shell.qml
+        - bin/omarchy-launch-shell
+    omanixy:
+      implementation: systemd --user service
+      service: omanixy-shell.service
+      module: modules/home/default.nix
+    notes:
+      - Systemd owns restart, logging, and graphical-session lifecycle.
+      - The upstream Bash supervisor is not copied.

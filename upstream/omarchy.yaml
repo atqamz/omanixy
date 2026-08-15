@@ -1,12 +1,23 @@
 project: basecamp/omarchy
-release: v3.8.4
-revision: 8fcc9d6048af4cb0e3af8512c78049857a3b53dd
-pinned_at: 2026-07-23
+release: quattro
+revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
+pinned_at: 2026-08-15
 
 policy:
   source: pinned-revision-only
   update_strategy: explicit-upstream-upgrade-issue
   integration_target: omarchy-quattro
-  current_pin_role: repository-source-baseline
-  runtime_pair: pending-issue-2
-  validated_quattro_pair: false
+  current_pin_role: validated-quattro-runtime
+  runtime_pair:
+    status: validated
+    omarchy:
+      source: github:basecamp/omarchy/f0020448ca87329199de7cb12f2015ebc4a3e5e7
+      revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
+    quickshell:
+      source: github:quickshell-mirror/quickshell/28771c7c74b42e20afca0b1b63980cb46515537c
+      revision: 28771c7c74b42e20afca0b1b63980cb46515537c
+      provenance: source-built-from-exact-revision-over-pinned-nixpkgs-quickshell
+    validation:
+      hermetic_checks: true
+      wayland_hyprland_smoke: true
+  validated_quattro_pair: true
