@@ -1,7 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-
-revision="$(sed -n 's/^revision: //p' upstream/omarchy.yaml)"
-test -n "$revision"
-printf '%s\n' "Pinned Omarchy revision: $revision"
-git diff -- upstream/omarchy.yaml upstream/porting-matrix.yaml
