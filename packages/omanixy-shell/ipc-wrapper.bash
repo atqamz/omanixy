@@ -31,17 +31,13 @@ if [[ $1 == shell && ($2 == summon || $2 == toggle) && $# == 3 ]]; then
 fi
 
 export OMARCHY_PATH='@OMARCHY_PATH@'
-runtime_dir=${XDG_RUNTIME_DIR:-/run/user/$UID}
 
-if [[ -z ${WAYLAND_DISPLAY:-} ]]; then
-  # shellcheck disable=SC2012,SC2045,SC2046
-  for socket in $(ls -t "$runtime_dir"/wayland-[0-9]* 2>/dev/null); do
-    [[ -S $socket ]] || continue
-    WAYLAND_DISPLAY=${socket##*/}
-    break
-  done
-  export WAYLAND_DISPLAY
-fi
+[[ -n ${XDG_RUNTIME_DIR:-} ]] || fail 'omanixy-shell requires XDG_RUNTIME_DIR from the graphical session'
+[[ -n ${WAYLAND_DISPLAY:-} ]] || fail 'omanixy-shell requires WAYLAND_DISPLAY from the graphical session'
+[[ $WAYLAND_DISPLAY != */* ]] || fail 'omanixy-shell received an invalid WAYLAND_DISPLAY'
+
+wayland_socket="$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY"
+[[ -S $wayland_socket ]] || fail "omanixy-shell Wayland socket is unavailable: $wayland_socket"
 
 timeout_value=${OMARCHY_SHELL_IPC_TIMEOUT:-2s}
 set +e

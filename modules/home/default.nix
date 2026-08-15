@@ -1,12 +1,25 @@
 { config
 , lib
 , omanixyRuntime
+, pkgs
 , ...
 }:
 
 let
   cfg = config.programs.omanixy;
   runtime = omanixyRuntime;
+  coreutils = "${pkgs.coreutils}/bin";
+  safetyDisabledPlugins = [
+    "omarchy.background"
+    "omarchy.battery"
+    "omarchy.clipboard"
+    "omarchy.idle"
+    "omarchy.lock"
+    "omarchy.media"
+    "omarchy.nightlight"
+    "omarchy.notifications"
+    "omarchy.polkit"
+  ];
   baselineConfig = {
     version = 1;
     bar = {
@@ -27,19 +40,14 @@ let
         right = [ ];
       };
     };
-    disabledPlugins = [
-      "omarchy.background"
-      "omarchy.battery"
-      "omarchy.clipboard"
-      "omarchy.idle"
-      "omarchy.lock"
-      "omarchy.media"
-      "omarchy.nightlight"
-      "omarchy.notifications"
-      "omarchy.polkit"
-    ];
+    disabledPlugins = safetyDisabledPlugins;
   };
-  configJson = builtins.toJSON cfg.shell.config;
+  configuredDisabledPlugins = cfg.shell.config.disabledPlugins or [ ];
+  effectiveConfig = cfg.shell.config // {
+    disabledPlugins = lib.unique (safetyDisabledPlugins ++ configuredDisabledPlugins);
+  };
+  configJson = builtins.toJSON effectiveConfig;
+  configSeed = pkgs.writeText "omanixy-shell-config" configJson;
   runtimeTheme = runtime.passthru.theme;
 in
 {
@@ -47,11 +55,14 @@ in
     enable = lib.mkEnableOption "the Omanixy Quattro shell";
 
     shell.config = lib.mkOption {
-      type = lib.types.attrsOf lib.types.anything;
+      type = lib.types.attrsOf lib.types.json;
       default = baselineConfig;
       defaultText = lib.literalExpression "<safe Quattro baseline>";
       description = ''
         Whole-file upstream-compatible Quattro shell.json configuration.
+        Omanixy always adds its safety floor to disabledPlugins, so this option
+        cannot enable unfinished lock, polkit, idle, notification, or related
+        surfaces owned by issue #4.
         The file is seeded on first activation and remains user-owned after
         that; it is not deep-merged or overwritten by later activations.
       '';
@@ -59,6 +70,18 @@ in
   };
 
   config = lib.mkIf cfg.enable {
+    assertions = [
+      {
+        assertion = (cfg.shell.config.version or null) == 1;
+        message = "programs.omanixy.shell.config.version must be 1";
+      }
+      {
+        assertion = builtins.isList configuredDisabledPlugins
+          && builtins.all builtins.isString configuredDisabledPlugins;
+        message = "programs.omanixy.shell.config.disabledPlugins must be a list of strings";
+      }
+    ];
+
     home.packages = [ runtime ];
 
     home.activation.omanixyShellState = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
@@ -66,43 +89,60 @@ in
       config_file="$config_dir/shell.json"
       theme_dir="$HOME/.local/state/omarchy/current/theme"
 
-      mkdir -p "$config_dir" "$config_dir/plugins"
+      run ${coreutils}/mkdir -p "$config_dir" "$config_dir/plugins"
 
       if [ -L "$config_file" ]; then
-        config_target=$(readlink -f "$config_file" || true)
+        config_target=$(${coreutils}/readlink -f "$config_file" || true)
         case "$config_target" in
           /nix/store/*)
-            config_tmp="$config_file.omanixy.$$"
-            cp -- "$config_target" "$config_tmp"
-            chmod u+rw -- "$config_tmp"
-            mv -f -- "$config_tmp" "$config_file"
+            if [ -f "$config_target" ]; then
+              config_tmp="$config_file.omanixy.$$"
+              run ${coreutils}/cp -- "$config_target" "$config_tmp"
+              run ${coreutils}/chmod u+rw -- "$config_tmp"
+              run ${coreutils}/mv -f -- "$config_tmp" "$config_file"
+            else
+              run ${coreutils}/rm -f -- "$config_file"
+            fi
+            ;;
+          *)
+            if [ ! -e "$config_file" ]; then
+              run ${coreutils}/rm -f -- "$config_file"
+            fi
             ;;
         esac
       fi
 
       if [ ! -e "$config_file" ]; then
-        (
-          umask 077
-          printf '%s\n' ${lib.escapeShellArg configJson} > "$config_file"
-        )
+        run ${coreutils}/install -Dm600 -- '${configSeed}' "$config_file"
       fi
 
       if [ -L "$theme_dir" ]; then
-        theme_target=$(readlink -f "$theme_dir" || true)
+        theme_target=$(${coreutils}/readlink -f "$theme_dir" || true)
         case "$theme_target" in
           /nix/store/*)
-            theme_tmp="$theme_dir.omanixy.$$"
-            mkdir -p "$theme_tmp"
-            cp -R -- "$theme_target/." "$theme_tmp/"
-            chmod -R u+rwX -- "$theme_tmp"
-            rm -f -- "$theme_dir"
-            mv -- "$theme_tmp" "$theme_dir"
+            if [ -d "$theme_target" ]; then
+              theme_tmp="$theme_dir.omanixy.$$"
+              run ${coreutils}/mkdir -p "$theme_tmp"
+              run ${coreutils}/cp -R -- "$theme_target/." "$theme_tmp/"
+              run ${coreutils}/chmod -R u+rwX -- "$theme_tmp"
+              run ${coreutils}/rm -f -- "$theme_dir"
+              run ${coreutils}/mv -- "$theme_tmp" "$theme_dir"
+            else
+              run ${coreutils}/rm -f -- "$theme_dir"
+            fi
+            ;;
+          *)
+            if [ ! -e "$theme_dir" ]; then
+              run ${coreutils}/rm -f -- "$theme_dir"
+            fi
             ;;
         esac
-      elif [ ! -e "$theme_dir" ]; then
-        mkdir -p "$theme_dir"
-        cp -R -- '${runtimeTheme}/.' "$theme_dir/"
-        chmod -R u+rwX -- "$theme_dir"
+      fi
+
+      if [ ! -e "$theme_dir" ]; then
+        run ${coreutils}/mkdir -p "$theme_dir"
+        run ${coreutils}/cp -R -- '${runtimeTheme}/.' "$theme_dir/"
+        run ${coreutils}/chmod -R u+rwX -- "$theme_dir"
       fi
     '';
 

@@ -5,7 +5,7 @@ repo=${1:?repository path required}
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
-mkdir -p "$tmp/bin" "$tmp/omarchy/shell"
+mkdir -p "$tmp/bin" "$tmp/omarchy/shell" "$tmp/runtime"
 cp "$repo/packages/omanixy-shell/ipc-wrapper.bash" "$tmp/omanixy-shell"
 sed -i "s|@OMARCHY_PATH@|$tmp/omarchy|g" "$tmp/omanixy-shell"
 chmod +x "$tmp/omanixy-shell"
@@ -22,6 +22,8 @@ cat > "$tmp/bin/quickshell" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$@" > "$IPC_LOG"
+printf '%s\n' "${WAYLAND_DISPLAY:-unset}" > "${IPC_ENV_LOG:-/dev/null}"
+touch "${QS_CALL_LOG:-/dev/null}"
 case ${IPC_MODE:-success} in
   success) printf '%s\n' '{"ok":true}' ;;
   unavailable) exit 1 ;;
@@ -33,8 +35,25 @@ EOF
 chmod +x "$tmp/bin/quickshell"
 sed -i "1c#!$(command -v bash)" "$tmp/omanixy-shell" "$tmp/bin/timeout" "$tmp/bin/quickshell"
 
+python_cmd=${PYTHON:?PYTHON test interpreter required}
+make_socket() {
+  "$python_cmd" - "$1" <<'PY'
+import socket
+import sys
+
+sock = socket.socket(socket.AF_UNIX)
+sock.bind(sys.argv[1])
+sock.close()
+PY
+}
+
+make_socket "$tmp/runtime/wayland-1"
+make_socket "$tmp/runtime/wayland-2"
+
 run_wrapper() {
   IPC_LOG="$tmp/ipc.log" \
+    IPC_ENV_LOG="$tmp/ipc-env.log" \
+    QS_CALL_LOG="$tmp/qs-called" \
     PATH="$tmp/bin:$PATH" \
     WAYLAND_DISPLAY=wayland-1 \
     XDG_RUNTIME_DIR="$tmp/runtime" \
@@ -61,6 +80,7 @@ grep -Fqx 'ipc' "$tmp/ipc.log"
 grep -Fqx 'shell' "$tmp/ipc.log"
 grep -Fqx 'ping' "$tmp/ipc.log"
 grep -Fqx '{"value":"a b"}' "$tmp/ipc.log"
+grep -Fqx 'wayland-1' "$tmp/ipc-env.log"
 
 run_wrapper shell summon omarchy.menu
 tail -n 1 "$tmp/ipc.log" | grep -Fqx '{}'
@@ -69,6 +89,14 @@ assert_failure 'omanixy-shell is not running' env IPC_MODE=unavailable IPC_LOG="
 assert_failure 'omanixy-shell is not ready' env IPC_MODE=not-ready IPC_LOG="$tmp/ipc.log" PATH="$tmp/bin:$PATH" WAYLAND_DISPLAY=wayland-1 XDG_RUNTIME_DIR="$tmp/runtime" "$tmp/omanixy-shell" shell ping
 assert_failure 'omanixy-shell is not responding' env IPC_MODE=timeout IPC_LOG="$tmp/ipc.log" PATH="$tmp/bin:$PATH" WAYLAND_DISPLAY=wayland-1 XDG_RUNTIME_DIR="$tmp/runtime" "$tmp/omanixy-shell" shell ping
 assert_failure 'Target not found.' env IPC_MODE=target-error IPC_LOG="$tmp/ipc.log" PATH="$tmp/bin:$PATH" WAYLAND_DISPLAY=wayland-1 XDG_RUNTIME_DIR="$tmp/runtime" "$tmp/omanixy-shell" shell ping
+
+rm -f "$tmp/qs-called"
+assert_failure 'omanixy-shell requires WAYLAND_DISPLAY from the graphical session' env -u WAYLAND_DISPLAY IPC_LOG="$tmp/ipc.log" IPC_ENV_LOG="$tmp/ipc-env.log" QS_CALL_LOG="$tmp/qs-called" PATH="$tmp/bin:$PATH" XDG_RUNTIME_DIR="$tmp/runtime" "$tmp/omanixy-shell" shell ping
+test ! -e "$tmp/qs-called"
+
+rm -f "$tmp/qs-called"
+assert_failure "omanixy-shell Wayland socket is unavailable: $tmp/runtime/stale-wayland" env IPC_LOG="$tmp/ipc.log" IPC_ENV_LOG="$tmp/ipc-env.log" QS_CALL_LOG="$tmp/qs-called" PATH="$tmp/bin:$PATH" WAYLAND_DISPLAY=stale-wayland XDG_RUNTIME_DIR="$tmp/runtime" "$tmp/omanixy-shell" shell ping
+test ! -e "$tmp/qs-called"
 
 assert_failure 'Usage: omanixy-shell <target> <method> [args...]' "$tmp/omanixy-shell" shell
 

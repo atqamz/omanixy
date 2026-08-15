@@ -2,7 +2,11 @@
 , pkgs
 , omarchy
 , quickshellSrc
+, nixpkgsRevision
+, supportedSystems
 }:
+
+assert lib.assertOneOf "omanixy supported system" pkgs.stdenv.hostPlatform.system supportedSystems;
 
 let
   inherit (pkgs) stdenvNoCC;
@@ -32,7 +36,7 @@ let
       description = "Pinned Omarchy Quattro source used by Omanixy";
       homepage = "https://github.com/basecamp/omarchy";
       license = lib.licenses.mit;
-      platforms = lib.platforms.linux;
+      platforms = supportedSystems;
     };
   };
 
@@ -71,7 +75,6 @@ let
     inotify-tools
     fontconfig
     hyprland
-    procps
     quickshell
   ];
 
@@ -106,17 +109,19 @@ pkgs.symlinkJoin {
     ln -s ${quickshell}/bin/qs "$out/bin/qs"
     ln -s ${pkgs.inotify-tools}/bin/inotifywait "$out/bin/inotifywait"
     ln -s ${pkgs.hyprland}/bin/hyprctl "$out/bin/hyprctl"
-    ln -s ${pkgs.procps}/bin/pkill "$out/bin/pkill"
     ln -s ${theme} "$out/share/omarchy-theme"
   '';
   passthru = {
-    inherit omarchyRevision quickshellRevision omarchySource quickshell theme;
+    inherit omarchyRevision quickshellRevision nixpkgsRevision omarchySource quickshell theme supportedSystems;
+    buildProvenance = {
+      inherit omarchyRevision quickshellRevision nixpkgsRevision;
+    };
   };
   meta = {
     description = "Nix-native Omarchy Quattro runtime and IPC client";
     homepage = "https://github.com/atqamz/omanixy";
-    license = lib.licenses.mit;
+    license = with lib.licenses; [ mit lgpl3Only ];
     mainProgram = "omanixy-shell";
-    platforms = lib.platforms.linux;
+    platforms = supportedSystems;
   };
 }

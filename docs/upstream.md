@@ -45,7 +45,7 @@ Quickshell compatibility must be tested independently of source changes because
 the stable package available from Nixpkgs is not automatically suitable for
 every Quattro revision.
 
-Issue #2 owns selecting and testing the concrete pair.
+Issue #2 selected and tested the concrete pair.
 The recorded pair is the release baseline until an explicit upstream upgrade
 issue revalidates both inputs together.
 

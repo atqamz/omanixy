@@ -51,12 +51,13 @@ The intended minimal consumer entry point is:
 Integrations that need system-level capabilities will also import
 `inputs.omanixy.nixosModules.default`.
 The module outputs and `programs.omanixy.enable` option are the public
-architecture contract for the implementation work that follows.
-This repository baseline does not yet implement the runtime API.
+runtime API.
+The pinned Quattro runtime is provided by the Home Manager module and
+`packages.${system}.omanixy-shell` output.
 
-Omanixy will expose opinionated but overridable defaults and a structured
+Omanixy exposes opinionated but overridable defaults and a structured
 upstream-compatible shell configuration escape hatch.
-It will not turn every upstream QML property into a Nix option or require
+It does not turn every upstream QML property into a Nix option or require
 consumers to copy internal modules.
 
 ## Documentation

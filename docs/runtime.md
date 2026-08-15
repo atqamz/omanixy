@@ -12,6 +12,7 @@ The release baseline is one compatibility unit:
 ```text
 Omarchy Quattro  f0020448ca87329199de7cb12f2015ebc4a3e5e7
 Quickshell      28771c7c74b42e20afca0b1b63980cb46515537c
+Nixpkgs         241313f4e8e508cb9b13278c2b0fa25b9ca27163
 ```
 
 Both inputs are immutable flake sources.
@@ -19,6 +20,8 @@ The Quickshell input is compiled from its exact source revision by overriding
 the pinned nixpkgs Quickshell package build.
 This retains the package's Qt/QML dependency closure while making the
 candidate revision explicit and auditable.
+The nixpkgs revision, including the Qt/QML build recipe used for the
+override, is part of the recorded validation provenance.
 
 The pair was checked against the Quattro imports and APIs used during startup,
 including `ShellRoot`, `IpcHandler`, process and file APIs, Wayland
@@ -50,6 +53,10 @@ Import the Home Manager module and enable the shell:
 options.
 The structured config is the escape hatch for upstream schema changes rather
 than a Nix option for every QML property.
+Omanixy always appends its #4 safety floor to `disabledPlugins`, even when a
+custom whole-file config omits that field.
+The raw config escape hatch cannot enable unfinished lock, polkit, idle,
+notification, or related security-sensitive surfaces.
 The NixOS module is valid and intentionally has no privileged declarations for
 this baseline.
 
@@ -89,7 +96,7 @@ filesystem.
 
 The closure contains the selected Quickshell, its Qt/QML dependencies,
 `hyprctl` for shell-specific Hyprland integration, `fc-match`,
-`inotifywait`, `pkill`, and the small command-line utilities used by the
+`inotifywait`, and the small command-line utilities used by the
 pinned shell bootstrap and plugin discovery.
 The upstream package list, Arch tools, `pacman`, `yay`, and
 `atqamz/universe` are not dependencies.
@@ -109,6 +116,9 @@ The ownership model is deliberately whole-file and idempotent:
 | `/nix/store/.../omanixy-shell-theme-...` | Immutable theme seed |
 
 First activation creates `shell.json` and the minimal theme seed.
+Home Manager activation side effects run through its `run` helper, so
+`home-manager switch --dry-run` logs planned writes without creating or
+changing user state.
 Later activations preserve existing regular files, including runtime-mutated
 or manually edited content.
 If an older activation left a writable-state symlink into the store, the
@@ -141,6 +151,11 @@ It invokes the exact packaged runtime, forwards positional arguments without
 shell reparsing, adds the upstream-compatible empty payload for
 `shell summon` and `shell toggle` calls with a plugin target, and uses a
 bounded timeout.
+It requires the authoritative `WAYLAND_DISPLAY` and `XDG_RUNTIME_DIR`
+provided by the graphical session and validates that exact Wayland socket.
+It never selects a socket by mtime or guesses among multiple sessions.
+Missing or stale session environment fails with a diagnostic before Quickshell
+is invoked.
 It distinguishes unavailable, not-ready, timeout, malformed, and IPC-level
 target/function errors.
 

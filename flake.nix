@@ -19,14 +19,18 @@
 
   outputs = { self, nixpkgs, omarchy, quickshell, home-manager, ... }:
     let
-      systems = [ "x86_64-linux" "aarch64-linux" ];
-      forEachSystem = nixpkgs.lib.genAttrs systems;
-      runtimeFor = system: import ./packages/omanixy-shell {
-        inherit omarchy;
-        lib = nixpkgs.lib;
-        pkgs = nixpkgs.legacyPackages.${system};
-        quickshellSrc = quickshell;
-      };
+      supportedSystems = [ "x86_64-linux" "aarch64-linux" ];
+      nixpkgsRevision = "241313f4e8e508cb9b13278c2b0fa25b9ca27163";
+      forEachSystem = nixpkgs.lib.genAttrs supportedSystems;
+      runtimeFor = system:
+        assert nixpkgs.lib.assertOneOf "omanixy supported system" system supportedSystems;
+        import ./packages/omanixy-shell {
+          inherit omarchy;
+          lib = nixpkgs.lib;
+          pkgs = nixpkgs.legacyPackages.${system};
+          quickshellSrc = quickshell;
+          inherit nixpkgsRevision supportedSystems;
+        };
       homeConfigurationFor = system: extra: home-manager.lib.homeManagerConfiguration {
         pkgs = nixpkgs.legacyPackages.${system};
         modules = [
@@ -55,6 +59,7 @@
         let
           pkgs = nixpkgs.legacyPackages.${system};
           runtime = runtimeFor system;
+          runtimeClosureInfo = pkgs.closureInfo { rootPaths = [ runtime ]; };
           storeConfig = "${runtime.passthru.omarchySource}/config/omarchy/shell.json";
           homeConfiguration = homeConfigurationFor system { };
           customHomeConfiguration = homeConfigurationFor system {
@@ -63,6 +68,15 @@
               custom = true;
             };
           };
+          invalidHomeConfiguration = builtins.tryEval (
+            builtins.deepSeq
+              (homeConfigurationFor system {
+                programs.omanixy.shell.config = {
+                  version = 2;
+                };
+              }).activationPackage
+              true
+          );
           nixosConfiguration = nixpkgs.lib.nixosSystem {
             inherit system;
             modules = [
@@ -103,15 +117,16 @@
             touch "$out"
           '';
           ipc-wrapper = pkgs.runCommand "omanixy-ipc-wrapper" {
-            nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.gnused ];
+            nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.gnused pkgs.python3 ];
           } ''
-            ${pkgs.bash}/bin/bash ${./tests/ipc-wrapper.sh} ${./.}
+            PYTHON=${pkgs.python3}/bin/python3 ${pkgs.bash}/bin/bash ${./tests/ipc-wrapper.sh} ${./.}
             touch "$out"
           '';
           runtime-closure = pkgs.runCommand "omanixy-runtime-closure" {
+            closurePaths = "${runtimeClosureInfo}/store-paths";
             nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.gnused ];
           } ''
-            ${pkgs.bash}/bin/bash ${./tests/runtime-closure.sh} ${runtime}
+            ${pkgs.bash}/bin/bash ${./tests/runtime-closure.sh} ${runtime} "$closurePaths" ${runtime.passthru.quickshell} ${runtime.passthru.omarchySource}
             touch "$out"
           '';
           config-ownership = pkgs.runCommand "omanixy-config-ownership" {
@@ -123,10 +138,11 @@
             touch "$out"
           '';
           service-unit = pkgs.runCommand "omanixy-service-unit" {
-            nativeBuildInputs = [ pkgs.systemd ];
+            nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.systemd ];
           } ''
             unit_dir=$(mktemp -d)
             cp ${serviceUnit} "$unit_dir/omanixy-shell.service"
+            ${pkgs.bash}/bin/bash ${./tests/service-unit.sh} "$unit_dir/omanixy-shell.service" ${runtime} ${runtime.passthru.omarchySource}
             printf '%s\n' '[Unit]' > "$unit_dir/sysinit.target"
             printf '%s\n' '[Unit]' > "$unit_dir/basic.target"
             XDG_RUNTIME_DIR="$unit_dir" \
@@ -138,6 +154,18 @@
                 cat "$unit_dir/omanixy-shell.service"
                 exit "$status"
               }
+            touch "$out"
+          '';
+          stale-text = pkgs.runCommand "omanixy-stale-text" {
+            nativeBuildInputs = [ pkgs.bash pkgs.gnugrep pkgs.ripgrep ];
+          } ''
+            ${pkgs.bash}/bin/bash ${./tests/stale-text.sh} ${./.}
+            touch "$out"
+          '';
+          configuration-contract = pkgs.runCommand "omanixy-configuration-contract" {
+            invalidConfiguration = if invalidHomeConfiguration.success then "true" else "false";
+          } ''
+            test "$invalidConfiguration" = false
             touch "$out"
           '';
           home-manager-evaluation = pkgs.runCommand "omanixy-home-manager-evaluation" {

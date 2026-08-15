@@ -3,6 +3,7 @@ set -euo pipefail
 
 test -s AGENTS.md
 test -s README.md
+test -s LICENSE
 test -s flake.nix
 test -s justfile
 test -s docs/architecture.md

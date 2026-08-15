@@ -92,14 +92,15 @@ NixOS consumers retain ownership of unrelated host and user configuration.
 Omanixy can expose configuration for a host-owned capability without becoming
 the global policy owner for that capability.
 
-## Scope of the v0.1 architecture gate
+## Scope of the v0.1 architecture baseline
 
 Within the v0.1 epic at
 [`atqamz/omanixy#7`](https://github.com/atqamz/omanixy/issues/7), this
-architecture contract precedes the implementation issues for the runtime,
-compatibility audit, security integration, releases, and standalone adoption.
-The concrete Quattro and Quickshell compatibility pair is selected and tested
-by the runtime work, not by this documentation gate.
+architecture contract is implemented by the runtime baseline and remains the
+boundary for the compatibility audit, security integration, releases, and
+standalone adoption.
+Issue #2 selected and validated the concrete Quattro and Quickshell pair.
+Issues #3 and #4 own the remaining compatibility and security work.
 
 See [architecture.md](architecture.md) for the component contract and
 [upstream.md](upstream.md) for the current pinning boundary.

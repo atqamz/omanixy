@@ -1,5 +1,4 @@
 { ... }:
 
 {
-  meta.maintainers = [ "atqamz" ];
 }

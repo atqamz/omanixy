@@ -48,8 +48,8 @@ lifecycle, configuration and theme plumbing, adapters, capability
 declarations, and tests.
 
 `omanixy-shell` is runtime and service terminology.
-For example, `omanixy-shell.service` names the systemd user unit that later
-runtime work may provide.
+For example, `omanixy-shell.service` names the systemd user unit provided by
+the runtime baseline.
 It is not a repository rename or a narrower product definition.
 
 ## Ownership boundaries
