@@ -58,8 +58,8 @@ grep -q 'Invalid coordinates' "$test_root/error"
 printf '%s\n' 'audio' > "$log"
 cat > "$bin/wpctl" <<EOF
 #!/usr/bin/env bash
-if [[ \$1 == get-default ]]; then
-  printf '%s\n' alsa_output.pci-1
+if [[ \$1 == inspect && \$2 == @DEFAULT_AUDIO_SINK@ ]]; then
+  printf '%s\n' 'node.name = "alsa_output.pci-1"'
 else
   printf 'wpctl %s\n' "\$*" >> "$log"
 fi
@@ -218,6 +218,8 @@ cat > "$bin/nmcli" <<'EOF'
 #!/usr/bin/env bash
 if [[ $* == *GENERAL.CON-UUID* ]]; then
   printf '%s\n' uuid-1
+elif [[ $* == *802-11-wireless-security.key-mgmt* && $* != *802-11-wireless.ssid* ]]; then
+  printf '%s\n' 'wpa-psk' 's e;cret' ''
 else
   printf '%s\n' 'My;Wi,Fi:Zone' 'wpa-psk' 's e;cret' 'no' ''
 fi
@@ -235,6 +237,14 @@ TEST_QR_PAYLOAD="$test_root/qr-payload" HOME="$home" PATH="$bin:$PATH" \
 grep -Fqx $'meta\twlan0\tWPA\tMy;Wi,Fi:Zone' "$test_root/qr"
 grep -Fqx '1' "$test_root/qr"
 grep -Fqx 'WIFI:T:WPA;S:My\;Wi\,Fi\:Zone;P:s e\;cret;;' "$test_root/qr-payload"
+ln -s "$adapter" "$bin/omarchy-network-password"
+HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-network-password wlan0 > "$test_root/password"
+grep -Fqx 's e;cret' "$test_root/password"
+if HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-network-password 2>"$test_root/error"; then
+  printf '%s\n' 'invalid network password arguments unexpectedly succeeded' >&2
+  exit 1
+fi
+grep -q 'Usage: omarchy-network-password' "$test_root/error"
 
 cat > "$bin/ip" <<'EOF'
 #!/usr/bin/env bash

@@ -136,6 +136,7 @@ let
     "omarchy-menu-emoji-insert"
     "omarchy-monitor-state"
     "omarchy-network-band"
+    "omarchy-network-password"
     "omarchy-network-qr"
     "omarchy-network-status"
     "omarchy-network-speedtest"

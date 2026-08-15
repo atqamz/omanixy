@@ -373,7 +373,7 @@ items:
         - path: bin/omarchy-network-qr
           role: reference contract
           consumption: audited-reference
-    requirement: Read the active non-enterprise NetworkManager connection and emit the metadata plus QR matrix consumed by the Quattro share panel.
+    requirement: Read the active non-enterprise NetworkManager connection, emit the metadata plus QR matrix consumed by the Quattro share panel, and reveal its password only on explicit user action.
     ownership:
       presentation: omarchy
       adapter: omanixy
@@ -384,12 +384,15 @@ items:
         - qrencode
       host:
         - NetworkManager
-    helper: omarchy-network-qr
+    helper:
+      - omarchy-network-qr
+      - omarchy-network-password
     tests:
       - test/compat-adapters.sh
     notes:
       - Credentials are read through nmcli stdout and never passed as process arguments.
       - Enterprise Wi-Fi sharing is rejected rather than emitting an unusable password QR.
+      - Password output is a private stdout contract for the wifiqr panel and is never exposed in menu output or process arguments.
 
   - id: network.speedtest
     classification: adapted

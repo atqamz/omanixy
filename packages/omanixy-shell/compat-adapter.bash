@@ -108,7 +108,9 @@ audio_output_sink() {
   need wpctl
   need pw-dump
   local default_name
-  default_name=$(timeout 2s wpctl get-default) || fail "$name: default output is unavailable"
+  default_name=$(timeout 2s wpctl inspect @DEFAULT_AUDIO_SINK@ |
+    sed -n 's/^[[:space:]]*node.name = "\(.*\)"$/\1/p' | head -n 1) || true
+  [[ -n $default_name ]] || fail "$name: default output is unavailable"
   pipewire_node_name_by_name "$default_name" Audio/Sink || fail "$name: default output is unavailable"
 }
 
@@ -207,6 +209,28 @@ network_qr_escape() {
   value=${value//,/\\,}
   value=${value//:/\\:}
   printf '%s' "$value"
+}
+
+network_password() {
+  (($# == 1)) || fail 'Usage: omarchy-network-password <interface>' 2
+  need nmcli
+  local interface=$1 uuid key_management password wep_key
+  uuid=$(nmcli --get-values GENERAL.CON-UUID device show "$interface" | head -n 1)
+  [[ -n $uuid && $uuid != -- ]] || fail 'No active Wi-Fi connection' 1
+  mapfile -t fields < <(nmcli --show-secrets --escape no --get-values \
+    802-11-wireless-security.key-mgmt,802-11-wireless-security.psk,802-11-wireless-security.wep-key0 \
+    connection show uuid "$uuid")
+  key_management=${fields[0]:-}
+  password=${fields[1]:-}
+  wep_key=${fields[2]:-}
+  [[ $key_management != *eap* && $key_management != *ieee8021x* ]] ||
+    fail 'Enterprise Wi-Fi has no shareable password' 1
+  if [[ -z $key_management || $key_management == none ]]; then
+    password=$wep_key
+    [[ -n $password ]] || fail 'This network has no password' 1
+  fi
+  [[ -n $password ]] || fail 'Could not read the Wi-Fi password' 1
+  printf '%s\n' "$password"
 }
 
 network_qr() {
@@ -691,6 +715,7 @@ case "$name" in
   omarchy-audio-sink-availability) audio_sink_availability "$@" ;;
   omarchy-network-status) network_status "$@" ;;
   omarchy-network-qr) network_qr "$@" ;;
+  omarchy-network-password) network_password "$@" ;;
   omarchy-network-speedtest) network_speedtest "$@" ;;
   omarchy-network-band) network_band "$@" ;;
   omarchy-dns) network_dns "$@" ;;

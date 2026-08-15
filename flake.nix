@@ -149,7 +149,7 @@
           '';
           runtime-closure = pkgs.runCommand "omanixy-runtime-closure" {
             closurePaths = "${runtimeClosureInfo}/store-paths";
-            nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.gnused pkgs.findutils ];
+            nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.gnused pkgs.findutils pkgs.jq pkgs.python3 ];
           } ''
             ${pkgs.bash}/bin/bash ${./test/runtime-closure.sh} ${runtime} "$closurePaths" ${runtime.passthru.quickshell} ${runtime.passthru.omarchySource} ${compatibilityRoot} ${runtime.passthru.compatibilityBin}
             touch "$out"

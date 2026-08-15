@@ -12,6 +12,10 @@ omarchy_short_revision=${omarchy_revision:0:12}
 quickshell_revision=28771c7c74b42e20afca0b1b63980cb46515537c
 quickshell_short_revision=${quickshell_revision:0:7}
 
+unit_path() {
+  readlink -f "$1"
+}
+
 test -x "$runtime/bin/omanixy-shell"
 test -x "$runtime/bin/omanixy-shell-runtime"
 test -x "$runtime/bin/quickshell"
@@ -39,12 +43,13 @@ grep -Fxq "$compatibility_bin" "$closure_paths"
 ! grep -E '/(pacman|yay|universe)([-/]|$)|/home/atqa([-/]|$)' "$closure_paths"
 ! grep -E '/pulseaudio([-/]|$)' "$closure_paths"
 
-runtime_text=$(cat "$runtime/bin/omanixy-shell" "$runtime/bin/omanixy-shell-runtime")
-! grep -E '/home/atqa|atqamz/universe|pacman|yay' <<<"$runtime_text"
-! grep -Fq ':$PATH' <<<"$runtime_text"
-grep -Fq "$compatibility_bin/bin" <<<"$runtime_text"
-! grep -Fq '/bin/omarchy-unreachable' "$runtime_source/default/omarchy/omarchy-menu.jsonc"
-grep -Fq "$omarchy_short_revision" <<<"$runtime_text"
-grep -Fq "$quickshell_short_revision" <<<"$runtime_text"
+[[ $(basename "$omarchy_path") == *"$omarchy_short_revision"* ]]
+[[ $(basename "$quickshell_path") == *"$quickshell_short_revision"* ]]
+test -x "$runtime/bin/omarchy-network-qr"
+test -x "$runtime/bin/omarchy-network-password"
+test "$(unit_path "$runtime/bin/omarchy-network-qr")" = "$(unit_path "$compatibility_bin/bin/omarchy-network-qr")"
+test "$(unit_path "$runtime/bin/omarchy-network-password")" = "$(unit_path "$compatibility_bin/bin/omarchy-network-password")"
+
+bash "$(dirname "$0")/safe-menu-contract.sh" "$runtime" "$compatibility_root"
 
 printf '%s\n' 'runtime closure invariants passed'
