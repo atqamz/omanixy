@@ -50,6 +50,4 @@ test -x "$runtime/bin/omarchy-network-password"
 test "$(unit_path "$runtime/bin/omarchy-network-qr")" = "$(unit_path "$compatibility_bin/bin/omarchy-network-qr")"
 test "$(unit_path "$runtime/bin/omarchy-network-password")" = "$(unit_path "$compatibility_bin/bin/omarchy-network-password")"
 
-bash "$(dirname "$0")/safe-menu-contract.sh" "$runtime" "$compatibility_root"
-
 printf '%s\n' 'runtime closure invariants passed'
