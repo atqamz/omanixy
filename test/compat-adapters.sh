@@ -145,6 +145,11 @@ grep -Fqx -- 'history text' "$test_root/opened-entry"
 cat > "$bin/notify-send" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$@" > "$TEST_NOTIFICATION"
+for argument; do
+  if [[ $argument == -p ]]; then
+    printf '%s\n' 31415
+  fi
+done
 EOF
 chmod +x "$bin/notify-send"
 sed -i "1c#!$(command -v bash)" "$bin/notify-send"
@@ -153,7 +158,8 @@ TEST_NOTIFICATION="$test_root/notification" HOME="$home" PATH="$bin:$PATH" \
 mapfile -t notification_args < "$test_root/notification"
 [[ ${notification_args[*]} == '-a omanixy-action -u low Weather Clear skies' ]]
 TEST_NOTIFICATION="$test_root/notification" HOME="$home" PATH="$bin:$PATH" \
-  run_adapter omarchy-notification-send 'Restart Foot' -r 42 -p
+  notification_id=$(run_adapter omarchy-notification-send 'Restart Foot' -r 42 -p)
+[[ $notification_id == 31415 ]]
 mapfile -t notification_args < "$test_root/notification"
 [[ ${notification_args[*]} == '-a omanixy-action -u low Restart Foot -r 42 -p' ]]
 if TEST_NOTIFICATION="$test_root/notification" HOME="$home" PATH="$bin:$PATH" \
