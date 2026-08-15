@@ -242,5 +242,5 @@ Inspect the rendered unit and activation output through Home Manager, then
 use `systemctl --user status omanixy-shell` and
 `journalctl --user -u omanixy-shell`.
 Run `omanixy-shell shell ping` only after the service is running.
-The shell source, runtime pair, metadata, and checks should be reviewed
+The shell source, runtime pair, metadata, ledger, and checks should be reviewed
 together for every upgrade.

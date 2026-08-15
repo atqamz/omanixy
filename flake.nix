@@ -135,37 +135,42 @@
           '';
         in
         {
-          pin-invariants = pkgs.runCommand "omanixy-pin-invariants" {
-            nativeBuildInputs = [ pkgs.bash pkgs.gnugrep pkgs.jq pkgs.ripgrep ];
-          } ''
+          pin-invariants = pkgs.runCommand "omanixy-pin-invariants"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.gnugrep pkgs.jq pkgs.ripgrep ];
+            } ''
             ${pkgs.bash}/bin/bash ${./test/pin-invariants.sh} ${./.}
             touch "$out"
           '';
-          ipc-wrapper = pkgs.runCommand "omanixy-ipc-wrapper" {
-            nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.gnused pkgs.python3 ];
-          } ''
+          ipc-wrapper = pkgs.runCommand "omanixy-ipc-wrapper"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.gnused pkgs.python3 ];
+            } ''
             PYTHON=${pkgs.python3}/bin/python3 ${pkgs.bash}/bin/bash ${./test/ipc-wrapper.sh} ${./.}
             touch "$out"
           '';
-          runtime-closure = pkgs.runCommand "omanixy-runtime-closure" {
-            closurePaths = "${runtimeClosureInfo}/store-paths";
-            nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.gnused pkgs.findutils pkgs.jq pkgs.python3 ];
-          } ''
+          runtime-closure = pkgs.runCommand "omanixy-runtime-closure"
+            {
+              closurePaths = "${runtimeClosureInfo}/store-paths";
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.gnused pkgs.findutils pkgs.jq pkgs.python3 ];
+            } ''
             ${pkgs.bash}/bin/bash ${./test/runtime-closure.sh} ${runtime} "$closurePaths" ${runtime.passthru.quickshell} ${runtime.passthru.omarchySource} ${compatibilityRoot} ${runtime.passthru.compatibilityBin}
             touch "$out"
           '';
-          config-ownership = pkgs.runCommand "omanixy-config-ownership" {
-            activation = activationScript;
-            customActivation = customActivationScript;
-            malformedStoreConfig = malformedStoreConfig;
-            nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.diffutils pkgs.jq ];
-          } ''
+          config-ownership = pkgs.runCommand "omanixy-config-ownership"
+            {
+              activation = activationScript;
+              customActivation = customActivationScript;
+              malformedStoreConfig = malformedStoreConfig;
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.diffutils pkgs.jq ];
+            } ''
             ${pkgs.bash}/bin/bash ${./test/config-ownership.sh} "$activation" "$customActivation" /build/omanixy-test /build/omanixy-custom-test /build/omanixy-store-link-test ${storeConfig} "$malformedStoreConfig"
             touch "$out"
           '';
-          service-unit = pkgs.runCommand "omanixy-service-unit" {
-            nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.systemd ];
-          } ''
+          service-unit = pkgs.runCommand "omanixy-service-unit"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.systemd ];
+            } ''
             unit_dir=$(mktemp -d)
             cp ${serviceUnit} "$unit_dir/omanixy-shell.service"
             ${pkgs.bash}/bin/bash ${./test/service-unit.sh} "$unit_dir/omanixy-shell.service" ${runtime} ${runtime.passthru.omarchySource} ${compatibilityRoot}
@@ -182,27 +187,30 @@
               }
             touch "$out"
           '';
-          stale-text = pkgs.runCommand "omanixy-stale-text" {
-            nativeBuildInputs = [ pkgs.bash pkgs.gnugrep pkgs.ripgrep ];
-          } ''
+          stale-text = pkgs.runCommand "omanixy-stale-text"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.gnugrep pkgs.ripgrep ];
+            } ''
             ${pkgs.bash}/bin/bash ${./test/stale-text.sh} ${./.}
             touch "$out"
           '';
-          configuration-contract = pkgs.runCommand "omanixy-configuration-contract" {
-            invalidConfiguration = if invalidHomeConfiguration.success then "true" else "false";
-            invalidDisabledPluginsType = if invalidDisabledPluginsType.success then "true" else "false";
-            invalidDisabledPluginMember = if invalidDisabledPluginMember.success then "true" else "false";
-            unsupportedPlatform = if unsupportedPlatform.success then "true" else "false";
-          } ''
+          configuration-contract = pkgs.runCommand "omanixy-configuration-contract"
+            {
+              invalidConfiguration = if invalidHomeConfiguration.success then "true" else "false";
+              invalidDisabledPluginsType = if invalidDisabledPluginsType.success then "true" else "false";
+              invalidDisabledPluginMember = if invalidDisabledPluginMember.success then "true" else "false";
+              unsupportedPlatform = if unsupportedPlatform.success then "true" else "false";
+            } ''
             test "$invalidConfiguration" = false
             test "$invalidDisabledPluginsType" = false
             test "$invalidDisabledPluginMember" = false
             test "$unsupportedPlatform" = false
             touch "$out"
           '';
-          home-manager-evaluation = pkgs.runCommand "omanixy-home-manager-evaluation" {
-            activation = homeConfiguration.activationPackage;
-          } ''
+          home-manager-evaluation = pkgs.runCommand "omanixy-home-manager-evaluation"
+            {
+              activation = homeConfiguration.activationPackage;
+            } ''
             test -x "$activation/activate"
             touch "$out"
           '';
@@ -210,25 +218,28 @@
             test "${nixosConfiguration.config.system.stateVersion}" = 26.11
             touch "$out"
           '';
-          quattro-contract-audit = pkgs.runCommand "omanixy-quattro-contract-audit" {
-            nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.diffutils pkgs.jq pkgs.python3 ];
-          } ''
+          quattro-contract-audit = pkgs.runCommand "omanixy-quattro-contract-audit"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.diffutils pkgs.jq pkgs.python3 ];
+            } ''
             generated="$TMPDIR/quattro-contracts.json"
             ${pkgs.python3}/bin/python3 ${./scripts/audit-quattro-contracts} ${runtime.passthru.omarchySource} > "$generated"
             cmp "$generated" ${./upstream/quattro-contracts.json}
             ${pkgs.bash}/bin/bash ${./test/quattro-contract-audit.sh} ${./.}
             touch "$out"
           '';
-          compat-adapters = pkgs.runCommand "omanixy-compat-adapters" {
-            nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gawk pkgs.gnugrep pkgs.gnused pkgs.jq ];
-          } ''
+          compat-adapters = pkgs.runCommand "omanixy-compat-adapters"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gawk pkgs.gnugrep pkgs.gnused pkgs.jq ];
+            } ''
             bash -n ${./packages/omanixy-shell/compat-adapter.bash}
             ${pkgs.bash}/bin/bash ${./test/compat-adapters.sh} ${./.}
             touch "$out"
           '';
-          safe-menu-contract = pkgs.runCommand "omanixy-safe-menu-contract" {
-            nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.gnused pkgs.jq pkgs.python3 ];
-          } ''
+          safe-menu-contract = pkgs.runCommand "omanixy-safe-menu-contract"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.gnused pkgs.jq pkgs.python3 ];
+            } ''
             ${pkgs.bash}/bin/bash ${./test/safe-menu-contract.sh} ${runtime} ${compatibilityRoot}
             touch "$out"
           '';

@@ -316,8 +316,8 @@ following work:
 
 - #2 selects and validates the exact Quattro and Quickshell runtime pair and
   implements the user service;
-- #3 audits shell contracts and populates the compatibility ledger with
-  traceable adapters;
+- #3 established the shell contract audit and populated the compatibility
+  ledger with traceable adapters;
 - #4 handles lock, PAM, polkit, idle, notification, and session security;
 - #5 defines SemVer and release automation;
 - #6 proves standalone reuse and migrates Universe downstream.

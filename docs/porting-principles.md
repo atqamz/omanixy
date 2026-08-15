@@ -42,11 +42,10 @@ omission is the correct architecture rather than unfinished work.
 The porting matrix is a compatibility ledger, not a percentage-complete
 tracker.
 The number of `exact` entries is never a project quality score.
-Issue #3 owns the real contract audit and matrix population.
 Issue #2 records the narrow runtime source contracts needed to make the
 validated Quattro baseline auditable.
-Those entries do not represent the comprehensive compatibility audit owned by
-issue #3.
+Issue #3 established the comprehensive contract audit and populated the
+ledger.
 
 The contract scanner is a static pin-drift guard.
 It records direct commands, dynamic command expressions, menu fields, absolute
