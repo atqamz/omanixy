@@ -39,6 +39,7 @@ expect_rejection() {
     cat "$checker_error" >&2
     exit 1
   fi
+  printf 'REJECTED\t%s\t%s\n' "$description" "$reason"
 }
 
 mutated_root=$test_root/mutated-root

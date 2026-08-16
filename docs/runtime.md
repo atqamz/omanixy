@@ -43,6 +43,8 @@ Import the Home Manager module and enable the shell:
 
   programs.omanixy = {
     enable = true;
+    # Optional; defaults to every feature group.
+    features = [ "network" "audio" ];
     shell.config = {
       # Whole-file upstream-compatible shell.json configuration.
     };
@@ -50,8 +52,13 @@ Import the Home Manager module and enable the shell:
 }
 ```
 
-`programs.omanixy.enable` and `programs.omanixy.shell.config` are the public
-options.
+`programs.omanixy.enable`, `programs.omanixy.features`, and
+`programs.omanixy.shell.config` are the public options.
+`features` selects the optional compatibility feature groups whose runtime
+dependencies, helpers, and menu actions are built into the runtime; it defaults
+to every group and is closed transitively.
+See [Source and runtime closure](#source-and-runtime-closure) for the group
+list and for what omitting a group removes.
 The structured config is the escape hatch for upstream schema changes rather
 than a Nix option for every QML property.
 Omanixy seeds the safety floor in `disabledPlugins` and enforces the same
