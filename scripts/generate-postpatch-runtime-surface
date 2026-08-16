@@ -48,9 +48,9 @@ Item {
 
 
 CONSUMER_TRIGGERS = {
-    "omarchy-shell": "consumer.item.bar = headlessBar; consumer.item.bar.run(\"omarchy-shell shell ping\")",
     "omarchy-audio-input-set-default": "consumer.item.setDefaultSource({ id: 1, name: \"probe-source\" })",
     "omarchy-audio-output-set-default": "consumer.item.setDefaultSink({ id: 1, name: \"probe-sink\" })",
+    "omarchy-audio-output-sink": "consumer.item.open()",
     "omarchy-audio-sink-availability": "consumer.item.open()",
     "omarchy-battery-status": "consumer.item.bar = headlessBar; consumer.item.open()",
     "omarchy-system-stats": "consumer.item.bar = headlessBar; consumer.item.open()",
@@ -67,6 +67,9 @@ CONSUMER_TRIGGERS = {
     "omarchy-monitor-state": "consumer.item.refresh()",
     "omarchy-network-password": "consumer.item.togglePassword()",
     "omarchy-network-qr": "consumer.item.generate(\"wlan0\")",
+    "omarchy-network-status": "consumer.item.open()",
+    "omarchy-network-band": "consumer.item.open()",
+    "omarchy-dns": "consumer.item.open()",
     "omarchy-notification-send": "consumer.item.bar = headlessBar; var target = harness.findPressable(consumer.item); if (target) target.triggerPress(Qt.RightButton)",
     "omarchy-powerprofiles-list": "consumer.item.items = { probe: { provider: \"power-profiles\" } }; consumer.item.startProviderForMenu(\"probe\")",
     "omarchy-powerprofiles-set": "consumer.item.applySelected(\"probe\", consumer.item.providers[\"power-profiles\"].actionFor(\"balanced\"))",
@@ -324,6 +327,27 @@ def main() -> int:
                 "sha256": hashlib.sha256(menu_config).hexdigest(),
             })
 
+        helper_path = compatibility_bin / "bin" / helper
+        dispatcher_path = compatibility_bin / "bin" / "omanixy-compat-adapter"
+        if helper == "omarchy-shell":
+            if not helper_path.is_symlink() or not dispatcher_path.is_symlink():
+                fail(f"{helper} does not use the packaged compatibility dispatcher")
+            surface[helper] = {
+                "consumer": consumer,
+                "consumerSourceSha256": hashlib.sha256(source).hexdigest(),
+                "consumerSources": consumer_sources,
+                "helperTarget": str(helper_path.resolve()),
+                "helperTargetSha256": hashlib.sha256(helper_path.resolve().read_bytes()).hexdigest(),
+                "dispatcherTarget": str(dispatcher_path.resolve()),
+                "dispatcherTargetSha256": hashlib.sha256(dispatcher_path.resolve().read_bytes()).hexdigest(),
+                "consumerProbe": {
+                    "helper": helper,
+                    "invocation": "reference-only",
+                    "evidence": "test/ipc-wrapper.sh",
+                },
+            }
+            continue
+
         probe_name = f"omanixy-consumer-{helper}"
         probe_path = compatibility_bin / "bin" / probe_name
         harness_path = compatibility_bin / "bin" / f"{probe_name}.qml"
@@ -365,8 +389,15 @@ def main() -> int:
             "  hyprctl) case ${1:-} in monitors) printf '%s\\n' '[{\"name\":\"DP-1\",\"focused\":true,\"scale\":1,\"x\":0,\"y\":0,\"width\":1920,\"height\":1080}]' ;; getoption) printf '%s\\n' '{\"int\":0}' ;; esac ;;\n"
             "  brightnessctl) printf '%s\\n' 'Device brightness, 50%' ;;\n"
             "  curl) printf '%s\\n' 'Probe|0C|0km/h' ;;\n"
-            "  grim) case ${*##* } in -) : ;; *) : > \"${!#}\" ;; esac ;;\n"
+            "  grim) last=; for arg do last=$arg; done; if [ \"$last\" != - ]; then : > \"$last\"; fi ;;\n"
             "  slurp) printf '%s\\n' '0,0 100x100' ;;\n"
+            "  ip) if [ \"${1:-}\" = -j ] && [ \"${2:-}\" = route ]; then printf '%s\\n' '[{\"dev\":\"wlan0\",\"gateway\":\"192.0.2.254\",\"prefsrc\":\"192.0.2.1\"}]'; elif [ \"${1:-}\" = -j ] && [ \"${2:-}\" = addr ]; then printf '%s\\n' '[{\"addr_info\":[{\"family\":\"inet\",\"prefixlen\":24}]}]'; else printf '%s\\n' '1.1.1.1 via 192.0.2.254 dev wlan0 src 192.0.2.1'; fi ;;\n"
+            "  iw) printf '%s\\n' 'Connected to 00:11:22:33:44:55 (on wlan0)' 'SSID: probe-network' 'freq: 2412' 'signal: -40.00 dBm' 'tx bitrate: 54.0 MBit/s' ;;\n"
+            "  ping) printf '%s\\n' '64 bytes from 192.0.2.254: time=1.00 ms' ;;\n"
+            "  busctl) printf '%s\\n' 'b false' ;;\n"
+            "  date) printf '%s\\n' '2026-01-01_00-00-00' ;;\n"
+            "  pgrep) exit 1 ;;\n"
+            "  pkill) : ;;\n"
             "  notify-send|wl-copy|wtype|gtk-launch|update-desktop-database|xdg-open|gsettings|setsid|systemctl|rfkill|hyprpicker) : ;;\n"
             "  *) : ;;\n"
             "esac\n"
@@ -378,6 +409,7 @@ def main() -> int:
             "brightnessctl", "bluetoothctl", "curl", "grim", "gsettings", "gtk-launch", "hyprctl",
             "nmcli", "notify-send", "pactl", "powerprofilesctl", "pw-dump", "qrencode", "rfkill",
             "slurp", "systemctl", "update-desktop-database", "upower", "wl-copy", "wtype", "wpctl", "xdg-open", "hyprpicker",
+            "ip", "iw", "ping", "busctl", "date", "pgrep", "pkill",
         ):
             target = probe_bin / backend
             if not target.exists():
@@ -456,7 +488,6 @@ def main() -> int:
             "      function hideTooltip(item) {}\n"
             "      function run(command) {\n"
             "        var value = String(command || \"\")\n"
-            "        if (value.indexOf(\"omarchy-shell\") !== -1) Quickshell.execDetached([\"omarchy-shell\", \"shell\", \"ping\"])\n"
             "        if (value.indexOf(\"omarchy-weather-status\") !== -1) Quickshell.execDetached([\"sh\", \"-c\", \"command -v omarchy-weather-status >/dev/null && omarchy-weather-status\"])\n"
             "        if (value.indexOf(\"omarchy-notification-send\") !== -1) Quickshell.execDetached([\"omarchy-notification-send\", \"probe\"])\n"
             "      }\n"
@@ -511,8 +542,6 @@ def main() -> int:
             encoding="utf-8",
         )
         probe_path.chmod(stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
-        helper_path = compatibility_bin / "bin" / helper
-        dispatcher_path = compatibility_bin / "bin" / "omanixy-compat-adapter"
         if not helper_path.is_symlink() or not dispatcher_path.is_symlink():
             fail(f"{helper} does not use the packaged compatibility dispatcher")
         surface[helper] = {
