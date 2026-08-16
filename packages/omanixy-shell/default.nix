@@ -339,6 +339,18 @@ EOF
   compatibilityHelpers = lib.filter
     (helper: builtins.elem (helperFeatures.${helper} or "core") selectedFeatures)
     allCompatibilityHelpers;
+  helperConsumer = helper:
+    let feature = helperFeatures.${helper} or "core"; in
+    if feature == "audio" then "shell/plugins/panels/audio/Panel.qml"
+    else if feature == "bluetooth" then "shell/plugins/panels/bluetooth/Panel.qml"
+    else if feature == "clipboard" then "shell/plugins/clipboard/Clipboard.qml"
+    else if feature == "display" || feature == "monitor" then "shell/plugins/panels/monitor/Panel.qml"
+    else if feature == "launcher" then "shell/plugins/menu/Menu.qml"
+    else if feature == "network" then "shell/plugins/panels/network/Panel.qml"
+    else if feature == "notification" then "shell/services/AppLibrary.qml"
+    else if feature == "power" then "shell/plugins/panels/power/Panel.qml"
+    else if feature == "weather" then "shell/plugins/panels/weather/Panel.qml"
+    else "shell/services/AppLibrary.qml";
   adapterSources = [
     ./adapters/common.bash
     ./adapters/weather.bash
@@ -386,7 +398,7 @@ EOF
 ${builtins.toJSON (lib.mapAttrs
   (name: _: {
     wrapper = "bin/${name}";
-    consumers = [ "bin/${name}" ];
+    consumers = [ (helperConsumer name) ];
     probe = "runtime-matrix:${name}";
   }) (lib.getAttrs compatibilityHelpers contractSource.helpers))}
 EOF

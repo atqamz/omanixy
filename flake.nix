@@ -230,7 +230,7 @@
           '';
           stale-text = pkgs.runCommand "omanixy-stale-text"
             {
-              nativeBuildInputs = [ pkgs.bash pkgs.gnugrep pkgs.ripgrep (pkgs.python3.withPackages (ps: [ ps.pyyaml ])) ];
+              nativeBuildInputs = [ pkgs.bash pkgs.gnugrep pkgs.jq pkgs.ripgrep (pkgs.python3.withPackages (ps: [ ps.pyyaml ])) ];
             } ''
             ${pkgs.bash}/bin/bash ${./test/stale-text.sh} ${./.}
             touch "$out"

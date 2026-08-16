@@ -69,7 +69,8 @@ Loader {
     menu.rebuildDisplay()
     menu.selectedIndex = 0
     menu.cursorActive = true
-    if (!item.canRemove("org.example.Missing") || !item.canRemove("org.example.Symlink")
+    if (!item.canRemove("org.example.System") || !item.canRemove("org.example.Nix")
+        || !item.canRemove("org.example.Missing") || !item.canRemove("org.example.Symlink")
         || item.canRemove("../escape") || item.canRemove("../../escape")) {
       Qt.quit()
       return
@@ -116,9 +117,8 @@ Loader {
     repeat: true
     onTriggered: {
       attempts++
-      if (item && attempts === 10 && item.loadUserOwnedEntries)
-        item.loadUserOwnedEntries("org.example.User.desktop\\n")
-      if (menuLoader.item && item && (item.userOwnedEntryIds["org.example.User"] === true || attempts >= 10))
+      if (item && item.refreshUserOwnedEntries) item.refreshUserOwnedEntries()
+      if (menuLoader.item && item && item.userOwnedEntryIds["org.example.User"] === true)
         root.runScenario(menuLoader.item)
     }
   }
