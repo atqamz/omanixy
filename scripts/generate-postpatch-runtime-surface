@@ -17,17 +17,19 @@ def fail(message: str) -> None:
 
 
 def main() -> int:
-    if len(sys.argv) != 4:
-        print(f"usage: {sys.argv[0]} ROOT COMPATIBILITY_BIN MAPPING_JSON", file=sys.stderr)
+    if len(sys.argv) != 5:
+        print(f"usage: {sys.argv[0]} ROOT COMPATIBILITY_BIN QUICKSHELL MAPPING_JSON", file=sys.stderr)
         return 2
 
     root = Path(sys.argv[1])
     compatibility_bin = Path(sys.argv[2])
-    mapping = json.loads(sys.argv[3])
+    quickshell = Path(sys.argv[3])
+    mapping = json.loads(sys.argv[4])
     if not isinstance(mapping, dict):
         fail("consumer mapping is not an object")
 
     surface = {}
+    (compatibility_bin / "qs").symlink_to(root / "shell")
     for helper, declaration in sorted(mapping.items()):
         if not isinstance(declaration, dict):
             fail(f"{helper} has an invalid consumer declaration")
@@ -44,7 +46,7 @@ def main() -> int:
             if helper == "omarchy-shell":
                 candidates = [root / "shell/shell.qml"]
             else:
-                candidates = [path for path in candidates if helper.encode() in path.read_bytes()]
+                candidates = [path for path in candidates if path.suffix == ".qml" and helper.encode() in path.read_bytes()]
             if not candidates:
                 fail(f"{helper} has no file consumer under {consumer}")
             consumer_path = candidates[0]
@@ -57,13 +59,25 @@ def main() -> int:
 
         probe_name = f"omanixy-consumer-{helper}"
         probe_path = compatibility_bin / "bin" / probe_name
+        harness_path = compatibility_bin / "bin" / f"{probe_name}.qml"
+        harness_path.write_text(
+            "import QtQuick\n"
+            "import Quickshell\n"
+            "import Quickshell.Io\n"
+            "Item {\n"
+            f"  Loader {{ id: consumer; source: {json.dumps(str(consumer_path))}; onLoaded: if (item) {{ marker.running = true }} }}\n"
+            f"  Process {{ id: marker; command: [\"sh\", \"-c\", \"printf 'CONSUMER_REACHED\\\\t{helper}\\\\n'; exec \" + {json.dumps(str(compatibility_bin / 'bin' / helper))}]; onExited: Qt.quit() }}\n"
+            "}\n",
+            encoding="utf-8",
+        )
         probe_path.write_text(
             "#!/bin/sh\n"
             "set -eu\n"
             f"test -f {json.dumps(str(consumer_path))}\n"
             f"printf '%s\\t%s\\n' CONSUMER_PROBE {json.dumps(helper)}\n"
-            f"export COMPAT_ADAPTER_NAME={json.dumps(helper)}\n"
-            f"exec timeout 4s {json.dumps(str(compatibility_bin / 'bin' / helper))} \"$@\"\n",
+            f"export QML2_IMPORT_PATH={json.dumps(str(compatibility_bin))}\n"
+            f"export OMARCHY_PATH={json.dumps(str(root))}\n"
+            f"exec timeout 4s {json.dumps(str(quickshell))} -n -p {json.dumps(str(harness_path))} \"$@\"\n",
             encoding="utf-8",
         )
         probe_path.chmod(stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)

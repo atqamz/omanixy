@@ -165,6 +165,8 @@ def main() -> int:
             die(f"helper {helper} generated consumer probe did not dispatch")
         if not probe_result.stdout.startswith(f"CONSUMER_PROBE\t{helper}\n"):
             die(f"helper {helper} generated consumer probe did not identify its consumer")
+        if f"CONSUMER_REACHED\t{helper}\n" not in probe_result.stdout:
+            die(f"helper {helper} generated consumer probe did not execute its consumer")
         if contract.get("reachable") is True and helper != "omarchy-shell" and helper not in runtime_probes:
             die(f"helper {helper} has no executable post-patch consumer probe")
         if contract.get("reachable") is not True:

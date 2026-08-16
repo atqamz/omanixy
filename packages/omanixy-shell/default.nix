@@ -389,7 +389,7 @@ EOF
         ln -s ${compatAdapter}/bin/omanixy-compat-adapter "$out/bin/$helper"
       done
       ${pkgs.python3}/bin/python3 ${../../scripts/generate-postpatch-runtime-surface} \
-        ${omarchyCompatibilityRoot} "$out" ${lib.escapeShellArg (builtins.toJSON helperConsumers)}
+        ${omarchyCompatibilityRoot} "$out" ${quickshell}/bin/quickshell ${lib.escapeShellArg (builtins.toJSON helperConsumers)}
     '';
   };
 
