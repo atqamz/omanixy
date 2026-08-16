@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ -n ${OMANIXY_CONSUMER_MARKER:-} ]]; then
+  trap 'status=$?; : > "$OMANIXY_CONSUMER_MARKER"; exit "$status"' EXIT
+fi
+
 case "${COMPAT_ADAPTER_NAME:-${0##*/}}" in
   omarchy-shell) exec @IPC@ "$@" ;;
   omarchy-weather-location) weather_location "$@" ;;

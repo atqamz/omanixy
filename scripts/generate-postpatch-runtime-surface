@@ -338,6 +338,8 @@ def main() -> int:
         keyboard_panel.chmod(stat.S_IRUSR | stat.S_IWUSR)
         keyboard_panel.write_text(HEADLESS_KEYBOARD_PANEL, encoding="utf-8")
         for path in (root / "bin").iterdir():
+            if path.name in mapping:
+                continue
             target = probe_bin / path.name
             if not target.exists():
                 target.symlink_to(path)
@@ -347,16 +349,37 @@ def main() -> int:
             target = probe_bin / path.name
             if not target.exists():
                 target.symlink_to(path)
-        wrapper_path = probe_bin / helper
-        wrapper_path.unlink(missing_ok=True)
-        wrapper_path.write_text(
+        backend_path = probe_bin / "omanixy-probe-backend"
+        backend_path.write_text(
             "#!/bin/sh\n"
             "set -eu\n"
-            ": > \"${OMANIXY_CONSUMER_MARKER:?}\"\n"
-            "exit 0\n",
+            "case ${0##*/} in\n"
+            "  pw-dump) printf '%s\\n' '[{\"id\":1,\"type\":\"PipeWire:Interface:Node\",\"info\":{\"props\":{\"media.class\":\"Audio/Sink\",\"node.name\":\"probe-sink\"}}}]' ;;\n"
+            "  pactl) case ${1:-} in get-default-sink|get-default-source) printf '%s\\n' probe-sink ;; esac ;;\n"
+            "  wpctl) if [ \"${1:-}\" = inspect ]; then printf '%s\\n' 'node.name = \"probe-sink\"'; fi ;;\n"
+            "  nmcli) printf '%s\\n' 'probe:wlan0:yes:connected:192.0.2.1/24:192.0.2.254' ;;\n"
+            "  qrencode) printf '%s\\n' probe-qr ;;\n"
+            "  bluetoothctl) if [ \"${1:-}\" = list ]; then printf '%s\\n' 'Controller 00:11:22:33:44:55 probe'; elif [ \"${1:-}\" = show ]; then printf '%s\\n' 'Powered: yes'; fi ;;\n"
+            "  upower) if [ \"${1:-}\" = -e ]; then printf '%s\\n' /org/freedesktop/UPower/devices/DisplayDevice; else printf '%s\\n' '  state:           charging'; fi ;;\n"
+            "  powerprofilesctl) printf '%s\\n' '  balanced:' ;;\n"
+            "  hyprctl) case ${1:-} in monitors) printf '%s\\n' '[{\"name\":\"DP-1\",\"focused\":true,\"scale\":1,\"x\":0,\"y\":0,\"width\":1920,\"height\":1080}]' ;; esac ;;\n"
+            "  brightnessctl) printf '%s\\n' 'Device brightness, 50%' ;;\n"
+            "  curl) printf '%s\\n' 'Probe|0C|0km/h' ;;\n"
+            "  notify-send|wl-copy|wtype|grim|slurp|gtk-launch|update-desktop-database|xdg-open|gsettings|setsid|systemctl|rfkill) : ;;\n"
+            "  *) : ;;\n"
+            "esac\n"
+            ":\n",
             encoding="utf-8",
         )
-        wrapper_path.chmod(stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
+        backend_path.chmod(stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
+        for backend in (
+            "brightnessctl", "bluetoothctl", "curl", "grim", "gsettings", "gtk-launch", "hyprctl",
+            "nmcli", "notify-send", "pactl", "powerprofilesctl", "pw-dump", "qrencode", "rfkill",
+            "slurp", "systemctl", "update-desktop-database", "upower", "wl-copy", "wtype", "wpctl", "xdg-open",
+        ):
+            target = probe_bin / backend
+            if not target.exists():
+                target.symlink_to(backend_path)
         trigger = CONSUMER_TRIGGERS.get(helper)
         probe_consumer_path = consumer_path
         if trigger:
@@ -478,10 +501,18 @@ def main() -> int:
             encoding="utf-8",
         )
         probe_path.chmod(stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
+        helper_path = compatibility_bin / "bin" / helper
+        dispatcher_path = compatibility_bin / "bin" / "omanixy-compat-adapter"
+        if not helper_path.is_symlink() or not dispatcher_path.is_symlink():
+            fail(f"{helper} does not use the packaged compatibility dispatcher")
         surface[helper] = {
             "consumer": consumer,
             "consumerSourceSha256": hashlib.sha256(source).hexdigest(),
             "consumerSources": consumer_sources,
+            "helperTarget": str(helper_path.resolve()),
+            "helperTargetSha256": hashlib.sha256(helper_path.resolve().read_bytes()).hexdigest(),
+            "dispatcherTarget": str(dispatcher_path.resolve()),
+            "dispatcherTargetSha256": hashlib.sha256(dispatcher_path.resolve().read_bytes()).hexdigest(),
             "consumerProbe": {
                 "executable": f"bin/{probe_name}",
                 "helper": helper,

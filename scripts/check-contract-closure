@@ -132,6 +132,18 @@ def main() -> int:
         surface = runtime_surface.get(helper)
         if not isinstance(surface, dict):
             die(f"helper {helper} has no generated runtime surface entry")
+        helper_path = compatibility_bin / "bin" / helper
+        dispatcher_path = compatibility_bin / "bin" / "omanixy-compat-adapter"
+        if not helper_path.is_symlink() or not dispatcher_path.is_symlink():
+            die(f"helper {helper} does not use the packaged compatibility dispatcher")
+        if surface.get("helperTarget") != str(helper_path.resolve()):
+            die(f"helper {helper} packaged target identity drifted")
+        if surface.get("dispatcherTarget") != str(dispatcher_path.resolve()):
+            die(f"helper {helper} dispatcher identity drifted")
+        if surface.get("helperTargetSha256") != hashlib.sha256(helper_path.resolve().read_bytes()).hexdigest():
+            die(f"helper {helper} packaged target content drifted")
+        if surface.get("dispatcherTargetSha256") != hashlib.sha256(dispatcher_path.resolve().read_bytes()).hexdigest():
+            die(f"helper {helper} dispatcher content drifted")
         consumer = surface.get("consumer")
         consumer_probe = surface.get("consumerProbe")
         if not isinstance(consumer, str) or not consumer:
