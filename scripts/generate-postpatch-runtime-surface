@@ -48,7 +48,7 @@ Item {
 
 
 CONSUMER_TRIGGERS = {
-    "omarchy-shell": "if (consumer.item) { harness.markConsumer(); stop() }",
+    "omarchy-shell": "consumer.item.bar = headlessBar; consumer.item.bar.run(\"omarchy-shell shell ping\")",
     "omarchy-audio-input-set-default": "consumer.item.setDefaultSource({ id: 1, name: \"probe-source\" })",
     "omarchy-audio-output-set-default": "consumer.item.setDefaultSink({ id: 1, name: \"probe-sink\" })",
     "omarchy-audio-sink-availability": "consumer.item.open()",
@@ -354,18 +354,20 @@ def main() -> int:
             "#!/bin/sh\n"
             "set -eu\n"
             "case ${0##*/} in\n"
-            "  pw-dump) printf '%s\\n' '[{\"id\":1,\"type\":\"PipeWire:Interface:Node\",\"info\":{\"props\":{\"media.class\":\"Audio/Sink\",\"node.name\":\"probe-sink\"}}}]' ;;\n"
-            "  pactl) case ${1:-} in get-default-sink|get-default-source) printf '%s\\n' probe-sink ;; esac ;;\n"
+            "  pw-dump) printf '%s\\n' '[{\"id\":1,\"type\":\"PipeWire:Interface:Node\",\"info\":{\"props\":{\"media.class\":\"Audio/Sink\",\"node.name\":\"probe-sink\"}}},{\"id\":1,\"type\":\"PipeWire:Interface:Node\",\"info\":{\"props\":{\"media.class\":\"Audio/Source\",\"node.name\":\"probe-source\"}}}]' ;;\n"
+            "  pactl) case ${1:-} in get-default-sink) printf '%s\\n' probe-sink ;; get-default-source) printf '%s\\n' probe-source ;; esac ;;\n"
             "  wpctl) if [ \"${1:-}\" = inspect ]; then printf '%s\\n' 'node.name = \"probe-sink\"'; fi ;;\n"
             "  nmcli) printf '%s\\n' 'probe:wlan0:yes:connected:192.0.2.1/24:192.0.2.254' ;;\n"
             "  qrencode) printf '%s\\n' probe-qr ;;\n"
             "  bluetoothctl) if [ \"${1:-}\" = list ]; then printf '%s\\n' 'Controller 00:11:22:33:44:55 probe'; elif [ \"${1:-}\" = show ]; then printf '%s\\n' 'Powered: yes'; fi ;;\n"
             "  upower) if [ \"${1:-}\" = -e ]; then printf '%s\\n' /org/freedesktop/UPower/devices/DisplayDevice; else printf '%s\\n' '  state:           charging'; fi ;;\n"
             "  powerprofilesctl) printf '%s\\n' '  balanced:' ;;\n"
-            "  hyprctl) case ${1:-} in monitors) printf '%s\\n' '[{\"name\":\"DP-1\",\"focused\":true,\"scale\":1,\"x\":0,\"y\":0,\"width\":1920,\"height\":1080}]' ;; esac ;;\n"
+            "  hyprctl) case ${1:-} in monitors) printf '%s\\n' '[{\"name\":\"DP-1\",\"focused\":true,\"scale\":1,\"x\":0,\"y\":0,\"width\":1920,\"height\":1080}]' ;; getoption) printf '%s\\n' '{\"int\":0}' ;; esac ;;\n"
             "  brightnessctl) printf '%s\\n' 'Device brightness, 50%' ;;\n"
             "  curl) printf '%s\\n' 'Probe|0C|0km/h' ;;\n"
-            "  notify-send|wl-copy|wtype|grim|slurp|gtk-launch|update-desktop-database|xdg-open|gsettings|setsid|systemctl|rfkill) : ;;\n"
+            "  grim) case ${*##* } in -) : ;; *) : > \"${!#}\" ;; esac ;;\n"
+            "  slurp) printf '%s\\n' '0,0 100x100' ;;\n"
+            "  notify-send|wl-copy|wtype|gtk-launch|update-desktop-database|xdg-open|gsettings|setsid|systemctl|rfkill|hyprpicker) : ;;\n"
             "  *) : ;;\n"
             "esac\n"
             ":\n",
@@ -375,7 +377,7 @@ def main() -> int:
         for backend in (
             "brightnessctl", "bluetoothctl", "curl", "grim", "gsettings", "gtk-launch", "hyprctl",
             "nmcli", "notify-send", "pactl", "powerprofilesctl", "pw-dump", "qrencode", "rfkill",
-            "slurp", "systemctl", "update-desktop-database", "upower", "wl-copy", "wtype", "wpctl", "xdg-open",
+            "slurp", "systemctl", "update-desktop-database", "upower", "wl-copy", "wtype", "wpctl", "xdg-open", "hyprpicker",
         ):
             target = probe_bin / backend
             if not target.exists():
@@ -420,9 +422,10 @@ def main() -> int:
                 text = text.replace(assignment, "    void node")
             probe_consumer_path.write_text(text, encoding="utf-8")
         trigger_timer = (
-            f"    Timer {{ interval: 250; repeat: true; running: true; onTriggered: "
-            f"if (consumer.status === Loader.Ready) {{ {trigger}; "
-            f"Quickshell.execDetached([{json.dumps(helper)}]); stop() }} }}\n"
+            f"    Timer {{ interval: 500; repeat: true; running: true; onTriggered: "
+            f"if (consumer.status === Loader.Ready) {{ Qt.callLater(function() {{ "
+            f"if (consumer.item && typeof consumer.item.open === \"function\") consumer.item.open(); "
+            f"{trigger}; }}); if (++harness.triggerCount >= 10) stop() }} }}\n"
             if trigger
             else ""
         )
@@ -433,6 +436,7 @@ def main() -> int:
             "ShellRoot {\n"
             "  Item {\n"
             "    id: harness\n"
+            "    property int triggerCount: 0\n"
             "    function findPressable(item) {\n"
             "      if (item && typeof item.triggerPress === \"function\") return item\n"
             "      var children = item && item.children ? item.children : []\n"
@@ -441,9 +445,6 @@ def main() -> int:
             "        if (found) return found\n"
             "      }\n"
             "      return null\n"
-            "    }\n"
-            "    function markConsumer() {\n"
-            "      Quickshell.execDetached([\"sh\", \"-c\", \"printf omarchy-shell > \\\"$1.omarchy-shell\\\"\", \"marker\", Quickshell.env(\"OMANIXY_CONSUMER_MARKER\")])\n"
             "    }\n"
             "    QtObject {\n"
             "      id: headlessBar\n"
@@ -455,13 +456,14 @@ def main() -> int:
             "      function hideTooltip(item) {}\n"
             "      function run(command) {\n"
             "        var value = String(command || \"\")\n"
+            "        if (value.indexOf(\"omarchy-shell\") !== -1) Quickshell.execDetached([\"omarchy-shell\", \"shell\", \"ping\"])\n"
             "        if (value.indexOf(\"omarchy-weather-status\") !== -1) Quickshell.execDetached([\"sh\", \"-c\", \"command -v omarchy-weather-status >/dev/null && omarchy-weather-status\"])\n"
             "        if (value.indexOf(\"omarchy-notification-send\") !== -1) Quickshell.execDetached([\"omarchy-notification-send\", \"probe\"])\n"
             "      }\n"
             "    }\n"
             f"    Loader {{ id: consumer; source: {json.dumps(str(probe_consumer_path))} }}\n"
             + trigger_timer
-            + "    Timer { interval: 3000; running: true; onTriggered: Qt.quit() }\n"
+            + "    Timer { interval: 12000; running: true; onTriggered: Qt.quit() }\n"
             + "  }\n"
             + "}\n",
             encoding="utf-8",
@@ -487,21 +489,24 @@ def main() -> int:
             f"export OMANIXY_PROBE_BACKEND_PATH={json.dumps(str(probe_bin))}\n"
             "unset COMPAT_ADAPTER_NAME\n"
             "export XDG_RUNTIME_DIR=\"$runtime_dir\"\n"
+            "export XDG_CONFIG_HOME=\"$home_dir/.config\"\n"
+            "export XDG_STATE_HOME=\"$home_dir/.local/state\"\n"
+            "export XDG_DATA_HOME=\"$home_dir/.local/share\"\n"
             "export XDG_CACHE_HOME=\"$home_dir/.cache\"\n"
             "export HOME=\"$home_dir\"\n"
-            "if timeout 4s "
+            "if timeout 14s "
             f"{json.dumps(str(quickshell))} -n -p {json.dumps(str(harness_path))} \"$@\" >\"$log_path\" 2>&1; then\n"
             "  probe_status=0\n"
             "else\n"
             "  probe_status=$?\n"
             "fi\n"
-            f"if grep -Fxq {json.dumps(helper)} \"$marker_path.{helper}\" 2>/dev/null; then\n"
+            f"if test \"$probe_status\" -eq 0 && grep -Fxq {json.dumps(helper)} \"$marker_path.{helper}\" 2>/dev/null; then\n"
             f"  printf 'CONSUMER_REACHED\\t%s\\n' {json.dumps(helper)}\n"
             "else\n"
             f"  printf 'dispatcher marker identity: expected {helper}, got:' >&2\n"
             f"  cat \"$marker_path.{helper}\" >&2 2>/dev/null || :\n"
             "  cat \"$log_path\" >&2\n"
-            "  exit \"$probe_status\"\n"
+            "  if test \"$probe_status\" -eq 0; then exit 1; else exit \"$probe_status\"; fi\n"
             "fi\n",
             encoding="utf-8",
         )
@@ -522,7 +527,7 @@ def main() -> int:
                 "executable": f"bin/{probe_name}",
                 "helper": helper,
                 "invocation": "generated-post-patch-consumer",
-                "marker": "dispatcher-command-identity",
+                "marker": "dispatcher-command-identity-success-only-v1",
             },
         }
     (compatibility_bin / "runtime-surface.json").write_text(

@@ -157,7 +157,7 @@ def main() -> int:
         if (
             probe_helper != helper
             or consumer_probe.get("invocation") != "generated-post-patch-consumer"
-            or consumer_probe.get("marker") != "dispatcher-command-identity"
+            or consumer_probe.get("marker") != "dispatcher-command-identity-success-only-v1"
         ):
             die(f"helper {helper} has a disconnected generated consumer probe")
         probe_path = compatibility_bin / executable
@@ -196,7 +196,7 @@ def main() -> int:
             env=os.environ.copy(),
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=20,
         )
         if probe_result.returncode == 127:
             die(f"helper {helper} generated consumer probe did not dispatch")

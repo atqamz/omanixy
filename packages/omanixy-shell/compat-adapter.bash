@@ -9,11 +9,11 @@ fi
 compatibility_command=${COMPAT_ADAPTER_NAME:-${0##*/}}
 if [[ -n ${OMANIXY_CONSUMER_MARKER:-} ]]; then
   compatibility_marker="$OMANIXY_CONSUMER_MARKER.$compatibility_command"
-  trap 'status=$?; printf "%s\\n" "$compatibility_command" > "$compatibility_marker"; exit "$status"' EXIT
+  trap 'status=$?; if [[ $status == 0 ]]; then printf "%s\n" "$compatibility_command" > "$compatibility_marker"; fi; exit "$status"' EXIT
 fi
 
 case "$compatibility_command" in
-  omarchy-shell) exec @IPC@ "$@" ;;
+  omarchy-shell) @IPC@ "$@" ;;
   omarchy-weather-location) weather_location "$@" ;;
   omarchy-weather-status) weather_status "$@" ;;
   omarchy-notification-send) notification_send "$@" ;;
