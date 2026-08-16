@@ -488,7 +488,7 @@ def main() -> int:
             "      function hideTooltip(item) {}\n"
             "      function run(command) {\n"
             "        var value = String(command || \"\")\n"
-            "        if (value.indexOf(\"omarchy-weather-status\") !== -1) Quickshell.execDetached([\"sh\", \"-c\", \"command -v omarchy-weather-status >/dev/null && omarchy-weather-status\"])\n"
+            "        if (value.indexOf(\"omarchy-weather-status\") !== -1) Quickshell.execDetached([\"omarchy-weather-status\"])\n"
             "        if (value.indexOf(\"omarchy-notification-send\") !== -1) Quickshell.execDetached([\"omarchy-notification-send\", \"probe\"])\n"
             "      }\n"
             "    }\n"
