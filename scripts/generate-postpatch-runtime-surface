@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
+import shutil
 import stat
 import sys
 from pathlib import Path
@@ -14,6 +14,256 @@ from pathlib import Path
 def fail(message: str) -> None:
     print(f"post-patch runtime surface: {message}", file=sys.stderr)
     raise SystemExit(1)
+
+
+HEADLESS_KEYBOARD_PANEL = """import QtQuick
+
+Item {
+  id: root
+
+  property Item anchorItem: null
+  property var owner: null
+  property var bar: null
+  property int margin: 0
+  property int padding: 0
+  property int contentWidth: 0
+  property int contentHeight: 0
+  property bool centerOnBar: false
+  property bool open: false
+  property int gap: 0
+  property bool popoutSwitching: false
+  property bool popoutSwitchClosing: false
+  property Item focusTarget: null
+  default property alias contentItem: content.children
+
+  function fittedContentWidth(value) { return value }
+  function fittedContentHeight(value) { return value }
+
+  Item {
+    id: content
+    anchors.fill: parent
+  }
+}
+"""
+
+
+CONSUMER_TRIGGERS = {
+    "omarchy-shell": "if (consumer.item) { harness.markConsumer(); stop() }",
+    "omarchy-audio-input-set-default": "consumer.item.setDefaultSource({ id: 1, name: \"probe-source\" })",
+    "omarchy-audio-output-set-default": "consumer.item.setDefaultSink({ id: 1, name: \"probe-sink\" })",
+    "omarchy-audio-sink-availability": "consumer.item.open()",
+    "omarchy-battery-status": "consumer.item.bar = headlessBar; consumer.item.open()",
+    "omarchy-system-stats": "consumer.item.bar = headlessBar; consumer.item.open()",
+    "omarchy-bluetooth-device": "consumer.item.runDeviceAction({ address: \"00:11:22:33:44:55\" }, \"connect\", \"connecting\")",
+    "omarchy-bluetooth-power": "consumer.item.toggleBluetooth()",
+    "omarchy-brightness-display": "consumer.item.setBrightness(50)",
+    "omarchy-capture-screenshot": "consumer.item.runAction(\"omarchy-capture-screenshot\")",
+    "omarchy-clipboard-open": "consumer.item.openSelected({ historyIndex: 0 })",
+    "omarchy-clipboard-paste-file": "consumer.item.applySelected({ entryType: \"image\", mime: \"image/png\", path: \"/tmp/probe.png\", historyIndex: 0 })",
+    "omarchy-clipboard-paste-text": "consumer.item.applySelected({ entryType: \"text\", fullText: \"probe\", historyIndex: 0 })",
+    "omarchy-display-text-size": "consumer.item.setTextSize(12)",
+    "omarchy-hyprland-monitor-scaling": "consumer.item.setScale(1)",
+    "omarchy-menu-emoji-insert": "consumer.item.applySelected(\"😀\")",
+    "omarchy-monitor-state": "consumer.item.refresh()",
+    "omarchy-network-password": "consumer.item.togglePassword()",
+    "omarchy-network-qr": "consumer.item.generate(\"wlan0\")",
+    "omarchy-notification-send": "consumer.item.bar = headlessBar; var target = harness.findPressable(consumer.item); if (target) target.triggerPress(Qt.RightButton)",
+    "omarchy-powerprofiles-list": "consumer.item.items = { probe: { provider: \"power-profiles\" } }; consumer.item.startProviderForMenu(\"probe\")",
+    "omarchy-powerprofiles-set": "consumer.item.applySelected(\"probe\", consumer.item.providers[\"power-profiles\"].actionFor(\"balanced\"))",
+    "omarchy-remove-launcher-entry": "consumer.item.userOwnedEntryIds = { \"org.example.User\": true }; consumer.item.remove(\"org.example.User.desktop\", \"Probe\")",
+    "omarchy-weather-location": "consumer.item.bar = headlessBar; consumer.item.persistLocation(\"Probe\", 1, 2)",
+    "omarchy-weather-status": "consumer.item.bar = headlessBar; var target = harness.findPressable(consumer.item); if (target) target.triggerPress(Qt.RightButton)",
+}
+
+
+HEADLESS_SOURCE_PATCHES = {
+    "omarchy-shell": (
+        '''  Component {
+    id: defaultBarComponent
+
+    Bar {
+      omarchyPath: shell.omarchyPath
+      barWidgetRegistry: shell.barWidgetRegistry
+      barConfig: shell.barConfig
+      shell: shell
+      manifest: shell.barManifestFor(shell.defaultBarId)
+    }
+  }''',
+        '''  Component {
+    id: defaultBarComponent
+
+    Item {}
+  }''',
+    ),
+    "omarchy-battery-status": (
+        """  readonly property bool batteryPresent: {
+    var device = UPower.displayDevice
+    return !!(device && device.isPresent)
+  }""",
+        "  readonly property bool batteryPresent: true",
+    ),
+    "omarchy-system-stats": (
+        """  readonly property bool batteryPresent: {
+    var device = UPower.displayDevice
+    return !!(device && device.isPresent)
+  }""",
+        "  readonly property bool batteryPresent: true",
+    ),
+    "omarchy-bluetooth-power": (
+        "  readonly property var adapter: Bluetooth.defaultAdapter",
+        "  property var adapter: ({ enabled: true })",
+    ),
+    "omarchy-clipboard-open": (
+        '''  PanelWindow {
+    id: panel
+    visible: root.opened
+    anchors { top: true; bottom: true; left: true; right: true }
+    color: "transparent"
+    WlrLayershell.namespace: "omarchy-clipboard"
+    WlrLayershell.layer: WlrLayer.Overlay
+    WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
+    exclusionMode: ExclusionMode.Ignore''',
+        '''  Item {
+    id: panel
+    visible: root.opened
+    width: 1280
+    height: 720''',
+    ),
+    "omarchy-clipboard-paste-file": (
+        '''  PanelWindow {
+    id: panel
+    visible: root.opened
+    anchors { top: true; bottom: true; left: true; right: true }
+    color: "transparent"
+    WlrLayershell.namespace: "omarchy-clipboard"
+    WlrLayershell.layer: WlrLayer.Overlay
+    WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
+    exclusionMode: ExclusionMode.Ignore''',
+        '''  Item {
+    id: panel
+    visible: root.opened
+    width: 1280
+    height: 720''',
+    ),
+    "omarchy-clipboard-paste-text": (
+        '''  PanelWindow {
+    id: panel
+    visible: root.opened
+    anchors { top: true; bottom: true; left: true; right: true }
+    color: "transparent"
+    WlrLayershell.namespace: "omarchy-clipboard"
+    WlrLayershell.layer: WlrLayer.Overlay
+    WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
+    exclusionMode: ExclusionMode.Ignore''',
+        '''  Item {
+    id: panel
+    visible: root.opened
+    width: 1280
+    height: 720''',
+    ),
+    "omarchy-capture-screenshot": (
+        '''  PanelWindow {
+    id: panel
+    visible: root.opened && root.rowsLoaded
+    anchors { top: true; bottom: true; left: true; right: true }
+    color: "transparent"
+    WlrLayershell.namespace: "omarchy-menu"
+    WlrLayershell.layer: WlrLayer.Overlay
+    WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
+    exclusionMode: ExclusionMode.Ignore''',
+        '''  Item {
+    id: panel
+    visible: root.opened && root.rowsLoaded
+    width: 1280
+    height: 720''',
+    ),
+    "omarchy-menu-emoji-insert": (
+        '''  PanelWindow {
+    id: panel
+    visible: root.opened
+    anchors { top: true; bottom: true; left: true; right: true }
+    color: "transparent"
+    WlrLayershell.namespace: "omarchy-emojis"
+    WlrLayershell.layer: WlrLayer.Overlay
+    WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
+    exclusionMode: ExclusionMode.Ignore''',
+        '''  Item {
+    id: panel
+    visible: root.opened
+    width: 1280
+    height: 720''',
+    ),
+    "omarchy-network-password": (
+        '''  PanelWindow {
+    visible: root.opened
+    anchors { top: true; bottom: true; left: true; right: true }
+    color: "transparent"
+    exclusionMode: ExclusionMode.Ignore
+    WlrLayershell.namespace: "omarchy-network-qr"
+    WlrLayershell.layer: WlrLayer.Overlay
+    WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive''',
+        '''  Item {
+    id: panel
+    visible: root.opened
+    width: 1280
+    height: 720''',
+    ),
+    "omarchy-network-qr": (
+        '''  PanelWindow {
+    visible: root.opened
+    anchors { top: true; bottom: true; left: true; right: true }
+    color: "transparent"
+    exclusionMode: ExclusionMode.Ignore
+    WlrLayershell.namespace: "omarchy-network-qr"
+    WlrLayershell.layer: WlrLayer.Overlay
+    WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive''',
+        '''  Item {
+    id: panel
+    visible: root.opened
+    width: 1280
+        height: 720''',
+    ),
+    "omarchy-powerprofiles-list": (
+        '''  PanelWindow {
+    id: panel
+    visible: root.opened && root.rowsLoaded
+    anchors { top: true; bottom: true; left: true; right: true }
+    color: "transparent"
+    WlrLayershell.namespace: "omarchy-menu"
+    WlrLayershell.layer: WlrLayer.Overlay
+    WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
+    exclusionMode: ExclusionMode.Ignore''',
+        '''  Item {
+    id: panel
+    visible: root.opened && root.rowsLoaded
+    width: 1280
+    height: 720''',
+    ),
+    "omarchy-powerprofiles-set": (
+        '''  PanelWindow {
+    id: panel
+    visible: root.opened && root.rowsLoaded
+    anchors { top: true; bottom: true; left: true; right: true }
+    color: "transparent"
+    WlrLayershell.namespace: "omarchy-menu"
+    WlrLayershell.layer: WlrLayer.Overlay
+    WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
+    exclusionMode: ExclusionMode.Ignore''',
+        '''  Item {
+    id: panel
+    visible: root.opened && root.rowsLoaded
+    width: 1280
+    height: 720''',
+    ),
+}
+
+
+HEADLESS_TEXT_PATCHES = {
+    "omarchy-network-password": (
+        '  property string iface: ""',
+        '  property string iface: "wlan0"',
+    ),
+}
 
 
 def main() -> int:
@@ -47,6 +297,8 @@ def main() -> int:
                 candidates = [root / "shell/shell.qml"]
             else:
                 candidates = [path for path in candidates if path.suffix == ".qml" and helper.encode() in path.read_bytes()]
+            if helper == "omarchy-capture-screenshot" and not candidates:
+                candidates = [root / "shell/plugins/menu/Menu.qml"]
             if not candidates:
                 fail(f"{helper} has no file consumer under {consumer}")
             consumer_path = candidates[0]
@@ -54,20 +306,140 @@ def main() -> int:
         if not consumer_path.is_file():
             fail(f"{helper} consumer is missing: {consumer}")
         source = consumer_path.read_bytes()
-        if helper != "omarchy-shell" and helper.encode() not in source:
+        if helper not in {"omarchy-shell", "omarchy-capture-screenshot"} and helper.encode() not in source:
             fail(f"{helper} is not referenced by generated consumer {consumer}")
+        consumer_sources = [{
+            "path": consumer,
+            "sha256": hashlib.sha256(source).hexdigest(),
+        }]
+        if helper == "omarchy-capture-screenshot":
+            menu_config_path = root / "default/omarchy/omarchy-menu.jsonc"
+            if not menu_config_path.is_file():
+                fail("omarchy-capture-screenshot pinned menu action is missing")
+            menu_config = menu_config_path.read_bytes()
+            if helper.encode() not in menu_config:
+                fail("omarchy-capture-screenshot pinned menu action drifted")
+            consumer_sources.append({
+                "path": str(menu_config_path.relative_to(root)),
+                "sha256": hashlib.sha256(menu_config).hexdigest(),
+            })
 
         probe_name = f"omanixy-consumer-{helper}"
         probe_path = compatibility_bin / "bin" / probe_name
         harness_path = compatibility_bin / "bin" / f"{probe_name}.qml"
+        probe_root = compatibility_bin / "probes" / helper
+        probe_qs = probe_root / "qs"
+        probe_bin = probe_root / "bin"
+        probe_qs.mkdir(parents=True, exist_ok=True)
+        probe_bin.mkdir(parents=True, exist_ok=True)
+        for module in ("Commons", "Ui"):
+            shutil.copytree(root / "shell" / module, probe_qs / module)
+        keyboard_panel = probe_qs / "Ui" / "KeyboardPanel.qml"
+        keyboard_panel.chmod(stat.S_IRUSR | stat.S_IWUSR)
+        keyboard_panel.write_text(HEADLESS_KEYBOARD_PANEL, encoding="utf-8")
+        for path in (root / "bin").iterdir():
+            target = probe_bin / path.name
+            if not target.exists():
+                target.symlink_to(path)
+        for path in (compatibility_bin / "bin").iterdir():
+            if path.name not in mapping:
+                continue
+            target = probe_bin / path.name
+            if not target.exists():
+                target.symlink_to(path)
+        wrapper_path = probe_bin / helper
+        wrapper_path.unlink(missing_ok=True)
+        wrapper_path.write_text(
+            "#!/bin/sh\n"
+            "set -eu\n"
+            ": > \"${OMANIXY_CONSUMER_MARKER:?}\"\n"
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        wrapper_path.chmod(stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
+        trigger = CONSUMER_TRIGGERS.get(helper)
+        probe_consumer_path = consumer_path
+        if trigger:
+            probe_consumer_path = probe_root / "consumer" / consumer_path.name
+            probe_consumer_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(consumer_path.parent, probe_consumer_path.parent, dirs_exist_ok=True)
+            probe_consumer_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+            services_dir = probe_consumer_path.parent / "services"
+            if services_dir.is_dir():
+                services_dir.chmod(stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
+                (services_dir / "qmldir").write_text(
+                    "AppLibrary 1.0 AppLibrary.qml\n"
+                    "BarWidgetRegistry 1.0 BarWidgetRegistry.qml\n"
+                    "PluginRegistry 1.0 PluginRegistry.qml\n",
+                    encoding="utf-8",
+                )
+            text = probe_consumer_path.read_text(encoding="utf-8")
+            source_patch = HEADLESS_SOURCE_PATCHES.get(helper)
+            if source_patch is not None:
+                old, new = source_patch
+                if text.count(old) != 1:
+                    fail(f"{helper} headless probe source-shape drifted")
+                text = text.replace(old, new)
+            text_patch = HEADLESS_TEXT_PATCHES.get(helper)
+            if text_patch is not None:
+                old, new = text_patch
+                if text.count(old) != 1:
+                    fail(f"{helper} headless probe source-shape drifted")
+                text = text.replace(old, new)
+            assignments = {
+                "omarchy-audio-input-set-default": "    Pipewire.preferredDefaultAudioSource = node",
+                "omarchy-audio-output-set-default": "    Pipewire.preferredDefaultAudioSink = node",
+            }
+            assignment = assignments.get(helper)
+            if assignment is not None:
+                if text.count(assignment) != 1:
+                    fail(f"{helper} headless probe source-shape drifted")
+                text = text.replace(assignment, "    void node")
+            probe_consumer_path.write_text(text, encoding="utf-8")
+        trigger_timer = (
+            f"    Timer {{ interval: 250; repeat: true; running: true; onTriggered: "
+            f"if (consumer.status === Loader.Ready) {{ {trigger}; stop() }} }}\n"
+            if trigger
+            else ""
+        )
         harness_path.write_text(
             "import QtQuick\n"
             "import Quickshell\n"
             "import Quickshell.Io\n"
-            "Item {\n"
-            f"  Loader {{ id: consumer; source: {json.dumps(str(consumer_path))}; onLoaded: if (item) {{ marker.running = true }} }}\n"
-            f"  Process {{ id: marker; command: [\"sh\", \"-c\", \"printf 'CONSUMER_REACHED\\\\t{helper}\\\\n'; exec \" + {json.dumps(str(compatibility_bin / 'bin' / helper))}]; onExited: Qt.quit() }}\n"
-            "}\n",
+            "ShellRoot {\n"
+            "  Item {\n"
+            "    id: harness\n"
+            "    function findPressable(item) {\n"
+            "      if (item && typeof item.triggerPress === \"function\") return item\n"
+            "      var children = item && item.children ? item.children : []\n"
+            "      for (var i = 0; i < children.length; i++) {\n"
+            "        var found = findPressable(children[i])\n"
+            "        if (found) return found\n"
+            "      }\n"
+            "      return null\n"
+            "    }\n"
+            "    function markConsumer() {\n"
+            "      Quickshell.execDetached([\"sh\", \"-c\", \"printf x > \\\"$1\\\"\", \"marker\", Quickshell.env(\"OMANIXY_CONSUMER_MARKER\")])\n"
+            "    }\n"
+            "    QtObject {\n"
+            "      id: headlessBar\n"
+            "      property color barForeground: \"white\"\n"
+            "      property color foreground: \"white\"\n"
+            "      property string fontFamily: \"Sans\"\n"
+            "      property bool vertical: false\n"
+            "      property int barSize: 24\n"
+            "      function hideTooltip(item) {}\n"
+            "      function run(command) {\n"
+            "        var value = String(command || \"\")\n"
+            "        if (value.indexOf(\"omarchy-weather-status\") !== -1) Quickshell.execDetached([\"sh\", \"-c\", \"command -v omarchy-weather-status >/dev/null && omarchy-weather-status\"])\n"
+            "        if (value.indexOf(\"omarchy-notification-send\") !== -1) Quickshell.execDetached([\"omarchy-notification-send\", \"probe\"])\n"
+            "      }\n"
+            "    }\n"
+            f"    Loader {{ id: consumer; source: {json.dumps(str(probe_consumer_path))} }}\n"
+            + trigger_timer
+            + "    Timer { interval: 3000; running: true; onTriggered: Qt.quit() }\n"
+            + "  }\n"
+            + "}\n",
             encoding="utf-8",
         )
         probe_path.write_text(
@@ -75,15 +447,41 @@ def main() -> int:
             "set -eu\n"
             f"test -f {json.dumps(str(consumer_path))}\n"
             f"printf '%s\\t%s\\n' CONSUMER_PROBE {json.dumps(helper)}\n"
-            f"export QML2_IMPORT_PATH={json.dumps(str(compatibility_bin))}\n"
-            f"export OMARCHY_PATH={json.dumps(str(root))}\n"
-            f"exec timeout 4s {json.dumps(str(quickshell))} -n -p {json.dumps(str(harness_path))} \"$@\"\n",
+            f"export QML2_IMPORT_PATH={json.dumps(str(probe_root))}:{json.dumps(str(compatibility_bin))}\n"
+            f"export OMARCHY_PATH={json.dumps(str(probe_root))}\n"
+            f"export PATH={json.dumps(str(probe_bin))}:{json.dumps(str(compatibility_bin / 'bin'))}:$PATH\n"
+            "export QT_QPA_PLATFORM=offscreen\n"
+            f"marker_path=\"${{TMPDIR:-/tmp}}/omanixy-consumer-{helper}-$$\"\n"
+            f"log_path=\"${{TMPDIR:-/tmp}}/omanixy-consumer-{helper}-$$.log\"\n"
+            f"runtime_dir=\"${{TMPDIR:-/tmp}}/omanixy-runtime-{helper}-$$\"\n"
+            f"home_dir=\"${{TMPDIR:-/tmp}}/omanixy-home-{helper}-$$\"\n"
+            "mkdir -p \"$runtime_dir\" \"$home_dir/.cache\"\n"
+            "chmod 700 \"$runtime_dir\"\n"
+            "rm -f \"$marker_path\"\n"
+            "trap 'rm -f \"$marker_path\" \"$log_path\"; rm -rf \"$runtime_dir\" \"$home_dir\"' EXIT\n"
+            "export OMANIXY_CONSUMER_MARKER=\"$marker_path\"\n"
+            "export XDG_RUNTIME_DIR=\"$runtime_dir\"\n"
+            "export XDG_CACHE_HOME=\"$home_dir/.cache\"\n"
+            "export HOME=\"$home_dir\"\n"
+            "if timeout 4s "
+            f"{json.dumps(str(quickshell))} -n -p {json.dumps(str(harness_path))} \"$@\" >\"$log_path\" 2>&1; then\n"
+            "  probe_status=0\n"
+            "else\n"
+            "  probe_status=$?\n"
+            "fi\n"
+            "if test -f \"$marker_path\"; then\n"
+            f"  printf 'CONSUMER_REACHED\\t%s\\n' {json.dumps(helper)}\n"
+            "else\n"
+            "  cat \"$log_path\" >&2\n"
+            "  exit \"$probe_status\"\n"
+            "fi\n",
             encoding="utf-8",
         )
         probe_path.chmod(stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
         surface[helper] = {
             "consumer": consumer,
             "consumerSourceSha256": hashlib.sha256(source).hexdigest(),
+            "consumerSources": consumer_sources,
             "consumerProbe": {
                 "executable": f"bin/{probe_name}",
                 "helper": helper,

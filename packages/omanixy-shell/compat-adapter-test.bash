@@ -2,7 +2,7 @@
 # shellcheck disable=SC1091 # the test harness resolves all adapter modules at runtime.
 set -euo pipefail
 
-adapter_dir=${BASH_SOURCE[0]%/*}
+adapter_dir=${OMANIXY_ADAPTER_DIR:-${BASH_SOURCE[0]%/*}}
 source "$adapter_dir/adapters/common.bash"
 source "$adapter_dir/adapters/weather.bash"
 source "$adapter_dir/adapters/audio.bash"

@@ -611,7 +611,7 @@ items:
         - path: default/omarchy/omarchy-menu.jsonc
           role: no-argument screenshot action
           consumption: audited-reference
-    requirement: Capture the pinned no-argument smart selection screenshot over frozen Wayland content, copy it to the clipboard, and report cancellation without a false output path.
+    requirement: Capture the pinned no-argument smart selection screenshot over frozen Wayland content, copy it to the clipboard, and report cancellation without a false output path. The upstream --editor form is outside the supported Quattro shell-facing subset because no pinned baseline consumer reaches it.
     ownership:
       presentation: omarchy
       adapter: omanixy
@@ -632,8 +632,8 @@ items:
       - test/compat-adapters.sh
       - test/safe-menu-contract.sh
     notes:
-      - Smart selection, region, window, fullscreen, clipboard, save, and `--editor=<name>` forms are bounded adaptations; OCR, QR, and screen recording remain omitted.
-      - After a successful `slurp` capture, the adapter preserves the pinned best-effort clipboard copy and notification with an editor action.
+      - Smart selection, region, window, fullscreen, clipboard, and save forms are bounded adaptations; the direct `--editor=<name>` form is implemented and tested but is not reached by the pinned default menu. OCR, QR, and screen recording remain omitted.
+      - After a successful `slurp` capture, the adapter preserves the pinned best-effort clipboard copy and notification behavior; editor-action notification is covered only by the direct adapter test.
       - A capture succeeds when the file was saved even if the optional clipboard copy fails; the helper reports that diagnostic on stderr, matching the pinned helper's best-effort clipboard behavior.
 
   - id: clipboard

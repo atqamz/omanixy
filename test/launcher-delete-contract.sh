@@ -3,7 +3,6 @@ set -euo pipefail
 
 root=${1:?compatibility root path required}
 runtime=${2:?runtime package path required}
-repo=${3:?repository path required}
 
 test -n "$runtime"
 runtime_path=$(sed -n 's/^export PATH="\(.*\)"$/\1/p' "$runtime/bin/omanixy-shell-runtime")

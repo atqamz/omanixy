@@ -170,7 +170,7 @@ import "MenuDeleteSupport.js" as MenuDeleteSupport' \
       substituteInPlace "$registry_file" \
         --replace-fail '  property bool scanning: false' \
           '  property bool scanning: false
-  readonly property var omanixyBlockedPlugins = ${blockedPluginIds}' \
+  readonly property var omanixyBlockedPlugins: ${blockedPluginIds}' \
         --replace-fail '    if (manifest) {' \
           '    if (isDisabled(config, key) || omanixyBlockedPlugins.indexOf(Util.canonicalWidgetId(String(key))) !== -1) return false
     if (manifest) {'
@@ -214,25 +214,6 @@ function isProtected(security, openSecurity) {' \
       substituteInPlace "$out/shell/plugins/panels/clock/BarWidget.qml" \
         --replace-fail 'else if (b === Qt.MiddleButton) { if (root.bar) root.bar.run("omarchy-menu-timezone") }' \
           'else if (b === Qt.MiddleButton) root.togglePanel()'
-      substituteInPlace "$out/shell/plugins/bar/Bar.qml" \
-        --replace-fail 'function refreshTransparentForeground() {
-    if (!requestedTransparent || transparentForegroundProc.running) return
-
-    transparentForegroundProc.command = [
-      "omarchy-bar-text-color",
-      root.position,
-      String(root.barSize),
-      colorHex(root.themeForeground),
-      colorHex(root.themeContrastForeground)
-    ]
-    transparentForegroundProc.running = true
-  }' \
-          'function refreshTransparentForeground() {
-    if (!requestedTransparent) return
-    transparentForeground = themeForeground
-    useTransparentForeground = true
-    transparent = true
-  }'
       ${pkgs.python3}/bin/python3 ${../../scripts/patch-transparent-foreground-process} \
         "$out/shell/plugins/bar/Bar.qml"
       substituteInPlace "$out/shell/plugins/panels/network/Panel.qml" \
@@ -341,7 +322,12 @@ EOF
     allCompatibilityHelpers;
   helperConsumers = lib.mapAttrs
     (name: contract: {
-      consumer = builtins.head contract.postPatchConsumer;
+      consumer = lib.findFirst
+        (consumer: lib.hasSuffix "/" consumer || lib.hasSuffix ".qml" consumer)
+        (throw "no executable QML consumer for ${name}")
+        (if name == "omarchy-capture-screenshot"
+         then [ "shell/plugins/" ]
+         else contract.postPatchConsumer);
     })
     (lib.getAttrs compatibilityHelpers contractSource.helpers);
   adapterSources = [

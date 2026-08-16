@@ -24,7 +24,7 @@ policy:
         revision: 241313f4e8e508cb9b13278c2b0fa25b9ca27163
     validation:
       hermetic_checks: true
-      wayland_hyprland_smoke: true
+      wayland_hyprland_smoke: false
   validated_quattro_pair: true
 contract_audit:
   scanner: scripts/audit-quattro-contracts

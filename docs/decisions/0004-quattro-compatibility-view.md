@@ -68,8 +68,9 @@ not a replacement for an adapter that could provide the same contract.
 
 The network model and panel edits are one behavioral patch site family, so the
 inventory has seven sites while documenting every persistent file and symbol.
-Each source edit is applied with `substituteInPlace` against the exact pinned
-text and therefore fails the build if the pinned source shape changes.
+Each source edit uses an exact pinned-text substitution or a fail-closed
+structured transformer and therefore fails the build if the pinned source
+shape changes.
 
 ## Rationale
 

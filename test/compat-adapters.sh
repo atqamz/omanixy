@@ -16,6 +16,7 @@ export XDG_STATE_HOME="$home/.local/state"
 export XDG_CONFIG_HOME="$home/.config"
 export XDG_DATA_HOME="$home/.local/share"
 export PATH="$bin:$PATH"
+export OMANIXY_ADAPTER_DIR="$repo/packages/omanixy-shell"
 case_log="$test_root/cases"
 bash_dir=$(dirname "$(command -v bash)")
 env_bin=$(command -v env)
@@ -86,7 +87,7 @@ run_adapter() {
     TEST_PACTL_DSP="${TEST_PACTL_DSP:-}" \
     TEST_PACTL_LOG="${TEST_PACTL_LOG:-}" \
     COMPAT_ADAPTER_NAME="$command" \
-  "$bin/$command" "$@"
+  bash "$bin/$command" "$@"
 }
 
 link_adapter() { [[ -e "$bin/$1" ]] || ln -s "$adapter" "$bin/$1"; }
@@ -95,7 +96,7 @@ if [[ -n "$runtime_bin" ]]; then
   mkdir -p "$runtime_copy"
   for helper in $(jq -r '.helpers | keys[]' "$repo/upstream/compatibility-contracts.json"); do
     cp "$runtime_bin/$helper" "$runtime_copy/$helper"
-    sed -i 's|^export PATH=.*$|export PATH="${PATH}"|' "$runtime_copy/$helper"
+    sed -i "s|^export PATH=.*$|export PATH=\"\${PATH}\"|" "$runtime_copy/$helper"
     chmod +x "$runtime_copy/$helper"
     ln -s "$runtime_copy/$helper" "$bin/$helper"
   done

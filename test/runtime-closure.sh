@@ -62,7 +62,8 @@ jq -e '
 test ! -e "$runtime_source/config/hypr"
 diff -u \
   <(find "$runtime_source/bin" -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | sort) \
-  <(find "$compatibility_bin/bin" -mindepth 1 -maxdepth 1 -type l -printf '%f\n' | sort)
+  <(find "$compatibility_bin/bin" -mindepth 1 -maxdepth 1 -type l ! -name omanixy-compat-adapter -printf '%f\n' | sort)
+test -L "$compatibility_bin/bin/omanixy-compat-adapter"
 test -x "$runtime_source/bin/omarchy-menu-emoji-insert"
 test -x "$runtime_source/bin/omarchy-clipboard-open"
 test ! -e "$runtime_source/bin/omarchy-update"

@@ -8,8 +8,7 @@ custom_home=${4:?custom Home Manager test home required}
 store_home=${5:?store-link test home required}
 store_config=${6:?store-backed source config required}
 malformed_store_config=${7:?malformed store-backed source config required}
-baseline_source=${8:?canonical baseline source required}
-historical_baseline=${9:?historical issue #2 baseline required}
+historical_baseline=${8:?historical issue #2 baseline required}
 mkdir -p "$home"
 mkdir -p "$custom_home"
 mkdir -p "$store_home/.config/omarchy"
@@ -54,14 +53,14 @@ migration_home="${home}-migration"
 custom_migration_home="${home}-custom-migration"
 mkdir -p "$migration_home/.config/omarchy" "$custom_migration_home/.config/omarchy"
 trap 'rm -rf "$home" "$custom_home" "$store_home" "$migration_home" "$custom_migration_home" "${home}-broken-store-link" "$malformed_store_home"' EXIT
-jq -S . "$historical_baseline" > "$migration_home/.config/omarchy/shell.json"
+cp "$historical_baseline" "$migration_home/.config/omarchy/shell.json"
 run_activation_at "$migration_home" "$activation"
 jq -e '.version == 1 and .omanixyBaselineVersion == 2 and .bar.layout.right[-1].id == "omarchy.power"' \
   "$migration_home/.config/omarchy/shell.json" >/dev/null
 cp "$migration_home/.config/omarchy/shell.json" "$migration_home/after-first"
 run_activation_at "$migration_home" "$activation"
 cmp "$migration_home/after-first" "$migration_home/.config/omarchy/shell.json"
-jq 'del(.migrations, .featurePlugins, .featureDependencies, .omanixyBaselineVersion) | .version = 1 | .customized = true' "$baseline_source" > "$custom_migration_home/.config/omarchy/shell.json"
+jq '. + {customized: true}' "$historical_baseline" > "$custom_migration_home/.config/omarchy/shell.json"
 cp "$custom_migration_home/.config/omarchy/shell.json" "$custom_migration_home/before"
 run_activation_at "$custom_migration_home" "$activation"
 cmp "$custom_migration_home/before" "$custom_migration_home/.config/omarchy/shell.json"

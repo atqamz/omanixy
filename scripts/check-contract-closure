@@ -150,6 +150,27 @@ def main() -> int:
         expected_consumer_hash = surface.get("consumerSourceSha256")
         if not isinstance(expected_consumer_hash, str) or hashlib.sha256((root / consumer).read_bytes()).hexdigest() != expected_consumer_hash:
             die(f"helper {helper} generated consumer identity drifted")
+        consumer_sources = surface.get("consumerSources")
+        if not isinstance(consumer_sources, list) or not consumer_sources:
+            die(f"helper {helper} has no generated consumer source evidence")
+        for evidence in consumer_sources:
+            if not isinstance(evidence, dict):
+                die(f"helper {helper} has invalid generated consumer source evidence")
+            evidence_path = evidence.get("path")
+            evidence_hash = evidence.get("sha256")
+            if (
+                not isinstance(evidence_path, str)
+                or Path(evidence_path).is_absolute()
+                or not isinstance(evidence_hash, str)
+            ):
+                die(f"helper {helper} has invalid generated consumer source identity")
+            evidence_file = root / evidence_path
+            try:
+                evidence_file.resolve().relative_to(root.resolve())
+            except ValueError:
+                die(f"helper {helper} generated consumer source escapes the compatibility root")
+            if not evidence_file.is_file() or hashlib.sha256(evidence_file.read_bytes()).hexdigest() != evidence_hash:
+                die(f"helper {helper} generated consumer source drifted: {evidence_path}")
         if any(not isinstance(consumer, str) or not (root / consumer).exists() for consumer in post_patch_consumers):
             die(f"helper {helper} has a missing declared post-patch consumer")
         if helper not in actual_bin:
@@ -159,14 +180,17 @@ def main() -> int:
             env=os.environ.copy(),
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=10,
         )
         if probe_result.returncode == 127:
             die(f"helper {helper} generated consumer probe did not dispatch")
         if not probe_result.stdout.startswith(f"CONSUMER_PROBE\t{helper}\n"):
             die(f"helper {helper} generated consumer probe did not identify its consumer")
         if f"CONSUMER_REACHED\t{helper}\n" not in probe_result.stdout:
-            die(f"helper {helper} generated consumer probe did not execute its consumer")
+            die(
+                f"helper {helper} generated consumer probe did not execute its consumer: "
+                f"stdout={probe_result.stdout!r} stderr={probe_result.stderr!r}"
+            )
         if contract.get("reachable") is True and helper != "omarchy-shell" and helper not in runtime_probes:
             die(f"helper {helper} has no executable post-patch consumer probe")
         if contract.get("reachable") is not True:

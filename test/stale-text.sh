@@ -9,6 +9,7 @@ import yaml
 
 data = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
 assert data["policy"]["runtime_pair"]["status"] == "validated"
+assert data["policy"]["runtime_pair"]["validation"]["wayland_hyprland_smoke"] is False
 assert data["track"] == "quattro"
 PY
 jq -e '

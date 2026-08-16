@@ -362,8 +362,8 @@
         "valid": true,
         "missingBackend": true
       },
-      "pinnedBehavior": "Accepts mode, processing, and --editor=<name> in any position; slurp saves, copies, and best-effort notifies with the editor action.",
-      "intentionalDeviation": "Omanixy keeps the supported capture modes and editor notification but uses its bounded picker and cursor-freeze implementation."
+      "pinnedBehavior": "The pinned default menu reaches the no-argument smart-selection form; the upstream helper also accepts mode, processing, and --editor=<name> in any position, but those additional forms are not reached by the supported Quattro baseline.",
+      "intentionalDeviation": "Omanixy implements and directly tests the editor form, while the supported shell-facing contract remains the pinned no-argument action and uses a bounded picker and cursor-freeze implementation."
     },
     "omarchy-clipboard-open": {
       "feature": "clipboard",

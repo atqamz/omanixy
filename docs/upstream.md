@@ -83,9 +83,10 @@ assertion, and is kept smaller than the upstream feature it excludes.
 Unsupported first-party plugin directories are absent rather than merely
 advertised as disabled.
 The screenshot adapter preserves the pinned smart picker, including frozen
-selection geometry, monitor transforms, tiny-click snapping, the `--editor`
-argument form, and the best-effort clipboard and notification behavior after a
-successful capture.
+selection geometry, monitor transforms, tiny-click snapping, and the
+best-effort clipboard and notification behavior after a successful capture.
+The direct `--editor` form is implemented and tested, but no pinned default
+Quattro consumer reaches it, so it is not claimed as shell-facing support.
 The root also supplies Omanixy's safe fallback shell configuration, audited
 menu, launcher-hides file, and helper surface.
 Runtime-writable configuration and state must be materialized outside the

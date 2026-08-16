@@ -89,6 +89,16 @@ Broad QML reimplementation or a continuously maintained presentation fork is
 not a compatibility adapter.
 Upstream presentation remains upstream-owned.
 
+The current adapters remain Bash where their boundary is process invocation,
+argv/stdout/stderr handling, bounded command timeouts, and small filesystem
+transactions with explicit rollback.
+Shared timeout and failure helpers keep those paths explicit, and focused
+failure tests cover the stateful audio, network, display, power, clipboard,
+and launcher mutations.
+QML and JavaScript remain the structured layer for presentation state and
+consumer parsing; no domain was split into a second language without a
+specific parsing or state-management benefit.
+
 ## Ownership and reuse
 
 NixOS owns host capabilities and privileged system configuration.

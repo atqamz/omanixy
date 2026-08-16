@@ -15,7 +15,61 @@ cp "$pinned_source/shell/plugins/bar/Bar.qml" "$bar_fixture"
 chmod u+w "$bar_fixture"
 "$python" "$patcher" "$bar_fixture"
 sed -i 's/required property /property /g' "$bar_fixture"
-sed -i -e 's/PanelWindow {/Item {/g' -e '/WlrLayershell\./d' -e '/exclusionMode:/d' -e '/layer:/d' -e '/keyboardFocus:/d' -e '/surfaceFormat:/d' "$bar_fixture"
+test "$(grep -c '^  Process {' "$pinned_source/shell/plugins/bar/Bar.qml")" -ge 2
+test "$(grep -c '^  Process {' "$bar_fixture")" -eq 1
+if grep -Fq 'id: transparentForegroundProc' "$bar_fixture"; then
+  printf '%s\n' 'transparent foreground process survived the exact source patch' >&2
+  exit 1
+fi
+if grep -Fq 'omarchy-bar-text-color' "$bar_fixture"; then
+  printf '%s\n' 'transparent foreground helper survived the exact source patch' >&2
+  exit 1
+fi
+grep -Fq 'id: barHiddenProbe' "$bar_fixture"
+grep -Fq "\$HOME/.local/state/omarchy/toggles/bar-off" "$bar_fixture"
+"$python" - "$bar_fixture" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+replacements = {
+    "component BarPanel: PanelWindow {": "component BarPanel: Item {",
+    "component DragGhostPanel: PanelWindow {": "component DragGhostPanel: Item {",
+    "component BarMoveGhostPanel: PanelWindow {": "component BarMoveGhostPanel: Item {",
+    "    visible: !remapGuard.remapping": "    visible: true",
+    "    ScreenMoveRemap {\n      id: remapGuard\n      window: barWindow\n    }\n\n": "",
+    "    margins {\n      top: root.barHidden && root.position === \"top\" ? -root.barSize : 0\n      bottom: root.barHidden && root.position === \"bottom\" ? -root.barSize : 0\n      left: root.barHidden && root.position === \"left\" ? -root.barSize : 0\n      right: root.barHidden && root.position === \"right\" ? -root.barSize : 0\n    }\n\n": "",
+    "    surfaceFormat.opaque: false\n": "",
+    "    mask: Region {}\n": "",
+    "    anchors {\n      top: root.position === \"top\" || root.vertical\n      bottom: root.position === \"bottom\" || root.vertical\n      left: root.position === \"left\" || !root.vertical\n      right: root.position === \"right\" || !root.vertical\n    }\n\n": "",
+    "    anchors {\n      top: true\n      bottom: true\n      left: true\n      right: true\n    }\n\n": "",
+}
+for old, new in replacements.items():
+    count = text.count(old)
+    expected = 2 if old.startswith("    anchors {\n      top: true") else 1
+    if count != expected and old != "    mask: Region {}\n":
+        raise SystemExit(f"expected one headless fixture source shape for {old!r}, found {count}")
+    if old == "    mask: Region {}\n" and count != 2:
+        raise SystemExit(f"expected two headless fixture masks, found {count}")
+    text = text.replace(old, new)
+for prefix in ("    screen: modelData\n", "        screen: modelData\n", "        ghostScreen: modelData\n"):
+    text = text.replace(prefix, "")
+for line in (
+    "    color: root.transparent ? \"transparent\" : root.background\n",
+    "    color: \"transparent\"\n",
+    "    exclusionMode: root.barHidden ? ExclusionMode.Ignore : ExclusionMode.Auto\n",
+    "    exclusionMode: ExclusionMode.Ignore\n",
+    "    WlrLayershell.namespace: \"omarchy-bar\"\n",
+    "    WlrLayershell.namespace: \"omarchy-bar-drag-ghost\"\n",
+    "    WlrLayershell.namespace: \"omarchy-bar-move-ghost\"\n",
+    "    WlrLayershell.layer: WlrLayer.Top\n",
+    "    WlrLayershell.layer: WlrLayer.Overlay\n",
+    "    WlrLayershell.keyboardFocus: WlrKeyboardFocus.None\n",
+):
+    text = text.replace(line, "")
+path.write_text(text)
+PY
 cat > "$test_root/shell.qml" <<EOF
 import QtQuick
 import Quickshell
@@ -43,8 +97,6 @@ cp -R "$root/shell/Commons" "$test_root/Commons"
 cp -R "$root/shell/Ui" "$test_root/Ui"
 cp "$root/shell/plugins/bar/BarModel.js" "$test_root/BarModel.js"
 chmod -R u+w "$test_root/Commons" "$test_root/Ui" "$test_root/BarModel.js"
-find "$test_root/Ui" -type f -name '*.qml' -exec sed -i '/surfaceFormat:/d' {} +
-sed -i '/surfaceFormat:/d' "$bar_fixture"
 HOME="$test_root/home" XDG_RUNTIME_DIR="$test_root/runtime" QML2_IMPORT_PATH="$test_root" QT_QPA_PLATFORM=offscreen timeout 10s "$quickshell" -n -p "$test_root" >"$test_root/quickshell.log" 2>&1 || true
 if ! grep -Fq 'QML_PATCH_PASS' "$test_root/quickshell.log"; then
   cat "$test_root/quickshell.log" >&2
@@ -55,10 +107,11 @@ drift_fixture="$test_root/Bar-drift.qml"
 cp "$pinned_source/shell/plugins/bar/Bar.qml" "$drift_fixture"
 chmod u+w "$drift_fixture"
 sed -i '0,/id: transparentForegroundProc/s//id: transparentForegroundProcDrift/' "$drift_fixture"
-if "$python" "$patcher" "$drift_fixture"; then
+if "$python" "$patcher" "$drift_fixture" 2>"$test_root/drift-error"; then
   printf '%s\n' 'exact Bar.qml patch accepted source-shape drift' >&2
   exit 1
 fi
+grep -Fq 'expected exactly one transparent foreground Process block' "$test_root/drift-error"
 
 node - "$root" <<'NODE'
 const assert = require("node:assert/strict")
