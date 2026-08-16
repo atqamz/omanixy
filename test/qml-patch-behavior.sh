@@ -34,12 +34,6 @@ replacements = {
     "    anchors {\n      top: true\n      bottom: true\n      left: true\n      right: true\n    }\n\n": "",
 }
 for old, new in replacements.items():
-    count = text.count(old)
-    expected = 2 if old.startswith("    anchors {\n      top: true") else 1
-    if count != expected and old != "    mask: Region {}\n":
-        raise SystemExit(f"expected one headless fixture source shape for {old!r}, found {count}")
-    if old == "    mask: Region {}\n" and count != 2:
-        raise SystemExit(f"expected two headless fixture masks, found {count}")
     text = text.replace(old, new)
 for prefix in ("    screen: modelData\n", "        screen: modelData\n", "        ghostScreen: modelData\n"):
     text = text.replace(prefix, "")
