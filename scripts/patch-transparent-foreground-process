@@ -1,0 +1,42 @@
+#!/usr/bin/env python3
+"""Remove the one pinned Bar.qml Process that invokes the unsupported helper."""
+
+from pathlib import Path
+import sys
+
+
+EXPECTED = '''  Process {
+    id: transparentForegroundProc
+    stdout: SplitParser {
+      onRead: function(line) {
+        var value = String(line || "").trim()
+        if (!/^#[0-9A-Fa-f]{6}$/.test(value)) return
+
+        root.foregroundAnimationEnabled = false
+        root.transparentForeground = value
+        if (root.requestedTransparent) {
+          root.useTransparentForeground = true
+          root.transparent = true
+        }
+        root.restoreForegroundAnimation()
+      }
+    }
+  }
+'''
+
+
+def main() -> int:
+    if len(sys.argv) != 2:
+        print(f"usage: {sys.argv[0]} BAR_QML", file=sys.stderr)
+        return 2
+    path = Path(sys.argv[1])
+    text = path.read_text()
+    count = text.count(EXPECTED)
+    if count != 1:
+        raise SystemExit(f"expected exactly one transparent foreground Process block, found {count}")
+    path.write_text(text.replace(EXPECTED, "", 1))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

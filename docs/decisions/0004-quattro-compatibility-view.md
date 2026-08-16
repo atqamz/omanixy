@@ -30,7 +30,7 @@ The compatibility view carries seven documented persistent source patch sites:
 the registry safety floor for bar widgets, enterprise Wi-Fi filtering through
 the network panel's model, removal of the Custom DNS provider/action/pill,
 hiding the unsupported speed-test action, clock middle-click routing, the
-native bar transparency fallback, and an inert launcher-delete action.
+native bar transparency fallback, and a selective user-owned launcher-delete action.
 Each patch is pinned to a source path and covered by a focused closure or
 behavioral check because native Quickshell APIs and a helper adapter cannot
 remove an unreachable presentation affordance.
@@ -64,7 +64,7 @@ not a replacement for an adapter that could provide the same contract.
 | `shell/plugins/panels/network/Panel.qml`, `canRunSpeedTest` and speed header/action properties | Hides the speed-test action. | The benchmark helper cannot provide honest generic measurements without its Omarchy-specific endpoint and transfer stack. | Omanixy omits the feature; `test/qml-patch-behavior.sh` and `test/runtime-closure.sh` prove the action is disabled and its panel is absent. |
 | `shell/plugins/panels/clock/BarWidget.qml`, middle-button handler | Opens the supported clock panel instead of invoking `omarchy-menu-timezone`. | The timezone command is outside the generic boundary and the panel route is a presentation event, not an external helper contract. | Omanixy owns the portability patch; `test/qml-patch-behavior.sh` proves the route and absence of the old command. |
 | `shell/plugins/bar/Bar.qml`, `refreshTransparentForeground()` and its helper `Process` | Uses the native Quickshell theme foreground for transparent bars and removes the unavailable helper process. | A helper could not reproduce the bar's live theme binding without retaining a downstream presentation process, while the pinned Quickshell property already supplies the required value. | Omarchy remains presentation owner and Quickshell remains runtime owner; `test/qml-patch-behavior.sh` and the runtime-root inspection prove the native path is present and the helper process is absent. |
-| `shell/plugins/menu/Menu.qml`, Delete-key handler | Consumes Delete without invoking system-wide application removal. | Omanixy can safely remove only a user-owned desktop entry, while AppLibrary displays system and Nix-managed entries too. | Omanixy owns the false-affordance guard and the adapter retains a separately tested user-entry contract; `test/qml-patch-behavior.sh` and `test/compat-adapters.sh` cover both sides. |
+| `shell/plugins/menu/Menu.qml`, Delete-key handler | Routes Delete through `AppLibrary.canRemove()` and does not invoke removal for system, Nix-store, missing, malformed, symlink, or traversal entries. | Omanixy can safely remove only a user-owned desktop entry, while AppLibrary displays system and Nix-managed entries too. | Omanixy owns the removability guard and the adapter retains a separately tested user-entry contract; `test/qml-patch-behavior.sh`, `test/launcher-delete-contract.sh`, and `test/compat-adapters.sh` cover both sides. |
 
 The network model and panel edits are one behavioral patch site family, so the
 inventory has seven sites while documenting every persistent file and symbol.
@@ -73,8 +73,8 @@ text and therefore fails the build if the pinned source shape changes.
 
 ## Rationale
 
-This preserves upstream Quattro presentation while satisfying the exact
-absolute-helper ABI that supported consumers use.
+This preserves upstream Quattro presentation while satisfying the declared
+absolute-helper contracts that supported consumers use.
 The immutable view is deterministic and reviewable, and it prevents an
 accidental passthrough of the large upstream `bin/` tree.
 The menu rule prevents visible controls from silently invoking unsupported
@@ -90,3 +90,14 @@ Omarchy behavior.
   owned by NixOS or the session.
 - A future upstream portability improvement can remove the compatibility view
   or reduce it without changing Quattro presentation ownership.
+
+## Contract evidence
+
+The compatibility manifest records pinned consumer evidence, post-patch
+reachability, implementation identity, observable fields, and focused test
+cases separately.
+`exact` describes an unchanged observable contract.
+`adapted` records a deliberate narrowing or hardening and names the changed
+failure or side-effect behavior.
+Static source scanning is discovery evidence only; it does not establish
+semantic compatibility by itself.

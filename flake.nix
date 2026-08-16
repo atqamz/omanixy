@@ -63,9 +63,14 @@
           runtime = runtimeFor system null;
           clipboardRuntime = runtimeFor system [ "clipboard" ];
           bluetoothRuntime = runtimeFor system [ "bluetooth" ];
+          weatherRuntime = runtimeFor system [ "weather" ];
+          audioRuntime = runtimeFor system [ "audio" ];
+          launcherRuntime = runtimeFor system [ "launcher" ];
+          screenshotRuntime = runtimeFor system [ "screenshot" ];
+          coreRuntime = runtimeFor system [ "core" ];
           runtimeClosureInfo = pkgs.closureInfo { rootPaths = [ runtime ]; };
           compatibilityRoot = runtime.passthru.omarchyCompatibilityRoot;
-          storeConfig = "${runtime.passthru.omarchySource}/config/omarchy/shell.json";
+          storeConfig = pkgs.writeText "omanixy-historical-shell-config" (builtins.readFile ./upstream/shell-baseline-v1.json);
           malformedStoreConfig = pkgs.writeText "omanixy-malformed-store-shell-config" ''{"disabledPlugins":'';
           homeConfiguration = homeConfigurationFor system { };
           customHomeConfiguration = homeConfigurationFor system {
@@ -184,6 +189,15 @@
             jq -e '.disabledPlugins | index("omarchy.network") != null and index("omarchy.audio") != null' ${clipboardRuntime.passthru.safeShellConfig} >/dev/null
             touch "$out"
           '';
+          feature-closure = pkgs.runCommand "omanixy-feature-closure"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.gnused pkgs.jq ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/feature-closure.sh} \
+              ${weatherRuntime} ${bluetoothRuntime} ${audioRuntime} ${launcherRuntime} \
+              ${screenshotRuntime} ${coreRuntime}
+            touch "$out"
+          '';
           config-ownership = pkgs.runCommand "omanixy-config-ownership"
             {
               activation = activationScript;
@@ -191,7 +205,7 @@
               malformedStoreConfig = malformedStoreConfig;
               nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.diffutils pkgs.jq ];
             } ''
-            ${pkgs.bash}/bin/bash ${./test/config-ownership.sh} "$activation" "$customActivation" /build/omanixy-test /build/omanixy-custom-test /build/omanixy-store-link-test ${storeConfig} "$malformedStoreConfig" ${./upstream/shell-baseline.json}
+            ${pkgs.bash}/bin/bash ${./test/config-ownership.sh} "$activation" "$customActivation" /build/omanixy-test /build/omanixy-custom-test /build/omanixy-store-link-test ${storeConfig} "$malformedStoreConfig" ${./upstream/shell-baseline.json} ${./upstream/shell-baseline-v1.json}
             touch "$out"
           '';
           service-unit = pkgs.runCommand "omanixy-service-unit"
@@ -278,7 +292,21 @@
               nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gawk pkgs.gnugrep pkgs.gnused pkgs.jq pkgs.procps pkgs.util-linux ];
             } ''
             bash -n ${./packages/omanixy-shell/compat-adapter.bash}
-            ${pkgs.bash}/bin/bash ${./test/compat-adapters.sh} ${./.}
+            ${pkgs.bash}/bin/bash ${./test/compat-adapters.sh} ${./.} ${compatibilityRoot}
+            touch "$out"
+          '';
+          compatibility-test-matrix = pkgs.runCommand "omanixy-compatibility-test-matrix"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gawk pkgs.gnugrep pkgs.gnused pkgs.jq pkgs.procps pkgs.util-linux ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/compatibility-test-matrix.sh} ${./.} ${compatibilityRoot} ${./upstream/compatibility-test-matrix.json}
+            touch "$out"
+          '';
+          deviation-contracts = pkgs.runCommand "omanixy-deviation-contracts"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.gnugrep ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/deviation-contracts.sh} ${runtime.passthru.omarchySource} ${./.}
             touch "$out"
           '';
           safe-menu-contract = pkgs.runCommand "omanixy-safe-menu-contract"
@@ -290,9 +318,23 @@
           '';
           qml-patch-behavior = pkgs.runCommand "omanixy-qml-patch-behavior"
             {
-              nativeBuildInputs = [ pkgs.bash pkgs.nodejs ];
+              nativeBuildInputs = [ pkgs.bash pkgs.nodejs pkgs.python3 pkgs.coreutils pkgs.gnugrep pkgs.gnused ];
             } ''
-            ${pkgs.bash}/bin/bash ${./test/qml-patch-behavior.sh} ${compatibilityRoot}
+            PYTHON=${pkgs.python3}/bin/python3 ${pkgs.bash}/bin/bash ${./test/qml-patch-behavior.sh} ${compatibilityRoot} ${runtime.passthru.omarchySource} ${./scripts/patch-transparent-foreground-process}
+            touch "$out"
+          '';
+          launcher-delete-contract = pkgs.runCommand "omanixy-launcher-delete-contract"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.nodejs pkgs.gnugrep ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/launcher-delete-contract.sh} ${compatibilityRoot} ${runtime}
+            touch "$out"
+          '';
+          uwsm-integration = pkgs.runCommand "omanixy-uwsm-integration"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.gnused ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/uwsm-integration.sh} ${runtime} ${compatibilityRoot}
             touch "$out"
           '';
         });

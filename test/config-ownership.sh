@@ -9,6 +9,7 @@ store_home=${5:?store-link test home required}
 store_config=${6:?store-backed source config required}
 malformed_store_config=${7:?malformed store-backed source config required}
 baseline_source=${8:?canonical baseline source required}
+historical_baseline=${9:?historical issue #2 baseline required}
 mkdir -p "$home"
 mkdir -p "$custom_home"
 mkdir -p "$store_home/.config/omarchy"
@@ -53,7 +54,7 @@ migration_home="${home}-migration"
 custom_migration_home="${home}-custom-migration"
 mkdir -p "$migration_home/.config/omarchy" "$custom_migration_home/.config/omarchy"
 trap 'rm -rf "$home" "$custom_home" "$store_home" "$migration_home" "$custom_migration_home" "${home}-broken-store-link" "$malformed_store_home"' EXIT
-jq 'del(.migrations, .featurePlugins, .featureDependencies, .omanixyBaselineVersion) | .version = 1' "$baseline_source" > "$migration_home/.config/omarchy/shell.json"
+jq -S . "$historical_baseline" > "$migration_home/.config/omarchy/shell.json"
 run_activation_at "$migration_home" "$activation"
 jq -e '.version == 1 and .omanixyBaselineVersion == 2 and .bar.layout.right[-1].id == "omarchy.power"' \
   "$migration_home/.config/omarchy/shell.json" >/dev/null
@@ -64,6 +65,13 @@ jq 'del(.migrations, .featurePlugins, .featureDependencies, .omanixyBaselineVers
 cp "$custom_migration_home/.config/omarchy/shell.json" "$custom_migration_home/before"
 run_activation_at "$custom_migration_home" "$activation"
 cmp "$custom_migration_home/before" "$custom_migration_home/.config/omarchy/shell.json"
+
+formatted_migration_home="${home}-formatted-migration"
+mkdir -p "$formatted_migration_home/.config/omarchy"
+jq -S . "$historical_baseline" | sed '1s/{/{\n/' > "$formatted_migration_home/.config/omarchy/shell.json"
+run_activation_at "$formatted_migration_home" "$activation"
+jq -e '.omanixyBaselineVersion == 2 and .bar.layout.center[1].id == "omarchy.weather"' \
+  "$formatted_migration_home/.config/omarchy/shell.json" >/dev/null
 
 printf '%s\n' '{"userOwned":true}' > "$config_file"
 run_activation
@@ -157,9 +165,9 @@ for plugin in \
 done
 jq -e '
   .version == 1
-  and .idle.screensaver == 150
+  and .omanixyBaselineVersion == 2
   and .bar.layout.left[0].id == "omarchy.menu"
-  and .plugins == []
+  and .bar.layout.center[1].id == "omarchy.weather"
 ' "$store_file" >/dev/null
 printf '%s\n' '{"storeLinkMaterialized":true}' > "$store_file"
 HOME="$store_home" USER=omanixy-test XDG_RUNTIME_DIR="$store_home/runtime" \

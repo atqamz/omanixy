@@ -27,8 +27,9 @@ The pair was checked against the Quattro imports and APIs used during startup,
 including `ShellRoot`, `IpcHandler`, process and file APIs, Wayland
 layer-shell, Hyprland, plugin loading, PipeWire and networking imports, and
 WlSessionLock type loading.
-The hermetic checks and a real Wayland/Hyprland smoke test passed for this
-pair.
+This branch claims the hermetic checks and source/runtime closure only.
+A live Wayland, Hyprland, and UWSM smoke result must be reported separately
+for the exact built runtime.
 An upstream upgrade must select and validate a new pair intentionally rather
 than following a branch tip through an unrelated flake update.
 
@@ -103,8 +104,8 @@ bar widgets, and reachable panels and overlays.
 It applies seven narrow patch sites: the disabled-plugin floor on bar widgets,
 enterprise Wi-Fi filtering through the network panel's model, removal of the
 Custom DNS provider/action/pill, hiding the unsupported speed-test action,
-clock middle-click routing, the native bar transparency fallback, and an inert
-launcher-delete action.
+clock middle-click routing, the native bar transparency fallback, and a
+user-owned launcher-delete guard.
 Unsupported first-party plugin directories are not copied into the view.
 The root supplies Omanixy's safe fallback shell configuration, launcher-hides
 file, audited default menu, and helper view.
@@ -156,8 +157,11 @@ new helpers, executables, absolute paths, services, and PAM paths.
 Static audit is a pin-drift and review guard, not semantic proof of every
 runtime behavior.
 The structured `upstream/compatibility-contracts.json` manifest closes each
-adapted helper to its pinned consumer, implementation, focused test, and
-referenced upstream implementation hash.
+adapted helper to its pinned consumer, post-patch reachable consumer,
+implementation, focused test matrix, and referenced upstream implementation
+hash.
+It records exact observable fields separately from intentional hardening,
+narrowing, omission, and missing-backend behavior.
 The closure check fails on missing edges, helper hash drift, unexpected
 compatibility-bin entries, or newly reachable unlisted contracts.
 Behavioral adapter tests and live smoke are separate evidence.
@@ -179,9 +183,11 @@ The ownership model is deliberately whole-file and idempotent:
 First activation creates `shell.json` and the minimal theme seed.
 The generated baseline is versioned in `upstream/shell-baseline.json` with the
 upstream-required `version: 1` plus an `omanixyBaselineVersion` marker.
-An exact known old Omanixy baseline migrates idempotently to the current marker
-and widget set; customized, malformed, or otherwise unknown files remain
-user-owned and are not rewritten.
+The checked-in `upstream/shell-baseline-v1.json` is the exact issue #2
+generated baseline from commit `c756f85dc2ad546fa2cfbad1fdf3b51913bc6723`.
+Only that historical baseline, compared as normalized JSON, migrates
+idempotently to the current marker and widget set; customized, malformed, or
+otherwise unknown files remain user-owned and are not rewritten.
 Home Manager activation side effects run through its `run` helper, so
 `home-manager switch --dry-run` logs planned writes without creating or
 changing user state.
@@ -204,6 +210,9 @@ Quattro's user plugin directory remains discoverable.
 The new-install baseline enables the native or adapted tray, media, audio,
 network, Bluetooth, monitor, power, weather, clipboard, emoji, launcher, and
 OSD paths covered by the ledger.
+Feature selection is closed transitively: Bluetooth selects audio, and weather
+and screenshot select notification because their reachable consumers invoke
+those helper surfaces.
 The updater, agents, background/theme workflow, nightlight, low-battery
 automation, and issue #4 security plugins remain disabled or absent.
 Third-party and user-local QML are trusted, unsandboxed code running in the

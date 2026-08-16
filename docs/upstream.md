@@ -4,7 +4,7 @@ Omanixy attributes the presentation source to
 [`basecamp/omarchy`](https://github.com/basecamp/omarchy).
 The repository pins the reviewed Quattro source at revision
 `f0020448ca87329199de7cb12f2015ebc4a3e5e7`.
-The validated Quickshell pairing is revision
+The pinned Quickshell pairing is revision
 `28771c7c74b42e20afca0b1b63980cb46515537c`.
 The pair and validation state are recorded in
 [`upstream/omarchy.yaml`](../upstream/omarchy.yaml).
@@ -74,16 +74,18 @@ It applies seven narrow compatibility patch sites:
   supported clock panel instead of the unavailable timezone command.
 - `shell/plugins/bar/Bar.qml` replaces the Omarchy helper-backed transparent
   foreground path with the native theme color and removes its helper process.
-- `shell/plugins/menu/Menu.qml` makes the unsupported system-wide launcher
-  deletion action inert rather than presenting a false deletion affordance.
+- `shell/plugins/menu/Menu.qml` routes launcher deletion through a
+  user-owned-entry predicate rather than presenting a false system deletion
+  affordance.
 
 Each patch is tied to a pinned source location, has a focused compatibility
 assertion, and is kept smaller than the upstream feature it excludes.
 Unsupported first-party plugin directories are absent rather than merely
 advertised as disabled.
 The screenshot adapter preserves the pinned smart picker, including frozen
-selection geometry, monitor transforms, tiny-click snapping, and the
-best-effort clipboard result after a successful capture.
+selection geometry, monitor transforms, tiny-click snapping, the `--editor`
+argument form, and the best-effort clipboard and notification behavior after a
+successful capture.
 The root also supplies Omanixy's safe fallback shell configuration, audited
 menu, launcher-hides file, and helper surface.
 Runtime-writable configuration and state must be materialized outside the
@@ -138,6 +140,8 @@ owner.
 
 The adapters in the ledger exist only for observable commands that the pinned
 Quattro consumers still invoke around these native APIs.
+Pinned-source references are not sufficient evidence of support: the
+post-patch compatibility root must also retain a reachable consumer.
 They do not start or configure a second instance of any host service.
 
 See [porting-principles.md](porting-principles.md) for the `exact`, `adapted`,

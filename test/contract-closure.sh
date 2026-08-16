@@ -49,11 +49,11 @@ if run_checker "$compatibility_root" "$native_drift_manifest" "$test_script"; th
   exit 1
 fi
 
-missing_test=$test_root/missing-test.sh
-sed '/run_adapter omarchy-display-text-size/ s/run_adapter omarchy-display-text-size/run_adapter omitted-display-text-size/' \
-  "$test_script" > "$missing_test"
-if run_checker "$compatibility_root" "$manifest" "$missing_test"; then
-  printf '%s\n' 'contract closure accepted missing focused helper coverage' >&2
+missing_matrix=$test_root/missing-matrix.json
+jq '.helpers["omarchy-display-text-size"].tests.valid = false' \
+  "$manifest" > "$missing_matrix"
+if run_checker "$compatibility_root" "$missing_matrix" "$test_script"; then
+  printf '%s\n' 'contract closure accepted missing per-helper matrix coverage' >&2
   exit 1
 fi
 

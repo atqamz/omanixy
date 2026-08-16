@@ -40,9 +40,13 @@ A feature may be `adapted` and still be experimental, or `omitted` because
 omission is the correct architecture rather than unfinished work.
 
 `maturity: validated` has a stricter meaning than "implemented".
-It requires pinned consumer evidence, a deterministic identity for any
-referenced upstream implementation, focused behavioral evidence for the
-applicable contract, and a passing contract-closure check.
+It means the declared compatibility contract, including any intentional
+adaptation, is proven against pinned consumer evidence, a deterministic
+identity for any referenced upstream implementation, focused behavioral
+evidence for every applicable matrix case, and a passing contract-closure
+check.
+It never means that an Omanixy implementation merely agrees with its own
+tests, and it never upgrades an `adapted` entry to `exact`.
 For `exact`, `omitted`, and `blocked` entries, the evidence proves the native
 capability or the documented reachability boundary rather than an adapter
 implementation.
@@ -50,8 +54,8 @@ implementation.
 The porting matrix is a compatibility ledger, not a percentage-complete
 tracker.
 The number of `exact` entries is never a project quality score.
-Issue #2 records the narrow runtime source contracts needed to make the
-validated Quattro baseline auditable.
+Issue #2 records the narrow runtime source contracts needed to make the pinned
+Quattro baseline auditable.
 Issue #3 defines the comprehensive contract audit and ledger; this branch
 implements the pinned baseline and its reviewed compatibility edges.
 

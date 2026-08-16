@@ -28,7 +28,7 @@ absolute_path=\$OMARCHY_PATH
   printf '%s\n' 'root.bar.run("omarchy-bar-helper --flag")'
 } > "$fixture/shell/services/Dynamic.qml"
 printf '%s\n' 'FileView { path: Quickshell.env("XDG_STATE_HOME") + "/omarchy/fixture.json"; watchChanges: true }' > "$fixture/shell/services/State.qml"
-printf '%s\n' 'Process { command: ["env-tool", "$CUSTOM_RUNTIME_VARIABLE"] }' >> "$fixture/shell/services/State.qml"
+printf '%s\n' "Process { command: [\"env-tool\", \"\$CUSTOM_RUNTIME_VARIABLE\"] }" >> "$fixture/shell/services/State.qml"
 printf '%s\n' 'FileView { path: Quickshell.env("lowercase_runtime_variable") }' >> "$fixture/shell/services/State.qml"
 printf '%s\n' 'import Quickshell.Networking' 'import Quickshell.Services.Mpris' '/etc/pam.d/fixture; /etc/fixture.conf; org.freedesktop.Fixture' > "$fixture/shell/services/Native.qml"
 printf '%s\n' '{"fixture": {"action": "omarchy-menu-helper --flag", "when": "fixture-guard", "checked": "fixture-check", "provider": "fixture-provider"}}' > "$fixture/default/omarchy/omarchy-menu.jsonc"

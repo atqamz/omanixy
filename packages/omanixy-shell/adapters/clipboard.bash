@@ -210,12 +210,22 @@ screenshot_selection() {
 }
 
 screenshot() {
-  (($# <= 2)) || fail 'Usage: omarchy-capture-screenshot [smart|region|windows|fullscreen] [slurp|copy|save]' 2
+  local editor=${OMARCHY_SCREENSHOT_EDITOR:-tensaku-edit} argument
+  local -a screenshot_arguments=()
+  for argument; do
+    if [[ $argument == --editor=* ]]; then
+      editor=${argument#--editor=}
+    else
+      screenshot_arguments+=("$argument")
+    fi
+  done
+  set -- "${screenshot_arguments[@]}"
+  (($# <= 2)) || fail 'Usage: omarchy-capture-screenshot [smart|region|windows|fullscreen] [slurp|copy|save] [--editor=<name>]' 2
   local mode=${1:-smart} processing=${2:-slurp}
   [[ $mode == smart || $mode == region || $mode == windows || $mode == fullscreen ]] ||
-    fail 'Usage: omarchy-capture-screenshot [smart|region|windows|fullscreen] [slurp|copy|save]' 2
+    fail 'Usage: omarchy-capture-screenshot [smart|region|windows|fullscreen] [slurp|copy|save] [--editor=<name>]' 2
   [[ $processing == slurp || $processing == copy || $processing == save ]] ||
-    fail 'Usage: omarchy-capture-screenshot [smart|region|windows|fullscreen] [slurp|copy|save]' 2
+    fail 'Usage: omarchy-capture-screenshot [smart|region|windows|fullscreen] [slurp|copy|save] [--editor=<name>]' 2
   if command -v pgrep >/dev/null 2>&1 && pgrep -x slurp >/dev/null 2>&1; then
     command -v pkill >/dev/null 2>&1 && pkill -x slurp >/dev/null 2>&1 || true
     return 0
@@ -260,6 +270,12 @@ screenshot() {
     if ! command -v wl-copy >/dev/null 2>&1 || ! timed 5 'screenshot clipboard copy' wl-copy --type image/png < "$file"; then
       printf '%s: screenshot captured but clipboard copy failed\n' "$name" >&2
     fi
+    local editor_command
+    editor_command=$(printf '%q %q' "$editor" "$file")
+    COMPAT_ADAPTER_NAME=omarchy-notification-send notification_send \
+      'Screenshot saved to clipboard and file' \
+      'Edit with Super + Alt + , (or click this)' \
+      --image "$file" --exec "$editor_command" || true
   fi
   return 0
 }

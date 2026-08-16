@@ -13,10 +13,11 @@ let
   inherit (pkgs) stdenvNoCC;
 
   baselineSource = builtins.fromJSON (builtins.readFile ../../upstream/shell-baseline.json);
+  featureSelection = import ../../lib/feature-selection.nix { inherit lib; baseline = baselineSource; };
   contractSource = builtins.fromJSON (builtins.readFile ../../upstream/compatibility-contracts.json);
   omarchyRevision = contractSource.pins.omarchy;
   quickshellRevision = contractSource.pins.quickshell;
-  baselineConfig = builtins.removeAttrs baselineSource [ "featurePlugins" "featureDependencies" "migrations" ];
+  baselineConfig = builtins.removeAttrs baselineSource [ "featurePlugins" "featureDependencies" "featureOrder" "migrations" ];
   blockedPluginIds = builtins.toJSON baselineConfig.disabledPlugins;
   featureRuntimeInputs = with pkgs; {
     core = [ bash coreutils findutils gawk gnugrep gnused inotify-tools jq quickshell systemd util-linux ];
@@ -31,16 +32,12 @@ let
     notification = [ libnotify ];
     launcher = [ desktop-file-utils gtk3 uwsm ];
   };
-  allFeatures = builtins.attrNames featureRuntimeInputs;
-  featureDependencies = baselineSource.featureDependencies or { };
-  requestedFeatures = [ "core" ] ++ (if features == null then allFeatures else features);
-  selectedFeatures = lib.unique (lib.concatMap
-    (feature: [ feature ] ++ (featureDependencies.${feature} or [ ]))
-    requestedFeatures);
+  allFeatures = featureSelection.featureNames;
+  requestedFeatures = if features == null then allFeatures else features;
+  selectedFeatures = featureSelection.select requestedFeatures;
   featureNamesValid = lib.assertMsg
-    (builtins.isList requestedFeatures
-      && lib.all (feature: builtins.elem feature allFeatures) requestedFeatures
-      && lib.all (feature: builtins.elem feature allFeatures) selectedFeatures)
+    (featureSelection.validate requestedFeatures
+      && lib.all (feature: builtins.hasAttr feature featureRuntimeInputs) selectedFeatures)
     "omanixy features must be a list of known feature names";
 
   quickshell = pkgs.quickshell.overrideAttrs (old: {
@@ -120,6 +117,7 @@ let
     version = lib.substring 0 12 omarchyRevision;
     dontUnpack = true;
     installPhase = ''
+      empty=
       mkdir -p "$out/bin" "$out/config/omarchy" "$out/default/omarchy"
       mkdir -p "$out/shell"
       cp -R ${omarchySource}/shell/Commons "$out/shell/Commons"
@@ -147,21 +145,24 @@ let
       mkdir -p "$out/shell/plugins/services"
       cp -R ${omarchySource}/shell/plugins/services/media "$out/shell/plugins/services/media"
 
-      chmod u+w "$out/shell/services" "$out/shell/services/PluginRegistry.qml"
+      chmod u+w "$out/shell/services" "$out/shell/services/PluginRegistry.qml" "$out/shell/services/AppLibrary.qml"
+      install -Dm644 ${./AppLibrarySupport.js} "$out/shell/services/AppLibrarySupport.js"
+      ${pkgs.python3}/bin/python3 ${../../scripts/patch-app-library} \
+        "$out/shell/services/AppLibrary.qml"
       chmod u+w "$out/shell/plugins/menu" "$out/shell/plugins/menu/Menu.qml"
+      substituteInPlace "$out/shell/plugins/menu/Menu.qml" \
+        --replace-fail '    if (!row || row.kind !== "app") return' \
+          '    if (!row || row.kind !== "app" || !root.appLibrary || !root.appLibrary.canRemove(row.appId)) return'
       chmod u+w "$out/shell/plugins/bar" "$out/shell/plugins/bar/Bar.qml"
       chmod u+w "$out/shell/plugins/panels/network/Model.js" "$out/shell/plugins/panels/network/Panel.qml"
       registry_file="$out/shell/services/PluginRegistry.qml"
-      registry_temporary="$registry_file.omanixy"
-      ${pkgs.gawk}/bin/awk -v blocked='${blockedPluginIds}' '
-        { print }
-        /^  property bool scanning: false$/ {
-          print "  readonly property var omanixyBlockedPlugins = " blocked
-        }
-      ' "$registry_file" > "$registry_temporary"
-      mv -f -- "$registry_temporary" "$registry_file"
-      sed -i '/^    if (manifest) {$/i\    if (isDisabled(config, key) || omanixyBlockedPlugins.indexOf(Util.canonicalWidgetId(String(key))) !== -1) return false' \
-        "$out/shell/services/PluginRegistry.qml"
+      substituteInPlace "$registry_file" \
+        --replace-fail '  property bool scanning: false' \
+          '  property bool scanning: false
+  readonly property var omanixyBlockedPlugins = ${blockedPluginIds}' \
+        --replace-fail '    if (manifest) {' \
+          '    if (isDisabled(config, key) || omanixyBlockedPlugins.indexOf(Util.canonicalWidgetId(String(key))) !== -1) return false
+    if (manifest) {'
       substituteInPlace "$out/shell/plugins/panels/network/Model.js" \
         --replace-fail 'function isProtected(security, openSecurity) {' \
           'function isEnterpriseSecurity(security, wpa2Eap, wpaEap) {
@@ -221,7 +222,8 @@ function isProtected(security, openSecurity) {' \
     useTransparentForeground = true
     transparent = true
   }'
-      sed -i '/^  Process {$/,/^  }$/d' "$out/shell/plugins/bar/Bar.qml"
+      ${pkgs.python3}/bin/python3 ${../../scripts/patch-transparent-foreground-process} \
+        "$out/shell/plugins/bar/Bar.qml"
       substituteInPlace "$out/shell/plugins/panels/network/Panel.qml" \
         --replace-fail 'readonly property int count: 4' \
           'readonly property int count: 3' \
@@ -234,33 +236,15 @@ function isProtected(security, openSecurity) {' \
           'if (provider === "Custom") return' \
         --replace-fail 'readonly property bool canRunSpeedTest: !!info.iface' \
           'readonly property bool canRunSpeedTest: false'
-      substituteInPlace "$out/shell/plugins/menu/Menu.qml" \
-        --replace-fail 'if (event.key === Qt.Key_Delete) {
-            root.requestDeleteSelected()
-            event.accepted = true
-          }' \
-          'if (event.key === Qt.Key_Delete) {
-            event.accepted = true
-          }'
-      shell_file="$out/shell/plugins/panels/network/Panel.qml"
-      temporary="$shell_file.omanixy"
-      chmod u+w "''${shell_file%/*}"
-      chmod u+w "$shell_file"
-      \${pkgs.gawk}/bin/awk '
-        /^          DnsProviderPill \{$/ {
-          block = $0
-          if ((getline provider) <= 0) { print block; exit }
-          if (provider ~ /provider: "Custom"/) {
-            while ((getline line) > 0 && line !~ /^          \}$/) {}
-            next
+      substituteInPlace "$out/shell/plugins/panels/network/Panel.qml" \
+        --replace-fail '          DnsProviderPill {
+            provider: "Custom"
+            index: 3
+            tooltipText: "Set custom DNS servers"
+            width: dnsRow.cellWidth
+            onClicked: root.setDns(provider)
           }
-          print block
-          print provider
-          next
-        }
-        { print }
-      ' "$shell_file" > "$temporary"
-      mv -f -- "$temporary" "$shell_file"
+' "$empty"
       install -Dm644 ${safeShellConfig} "$out/config/omarchy/shell.json"
       install -Dm644 ${omarchySource}/default/omarchy/launcher.hides "$out/default/omarchy/launcher.hides"
       install -Dm644 ${safeMenu} "$out/default/omarchy/omarchy-menu.jsonc"
@@ -355,6 +339,8 @@ EOF
     ./adapters/clipboard.bash
     ./compat-adapter.bash
   ];
+  adapterSourceText = builtins.concatStringsSep "\n" (map builtins.readFile adapterSources);
+  adapterSourceHash = builtins.hashString "sha256" adapterSourceText;
 
   ipc = pkgs.writeShellApplication {
     name = "omanixy-shell";
@@ -373,7 +359,7 @@ EOF
     text = builtins.replaceStrings
       [ "@IPC@" ]
       [ "${ipc}/bin/omanixy-shell" ]
-      (builtins.concatStringsSep "\n" (map builtins.readFile adapterSources));
+      adapterSourceText;
   };
 
   compatibilityBin = stdenvNoCC.mkDerivation {
@@ -420,7 +406,7 @@ pkgs.symlinkJoin {
     ln -s ${theme} "$out/share/omarchy-theme"
   '';
   passthru = {
-    inherit omarchyRevision quickshellRevision nixpkgsRevision omarchySource omarchyCompatibilityRoot compatibilityBin quickshell theme supportedSystems safeMenu safeShellConfig selectedFeatures compatibilityHelpers;
+    inherit omarchyRevision quickshellRevision nixpkgsRevision omarchySource omarchyCompatibilityRoot compatibilityBin quickshell theme supportedSystems safeMenu safeShellConfig selectedFeatures compatibilityHelpers adapterSources adapterSourceHash;
     buildProvenance = {
       inherit omarchyRevision quickshellRevision nixpkgsRevision;
     };

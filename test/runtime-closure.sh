@@ -108,8 +108,9 @@ test -x "$runtime/bin/omarchy-network-qr"
 test -x "$runtime/bin/omarchy-network-password"
 test "$(unit_path "$runtime/bin/omarchy-network-qr")" = "$(unit_path "$compatibility_bin/bin/omarchy-network-qr")"
 test "$(unit_path "$runtime/bin/omarchy-network-password")" = "$(unit_path "$compatibility_bin/bin/omarchy-network-password")"
-if grep -Fq 'root.requestDeleteSelected()' "$runtime_source/shell/plugins/menu/Menu.qml"; then
-  exit 1
-fi
+grep -Fq 'root.requestDeleteSelected()' "$runtime_source/shell/plugins/menu/Menu.qml"
+grep -Fq 'root.appLibrary.canRemove(row.appId)' "$runtime_source/shell/plugins/menu/Menu.qml"
+grep -Fq 'function canRemove(desktopId)' "$runtime_source/shell/services/AppLibrary.qml"
+test -f "$runtime_source/shell/services/AppLibrarySupport.js"
 
 printf '%s\n' 'runtime closure invariants passed'

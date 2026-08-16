@@ -29,8 +29,8 @@ unit_has RestartSec 2s
 unit_has Environment "OMARCHY_PATH=$compatibility_root"
 unit_has Environment QS_DISABLE_FILE_WATCHER=1
 unit_has Environment QS_NO_RELOAD_POPUP=1
-! unit_has Restart always
-! unit_has ExecStart omarchy-launch-shell
-! unit_has After graphical-session-pre.target
+unit_has Restart always && exit 1
+unit_has ExecStart omarchy-launch-shell && exit 1
+unit_has After graphical-session-pre.target && exit 1
 
 printf '%s\n' 'service unit semantics passed'

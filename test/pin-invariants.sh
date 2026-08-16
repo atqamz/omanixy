@@ -33,15 +33,23 @@ jq -e \
     and .nodes.quickshell.original.rev == $quickshell
     and .nodes.nixpkgs.locked.rev == $nixpkgs
   ' "$lockfile" >/dev/null
+adapter_hash=$( {
+  first=true
+  while IFS= read -r source; do
+    if [[ $first == false ]]; then printf '\n'; fi
+    first=false
+    cat "$repo/$source"
+  done < <(jq -er '.adapterSources[]' "$manifest")
+} | sha256sum | awk '{print $1}')
 jq -e \
   --arg adapter 'packages/omanixy-shell/compat-adapter.bash' \
   --arg tests 'test/compat-adapters.sh' \
-  --arg adapter_hash "$(sha256sum "$repo/packages/omanixy-shell/compat-adapter.bash" | awk '{print $1}')" \
-  '.adapter == $adapter and .adapterHash == $adapter_hash and .behavioralTests == $tests and (.helpers | type) == "object"' \
+  --arg adapter_hash "$adapter_hash" \
+  '.adapter == $adapter and .adapterHash == $adapter_hash and (.adapterSources | type) == "array" and .behavioralTests == $tests and (.helpers | type) == "object"' \
   "$manifest" >/dev/null
 grep -Fq "validated_quattro_pair: true" "$metadata"
 grep -Fq 'track: quattro' "$metadata"
-! grep -Fq 'release:' "$metadata"
+grep -Fq 'release:' "$metadata" && exit 1
 grep -Fq 'assertOneOf "omanixy supported system"' "$flake"
 grep -Fq 'path: shell/shell.qml' "$matrix"
 grep -Fqx '        - path: shell/plugins/' "$matrix"
@@ -50,9 +58,9 @@ grep -Fq 'path: themes/tokyo-night/' "$matrix"
 grep -Fq 'path: bin/omarchy-launch-shell' "$matrix"
 grep -Fq 'consumption: reference-only' "$matrix"
 grep -Fq 'consumption: build-time' "$matrix"
-! rg -n 'github:basecamp/omarchy/(quattro|main|master)' "$flake"
-! rg -n 'github:quickshell-mirror/quickshell/(master|main)' "$flake"
-! rg -n 'pending-issue-2|validated_quattro_pair: false|runtime_pair: pending' "$metadata"
-! find "$repo" -type f -name '*.qml' -print -quit | grep -q .
+rg -n 'github:basecamp/omarchy/(quattro|main|master)' "$flake" && exit 1
+rg -n 'github:quickshell-mirror/quickshell/(master|main)' "$flake" && exit 1
+rg -n 'pending-issue-2|validated_quattro_pair: false|runtime_pair: pending' "$metadata" && exit 1
+find "$repo" -type f -name '*.qml' -print -quit | grep -q . && exit 1
 
 printf '%s\n' 'pin invariants passed'

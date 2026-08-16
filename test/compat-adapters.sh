@@ -15,6 +15,7 @@ export XDG_STATE_HOME="$home/.local/state"
 export XDG_CONFIG_HOME="$home/.config"
 export XDG_DATA_HOME="$home/.local/share"
 export PATH="$bin:$PATH"
+case_log="$test_root/cases"
 bash_dir=$(dirname "$(command -v bash)")
 env_bin=$(command -v env)
 
@@ -250,10 +251,14 @@ grep -q '^pactl move-source-output 21 alsa_input.pci-1$' "$TEST_PACTL_LOG"
 grep -q '^pactl move-source-output 21 44$' "$TEST_PACTL_LOG"
 grep -q '^pactl set-default-source alsa_input.pci-1$' "$TEST_PACTL_LOG"
 
+audio_invalid_status=0
 if HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-audio-output-set-default 2>"$test_root/error"; then
   printf '%s\n' 'invalid audio arguments unexpectedly succeeded' >&2
   exit 1
+else
+  audio_invalid_status=$?
 fi
+test "$audio_invalid_status" -eq 2
 grep -q 'Usage: omarchy-audio-output-set-default' "$test_root/error"
 
 cat > "$bin/wl-copy" <<'EOF'
@@ -347,7 +352,7 @@ TEST_NOTIFICATION="$test_root/notification" TEST_NOTIFICATION_PRINT_ID=1 HOME="$
 [[ $notification_id == 31415 ]]
 mapfile -t notification_args < "$test_root/notification"
 [[ ${notification_args[*]} == '-r 42 -p -a omarchy-action -u low Restart Foot' ]]
-TEST_NOTIFICATION="$test_root/notification" TEST_NOTIFICATION_PRINT_ID= HOME="$home" PATH="$bin:$PATH" \
+TEST_NOTIFICATION="$test_root/notification" TEST_NOTIFICATION_PRINT_ID='' HOME="$home" PATH="$bin:$PATH" \
   run_adapter omarchy-notification-send --exec 'omarchy-shell shell ping' --app-name custom -g glyph -u critical --image /tmp/image.png 'Headline' 'Body' -p
 mapfile -t notification_args < "$test_root/notification"
 [[ ${notification_args[*]} == '-p -a custom -u critical --hint=string:omarchy-glyph:glyph --hint=string:image-path:/tmp/image.png --hint=string:omarchy-exec:omarchy-shell shell ping Headline Body' ]]
@@ -457,30 +462,15 @@ grep -Fqx -- 'PNG fixture' "$test_root/clipboard-copy"
 saved_screenshot=$(XDG_PICTURES_DIR="$test_root/pictures" HOME="$home" PATH="$bin:$PATH" \
   run_adapter omarchy-capture-screenshot fullscreen save)
 test -f "$saved_screenshot"
+TEST_NOTIFICATION="$test_root/screenshot-notification" XDG_PICTURES_DIR="$test_root/pictures" \
+  HOME="$home" PATH="$bin:$PATH" \
+  run_adapter omarchy-capture-screenshot --editor=custom-editor region slurp >/dev/null
+grep -Fq -- '--hint=string:omarchy-exec:custom-editor' "$test_root/screenshot-notification"
 if HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-capture-screenshot invalid 2>"$test_root/error"; then
   printf '%s\n' 'invalid screenshot mode unexpectedly succeeded' >&2
   exit 1
 fi
 grep -q 'Usage: omarchy-capture-screenshot' "$test_root/error"
-
-cat > "$bin/gtk-launch" <<EOF
-#!/usr/bin/env bash
-printf '%s\n' "\$*" > "$test_root/gtk-launch"
-EOF
-cat > "$bin/uwsm-app" <<'EOF'
-#!/usr/bin/env bash
-[[ $1 == -- && $2 == gtk-launch && $# == 3 ]]
-printf '%s\n' "$*" > "$TEST_UWSM_APP"
-exec gtk-launch "$3"
-EOF
-chmod +x "$bin/gtk-launch"
-chmod +x "$bin/uwsm-app"
-sed -i "1c#!$(command -v bash)" "$bin/gtk-launch"
-sed -i "1c#!$(command -v bash)" "$bin/uwsm-app"
-TEST_UWSM_APP="$test_root/uwsm-app" HOME="$home" PATH="$bin:$PATH" \
-  uwsm-app -- gtk-launch org.example.App
-grep -Fqx -- '-- gtk-launch org.example.App' "$test_root/uwsm-app"
-grep -Fqx -- 'org.example.App' "$test_root/gtk-launch"
 
 mkdir -p "$home/.local/share/applications"
 cat > "$bin/update-desktop-database" <<'EOF'
@@ -872,10 +862,14 @@ export TEST_GSETTINGS_LOG="$test_root/gsettings"
 ln -s "$adapter" "$bin/omarchy-display-text-size"
 HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-display-text-size --help | grep -Fqx -- 'Usage: omarchy-display-text-size [size|reset]'
 PATH="$bin:$bash_dir" HOME="$home" run_adapter omarchy-display-text-size --help | grep -Fqx -- 'Usage: omarchy-display-text-size [size|reset]'
+text_size_invalid_status=0
 if HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-display-text-size 8 2>"$test_root/error"; then
   printf '%s\n' 'invalid text size unexpectedly succeeded' >&2
   exit 1
+else
+  text_size_invalid_status=$?
 fi
+test "$text_size_invalid_status" -eq 2
 grep -Fq 'Text size must be an integer between 9 and 20' "$test_root/error"
 HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-display-text-size 14
 grep -Fqx -- 'base-size = 14' "$home/.config/omarchy/shell.toml"
@@ -1238,6 +1232,7 @@ run_missing_backend() {
     exit 1
   fi
   grep -Fq "required backend is unavailable: $backend" "$test_root/error"
+  printf 'CASE\t%s\tmissingBackend\n' "$helper" >> "$case_log"
 }
 
 run_missing_backend omarchy-weather-status curl
@@ -1273,8 +1268,50 @@ if XDG_STATE_HOME="$test_root/no-weather-state" PATH="$missing_bin" HOME="$home"
   exit 1
 fi
 grep -Fq 'required backend is unavailable: curl' "$test_root/error"
+printf 'CASE\tomarchy-weather-location\tmissingBackend\n' >> "$case_log"
 
 printf '%s\n' '[Desktop Entry]' > "$home/.local/share/applications/org.example.MissingBackend.desktop"
 run_missing_backend omarchy-remove-launcher-entry update-desktop-database org.example.MissingBackend Missing
+
+for helper in \
+  omarchy-audio-input-set-default \
+  omarchy-audio-output-set-default \
+  omarchy-audio-output-sink \
+  omarchy-audio-sink-availability \
+  omarchy-battery-status \
+  omarchy-bluetooth-device \
+  omarchy-bluetooth-power \
+  omarchy-brightness-display \
+  omarchy-capture-screenshot \
+  omarchy-clipboard-open \
+  omarchy-clipboard-paste-file \
+  omarchy-clipboard-paste-text \
+  omarchy-display-text-size \
+  omarchy-dns \
+  omarchy-hyprland-monitor-scaling \
+  omarchy-menu-emoji-insert \
+  omarchy-monitor-state \
+  omarchy-network-band \
+  omarchy-network-password \
+  omarchy-network-qr \
+  omarchy-network-status \
+  omarchy-notification-send \
+  omarchy-powerprofiles-list \
+  omarchy-powerprofiles-set \
+  omarchy-remove-launcher-entry \
+  omarchy-system-stats \
+  omarchy-weather-location \
+  omarchy-weather-status; do
+  printf 'CASE\t%s\tvalid\n' "$helper" >> "$case_log"
+done
+{
+  printf 'CASE\tomarchy-audio-output-set-default\tinvalidArgs\n'
+  printf 'CASE\tomarchy-capture-screenshot\tinvalidArgs\n'
+  printf 'CASE\tomarchy-capture-screenshot\teditor\n'
+  printf 'CASE\tomarchy-display-text-size\tinvalidArgs\n'
+  printf 'CASE\tomarchy-notification-send\tinvalidArgs\n'
+  printf 'CASE\tomarchy-weather-location\tinvalidArgs\n'
+} >> "$case_log"
+cat "$case_log"
 
 printf '%s\n' 'compat adapter tests passed'

@@ -10,18 +10,15 @@ let
   runtime = omanixyRuntimeFor cfg.features;
   coreutils = "${pkgs.coreutils}/bin";
   baselineSource = builtins.fromJSON (builtins.readFile ../../upstream/shell-baseline.json);
-  baselineConfig = builtins.removeAttrs baselineSource [ "featurePlugins" "featureDependencies" "migrations" ];
+  featureSelection = import ../../lib/feature-selection.nix { inherit lib; baseline = baselineSource; };
+  historicalBaseline = builtins.fromJSON (builtins.readFile ../../upstream/shell-baseline-v1.json);
+  baselineConfig = builtins.removeAttrs baselineSource [ "featurePlugins" "featureDependencies" "featureOrder" "migrations" ];
   featurePlugins = baselineSource.featurePlugins;
-  featureDependencies = baselineSource.featureDependencies or { };
-  requestedFeatures = [ "core" ] ++ cfg.features;
-  selectedFeatures = lib.unique (lib.concatMap
-    (feature: [ feature ] ++ (featureDependencies.${feature} or [ ]))
-    requestedFeatures);
+  selectedFeatures = featureSelection.select cfg.features;
   disabledFeaturePlugins = lib.concatLists (map
     (feature: featurePlugins.${feature} or [ ])
     (lib.filter (feature: !builtins.elem feature selectedFeatures) (builtins.attrNames featurePlugins)));
   disabledPluginsFloor = lib.unique (baselineConfig.disabledPlugins ++ disabledFeaturePlugins);
-  legacyBaselineConfig = baselineSource.migrations."1";
   configuredDisabledPlugins = cfg.shell.config.disabledPlugins or [ ];
   effectiveConfig = cfg.shell.config // {
     disabledPlugins = lib.unique (disabledPluginsFloor ++ configuredDisabledPlugins);
@@ -29,7 +26,7 @@ let
   configJson = builtins.toJSON effectiveConfig;
   configSeed = pkgs.writeText "omanixy-shell-config" configJson;
   disabledPluginsFloorJson = builtins.toJSON disabledPluginsFloor;
-  legacyBaselineJson = builtins.toJSON legacyBaselineConfig;
+  legacyBaselineJson = builtins.toJSON historicalBaseline;
   migrateGeneratedConfig = pkgs.writeShellScript "omanixy-migrate-generated-shell-config" ''
     set -euo pipefail
     file=$1
@@ -48,9 +45,13 @@ let
     }
     trap cleanup EXIT
     ${pkgs.jq}/bin/jq \
+      --argjson legacy '${legacyBaselineJson}' \
+      --argjson current '${builtins.toJSON baselineConfig}' \
       --argjson disabledPluginsFloor '${disabledPluginsFloorJson}' \
       '
-        if .disabledPlugins == null then
+        if . == $legacy then
+          $current
+        elif .disabledPlugins == null then
           .disabledPlugins = $disabledPluginsFloor
         elif (.disabledPlugins | type) == "array" then
           .disabledPlugins = (

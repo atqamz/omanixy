@@ -35,7 +35,7 @@ Quickshell is the shell runtime that executes that presentation.
 Omanixy provides the declarative integration boundary.
 NixOS remains authoritative for the operating system and its capabilities.
 
-Issue #2 provides the first validated Quattro runtime baseline.
+Issue #2 provides the first pinned Quattro runtime baseline.
 Later issues add compatibility adapters and security integrations without
 changing the ownership boundary.
 

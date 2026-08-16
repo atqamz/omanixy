@@ -144,9 +144,11 @@ items:
     tests:
       - test/compat-adapters.sh
       - test/safe-menu-contract.sh
+      - test/launcher-delete-contract.sh
     notes:
       - Launching uses the pinned UWSM client and gtk-launch inside the session-scoped app-graphical.slice.
-      - The compatibility root keeps the upstream remove helper as a directly tested user-entry contract, but the baseline Menu Delete action is patched inert because Nix-managed system entries are not removable by Omanixy.
+      - AppLibrary exposes deletion only for a regular desktop file owned by the user's XDG applications directory; system, Nix-store, missing, malformed, symlink, and traversal entries remain unavailable.
+      - Menu Delete is reachable for confirmed user-owned entries and inert for every unsupported entry; Omanixy never performs package removal.
       - Removal rejects missing, system-owned, symlink, and traversal targets and does not implement package removal.
 
   - id: menu.baseline
@@ -307,6 +309,7 @@ items:
       - Default selection uses wpctl; node names and sink availability come from pw-dump metadata.
       - Defaults are also updated through pactl and active application streams are moved, excluding EasyEffects filter-chain streams as pinned upstream does.
       - Output sink resolution follows EasyEffects/DSP virtual sinks to the physical sink used for effective loudness.
+      - The pinned helper makes backend mutations best-effort and returns status 1 for invalid arguments; Omanixy intentionally validates metadata, hard-fails backend errors, rolls back partial changes, and returns status 2 for invalid arguments.
 
   - id: network.native
     classification: exact
@@ -596,6 +599,7 @@ items:
       - Text-size changes update the Quattro base size, GTK text scaling, and supported terminal font settings atomically where those backends exist.
       - The adapter also preserves the pinned up/down monitor-scaling forms and cleans fractional requests against the current mode dimensions.
       - DDC and hardware-specific external-display behavior is not claimed by the brightness adapter.
+      - The pinned text-size helper makes selected gsettings mutations best-effort and returns status 1 for invalid arguments; Omanixy intentionally hard-fails unavailable backends, rolls back partial mutations, and returns status 2 for invalid arguments.
 
   - id: screenshot
     classification: adapted
@@ -628,7 +632,8 @@ items:
       - test/compat-adapters.sh
       - test/safe-menu-contract.sh
     notes:
-      - Smart selection, region, window, fullscreen, clipboard, and save forms are bounded adaptations; OCR, QR, screen recording, editor, and notification workflows are omitted.
+      - Smart selection, region, window, fullscreen, clipboard, save, and `--editor=<name>` forms are bounded adaptations; OCR, QR, and screen recording remain omitted.
+      - After a successful `slurp` capture, the adapter preserves the pinned best-effort clipboard copy and notification with an editor action.
       - A capture succeeds when the file was saved even if the optional clipboard copy fails; the helper reports that diagnostic on stderr, matching the pinned helper's best-effort clipboard behavior.
 
   - id: clipboard

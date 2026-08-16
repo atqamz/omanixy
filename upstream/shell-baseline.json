@@ -55,57 +55,30 @@
     "power": ["omarchy.power"],
     "weather": ["omarchy.weather"]
   },
+  "featureOrder": [
+    "core",
+    "audio",
+    "bluetooth",
+    "clipboard",
+    "launcher",
+    "monitor",
+    "network",
+    "notification",
+    "power",
+    "screenshot",
+    "weather"
+  ],
   "featureDependencies": {
-    "bluetooth": ["audio"]
-  },
-  "migrations": {
-    "1": {
-      "version": 1,
-      "bar": {
-        "position": "top",
-        "transparent": false,
-        "centerAnchor": "omarchy.clock",
-        "layout": {
-          "left": [
-            {"id": "omarchy.menu"},
-            {"id": "omarchy.workspaces"}
-          ],
-          "center": [
-            {"id": "omarchy.clock", "format": "dddd HH:mm"},
-            {"id": "omarchy.weather"}
-          ],
-          "right": [
-            {"id": "omarchy.tray"},
-            {"id": "omarchy.media"},
-            {"id": "omarchy.bluetooth"},
-            {"id": "omarchy.network"},
-            {"id": "omarchy.audio"},
-            {"id": "omarchy.monitor"},
-            {"id": "omarchy.power"}
-          ]
-        }
-      },
-      "disabledPlugins": [
-        "omarchy.active-window",
-        "omarchy.agents",
-        "omarchy.background",
-        "omarchy.battery",
-        "omarchy.dev-gallery",
-        "omarchy.disk-speedtest",
-        "omarchy.dropbox",
-        "omarchy.idle",
-        "omarchy.image-picker",
-        "omarchy.indicators",
-        "omarchy.keyboard-layout",
-        "omarchy.lock",
-        "omarchy.microphone",
-        "omarchy.nightlight",
-        "omarchy.notifications",
-        "omarchy.polkit",
-        "omarchy.reminders",
-        "omarchy.system-update",
-        "omarchy.tailscale"
-      ]
-    }
+    "audio": [],
+    "bluetooth": ["audio"],
+    "clipboard": [],
+    "core": [],
+    "launcher": [],
+    "monitor": [],
+    "network": [],
+    "notification": [],
+    "power": [],
+    "screenshot": ["notification"],
+    "weather": ["notification"]
   }
 }
