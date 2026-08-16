@@ -149,6 +149,13 @@ let
       install -Dm644 ${./AppLibrarySupport.js} "$out/shell/services/AppLibrarySupport.js"
       ${pkgs.python3}/bin/python3 ${../../scripts/patch-app-library} \
         "$out/shell/services/AppLibrary.qml"
+      substituteInPlace "$out/shell/services/AppLibrary.qml" \
+        --replace-fail 'import "AppSearch.js" as AppSearch' \
+          'import "AppSearch.js" as AppSearch
+import "AppLibrarySupport.js" as AppSupport' \
+        --replace-fail 'Util.execDetached("uwsm-app -- gtk-launch " + Util.shellQuote(id + ".desktop"))' \
+          'var command = AppSupport.launchCommand(id)
+    if (command) Util.execDetached(command)'
       chmod u+w "$out/shell/plugins/menu" "$out/shell/plugins/menu/Menu.qml"
       substituteInPlace "$out/shell/plugins/menu/Menu.qml" \
         --replace-fail '    if (!row || row.kind !== "app") return' \

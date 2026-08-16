@@ -3,6 +3,7 @@ set -euo pipefail
 
 runtime=${1:?runtime package path required}
 compatibility_root=${2:?compatibility root path required}
+uwsm_test=${3:?UWSM integration test path required}
 menu="$compatibility_root/default/omarchy/omarchy-menu.jsonc"
 test_root=$(mktemp -d)
 trap 'rm -rf "$test_root"' EXIT
@@ -18,10 +19,6 @@ for helper in \
   test -x "$compatibility_root/bin/$helper"
 done
 test ! -e "$compatibility_root/bin/omarchy-update"
-app_library="$compatibility_root/shell/services/AppLibrary.qml"
-grep -Fq 'Util.execDetached("uwsm-app -- gtk-launch ' "$app_library"
-test "$(grep -Fc 'uwsm-app --' "$app_library")" -eq 1
-
 python3 - "$menu" "$normalized_menu" <<'PY'
 import json
 import re
@@ -109,6 +106,8 @@ while IFS= read -r command; do
     test -x "$helper_path"
   done < <(grep -oE 'omarchy-[a-z0-9][a-z0-9-]*' <<<"$command" | sort -u)
 done < <(jq -r '.. | objects | .action?, .when?, .checked?, .provider? | strings' "$normalized_menu")
+
+bash "$uwsm_test" "$runtime" "$compatibility_root"
 
 for executable in systemctl loginctl; do
   PATH="$runtime_path" command -v "$executable" >/dev/null

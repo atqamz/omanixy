@@ -304,16 +304,16 @@
           '';
           deviation-contracts = pkgs.runCommand "omanixy-deviation-contracts"
             {
-              nativeBuildInputs = [ pkgs.bash pkgs.gnugrep ];
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gawk pkgs.gnugrep pkgs.gnused pkgs.jq pkgs.procps pkgs.util-linux ];
             } ''
-            ${pkgs.bash}/bin/bash ${./test/deviation-contracts.sh} ${runtime.passthru.omarchySource} ${./.}
+            ${pkgs.bash}/bin/bash ${./test/deviation-contracts.sh} ${runtime.passthru.omarchySource} ${./.} ${compatibilityRoot}
             touch "$out"
           '';
           safe-menu-contract = pkgs.runCommand "omanixy-safe-menu-contract"
             {
-              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.gnused pkgs.jq pkgs.python3 ];
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.gnused pkgs.jq pkgs.python3 pkgs.nodejs ];
             } ''
-            ${pkgs.bash}/bin/bash ${./test/safe-menu-contract.sh} ${runtime} ${compatibilityRoot}
+            ${pkgs.bash}/bin/bash ${./test/safe-menu-contract.sh} ${runtime} ${compatibilityRoot} ${./test/uwsm-integration.sh}
             touch "$out"
           '';
           qml-patch-behavior = pkgs.runCommand "omanixy-qml-patch-behavior"
@@ -325,14 +325,14 @@
           '';
           launcher-delete-contract = pkgs.runCommand "omanixy-launcher-delete-contract"
             {
-              nativeBuildInputs = [ pkgs.bash pkgs.nodejs pkgs.gnugrep ];
+              nativeBuildInputs = [ pkgs.bash pkgs.nodejs pkgs.gnugrep pkgs.coreutils ];
             } ''
             ${pkgs.bash}/bin/bash ${./test/launcher-delete-contract.sh} ${compatibilityRoot} ${runtime}
             touch "$out"
           '';
           uwsm-integration = pkgs.runCommand "omanixy-uwsm-integration"
             {
-              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.gnused ];
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.gnused pkgs.nodejs ];
             } ''
             ${pkgs.bash}/bin/bash ${./test/uwsm-integration.sh} ${runtime} ${compatibilityRoot}
             touch "$out"

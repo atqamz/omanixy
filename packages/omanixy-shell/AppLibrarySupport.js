@@ -19,6 +19,16 @@ function canRemove(value, entries) {
   return isValidDesktopId(id) && hasEntry(entries, id)
 }
 
+function shellQuote(value) {
+  return "'" + String(value).replace(/'/g, "'\\''") + "'"
+}
+
+function launchCommand(value) {
+  var id = normalizeDesktopId(value)
+  if (!isValidDesktopId(id)) return ""
+  return "uwsm-app -- gtk-launch " + shellQuote(id + ".desktop")
+}
+
 if (typeof module !== "undefined") {
-  module.exports = { normalizeDesktopId, isValidDesktopId, canRemove }
+  module.exports = { normalizeDesktopId, isValidDesktopId, canRemove, launchCommand }
 }
