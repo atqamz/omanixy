@@ -118,137 +118,137 @@ let
     version = lib.substring 0 12 omarchyRevision;
     dontUnpack = true;
     installPhase = ''
-      empty=
-      mkdir -p "$out/bin" "$out/config/omarchy" "$out/default/omarchy"
-      mkdir -p "$out/shell"
-      cp -R ${omarchySource}/shell/Commons "$out/shell/Commons"
-      cp -R ${omarchySource}/shell/Ui "$out/shell/Ui"
-      chmod u+w "$out/shell/Ui"
-      chmod u+w "$out/shell/Ui/SpeedTestOverlay.qml"
-      rm -f "$out/shell/Ui/SpeedTestOverlay.qml"
-      cp -R ${omarchySource}/shell/services "$out/shell/services"
-      install -Dm644 ${omarchySource}/shell/shell.qml "$out/shell/shell.qml"
-      mkdir -p "$out/shell/plugins/bar/widgets"
-      for file in Bar.qml BarModel.js manifest.json; do
-        install -Dm644 "${omarchySource}/shell/plugins/bar/$file" "$out/shell/plugins/bar/$file"
-      done
-      for file in Spacer.qml Spacer.manifest.json Tray.qml Tray.manifest.json TrayModel.js Workspaces.qml Workspaces.manifest.json; do
-        install -Dm644 "${omarchySource}/shell/plugins/bar/widgets/$file" "$out/shell/plugins/bar/widgets/$file"
-      done
+            empty=
+            mkdir -p "$out/bin" "$out/config/omarchy" "$out/default/omarchy"
+            mkdir -p "$out/shell"
+            cp -R ${omarchySource}/shell/Commons "$out/shell/Commons"
+            cp -R ${omarchySource}/shell/Ui "$out/shell/Ui"
+            chmod u+w "$out/shell/Ui"
+            chmod u+w "$out/shell/Ui/SpeedTestOverlay.qml"
+            rm -f "$out/shell/Ui/SpeedTestOverlay.qml"
+            cp -R ${omarchySource}/shell/services "$out/shell/services"
+            install -Dm644 ${omarchySource}/shell/shell.qml "$out/shell/shell.qml"
+            mkdir -p "$out/shell/plugins/bar/widgets"
+            for file in Bar.qml BarModel.js manifest.json; do
+              install -Dm644 "${omarchySource}/shell/plugins/bar/$file" "$out/shell/plugins/bar/$file"
+            done
+            for file in Spacer.qml Spacer.manifest.json Tray.qml Tray.manifest.json TrayModel.js Workspaces.qml Workspaces.manifest.json; do
+              install -Dm644 "${omarchySource}/shell/plugins/bar/widgets/$file" "$out/shell/plugins/bar/widgets/$file"
+            done
 
-      for plugin in clipboard emojis menu osd; do
-        cp -R "${omarchySource}/shell/plugins/$plugin" "$out/shell/plugins/$plugin"
-      done
-      for plugin in audio bluetooth clock monitor network power weather wifiqr; do
-        mkdir -p "$out/shell/plugins/panels/$plugin"
-        cp -R "${omarchySource}/shell/plugins/panels/$plugin/." "$out/shell/plugins/panels/$plugin"
-      done
-      mkdir -p "$out/shell/plugins/services"
-      cp -R ${omarchySource}/shell/plugins/services/media "$out/shell/plugins/services/media"
+            for plugin in clipboard emojis menu osd; do
+              cp -R "${omarchySource}/shell/plugins/$plugin" "$out/shell/plugins/$plugin"
+            done
+            for plugin in audio bluetooth clock monitor network power weather wifiqr; do
+              mkdir -p "$out/shell/plugins/panels/$plugin"
+              cp -R "${omarchySource}/shell/plugins/panels/$plugin/." "$out/shell/plugins/panels/$plugin"
+            done
+            mkdir -p "$out/shell/plugins/services"
+            cp -R ${omarchySource}/shell/plugins/services/media "$out/shell/plugins/services/media"
 
-      chmod u+w "$out/shell/services" "$out/shell/services/PluginRegistry.qml" "$out/shell/services/AppLibrary.qml"
-      install -Dm644 ${./AppLibrarySupport.js} "$out/shell/services/AppLibrarySupport.js"
-      ${pkgs.python3}/bin/python3 ${../../scripts/patch-app-library} \
-        "$out/shell/services/AppLibrary.qml"
-      substituteInPlace "$out/shell/services/AppLibrary.qml" \
-        --replace-fail 'import "AppSearch.js" as AppSearch' \
-          'import "AppSearch.js" as AppSearch
-import "AppLibrarySupport.js" as AppSupport' \
-        --replace-fail 'Util.execDetached("uwsm-app -- gtk-launch " + Util.shellQuote(id + ".desktop"))' \
-          'var command = AppSupport.launchCommand(id)
-    if (command) Util.execDetached(command)'
-      chmod u+w "$out/shell/plugins/menu" "$out/shell/plugins/menu/Menu.qml"
-      install -Dm644 ${./MenuDeleteSupport.js} "$out/shell/plugins/menu/MenuDeleteSupport.js"
-      substituteInPlace "$out/shell/plugins/menu/Menu.qml" \
-        --replace-fail 'import "MenuModel.js" as MenuModel' \
-          'import "MenuModel.js" as MenuModel
-import "MenuDeleteSupport.js" as MenuDeleteSupport' \
-        --replace-fail '    if (!row || row.kind !== "app") return' \
-          '    if (!MenuDeleteSupport.canRequestDelete(row, root.appLibrary)) return'
-      chmod u+w "$out/shell/plugins/bar" "$out/shell/plugins/bar/Bar.qml"
-      chmod u+w "$out/shell/plugins/panels/network/Model.js" "$out/shell/plugins/panels/network/Panel.qml"
-      registry_file="$out/shell/services/PluginRegistry.qml"
-      substituteInPlace "$registry_file" \
-        --replace-fail '  property bool scanning: false' \
-          '  property bool scanning: false
-  readonly property var omanixyBlockedPlugins: ${blockedPluginIds}' \
-        --replace-fail '    if (manifest) {' \
-          '    if (isDisabled(config, key) || omanixyBlockedPlugins.indexOf(Util.canonicalWidgetId(String(key))) !== -1) return false
-    if (manifest) {'
-      substituteInPlace "$out/shell/plugins/panels/network/Model.js" \
-        --replace-fail 'function isProtected(security, openSecurity) {' \
-          'function isEnterpriseSecurity(security, wpa2Eap, wpaEap) {
-  return security === wpa2Eap || security === wpaEap
-}
+            chmod u+w "$out/shell/services" "$out/shell/services/PluginRegistry.qml" "$out/shell/services/AppLibrary.qml"
+            install -Dm644 ${./AppLibrarySupport.js} "$out/shell/services/AppLibrarySupport.js"
+            ${pkgs.python3}/bin/python3 ${../../scripts/patch-app-library} \
+              "$out/shell/services/AppLibrary.qml"
+            substituteInPlace "$out/shell/services/AppLibrary.qml" \
+              --replace-fail 'import "AppSearch.js" as AppSearch' \
+                'import "AppSearch.js" as AppSearch
+      import "AppLibrarySupport.js" as AppSupport' \
+              --replace-fail 'Util.execDetached("uwsm-app -- gtk-launch " + Util.shellQuote(id + ".desktop"))' \
+                'var command = AppSupport.launchCommand(id)
+          if (command) Util.execDetached(command)'
+            chmod u+w "$out/shell/plugins/menu" "$out/shell/plugins/menu/Menu.qml"
+            install -Dm644 ${./MenuDeleteSupport.js} "$out/shell/plugins/menu/MenuDeleteSupport.js"
+            substituteInPlace "$out/shell/plugins/menu/Menu.qml" \
+              --replace-fail 'import "MenuModel.js" as MenuModel' \
+                'import "MenuModel.js" as MenuModel
+      import "MenuDeleteSupport.js" as MenuDeleteSupport' \
+              --replace-fail '    if (!row || row.kind !== "app") return' \
+                '    if (!MenuDeleteSupport.canRequestDelete(row, root.appLibrary)) return'
+            chmod u+w "$out/shell/plugins/bar" "$out/shell/plugins/bar/Bar.qml"
+            chmod u+w "$out/shell/plugins/panels/network/Model.js" "$out/shell/plugins/panels/network/Panel.qml"
+            registry_file="$out/shell/services/PluginRegistry.qml"
+            substituteInPlace "$registry_file" \
+              --replace-fail '  property bool scanning: false' \
+                '  property bool scanning: false
+        readonly property var omanixyBlockedPlugins: ${blockedPluginIds}' \
+              --replace-fail '    if (manifest) {' \
+                '    if (isDisabled(config, key) || omanixyBlockedPlugins.indexOf(Util.canonicalWidgetId(String(key))) !== -1) return false
+          if (manifest) {'
+            substituteInPlace "$out/shell/plugins/panels/network/Model.js" \
+              --replace-fail 'function isProtected(security, openSecurity) {' \
+                'function isEnterpriseSecurity(security, wpa2Eap, wpaEap) {
+        return security === wpa2Eap || security === wpaEap
+      }
 
-function supportedDnsProviders() {
-  return ["DHCP", "Cloudflare", "Google"]
-}
+      function supportedDnsProviders() {
+        return ["DHCP", "Cloudflare", "Google"]
+      }
 
-function filterWifiNetworks(networks, wpa2Eap, wpaEap) {
-  var visible = []
-  var values = Array.isArray(networks) ? networks : []
-  for (var i = 0; i < values.length; i++) {
-    if (values[i] && !isEnterpriseSecurity(values[i].security, wpa2Eap, wpaEap))
-      visible.push(values[i])
-  }
-  return visible
-}
+      function filterWifiNetworks(networks, wpa2Eap, wpaEap) {
+        var visible = []
+        var values = Array.isArray(networks) ? networks : []
+        for (var i = 0; i < values.length; i++) {
+          if (values[i] && !isEnterpriseSecurity(values[i].security, wpa2Eap, wpaEap))
+            visible.push(values[i])
+        }
+        return visible
+      }
 
-function isProtected(security, openSecurity) {' \
-        --replace-fail '    isProtected: isProtected,' \
-          '    isEnterpriseSecurity: isEnterpriseSecurity,
-    filterWifiNetworks: filterWifiNetworks,
-    supportedDnsProviders: supportedDnsProviders,
-    isProtected: isProtected,'
-      substituteInPlace "$out/shell/plugins/panels/network/Panel.qml" \
-        --replace-fail 'readonly property var dnsProviders: ["DHCP", "Cloudflare", "Google", "Custom"]' \
-          'readonly property var dnsProviders: Model.supportedDnsProviders()' \
-        --replace-fail 'function syncWifiNetworks() {
-    var nets = []
-    var networks = wifiNetworkObjects || []' \
-          'function syncWifiNetworks() {
-    var nets = []
-    var networks = Model.filterWifiNetworks(wifiNetworkObjects, WifiSecurityType.Wpa2Eap, WifiSecurityType.WpaEap)' \
-        --replace-fail 'return net.security !== WifiSecurityType.Wpa2Eap && net.security !== WifiSecurityType.WpaEap' \
-          'return !Model.isEnterpriseSecurity(net.security, WifiSecurityType.Wpa2Eap, WifiSecurityType.WpaEap)'
-      substituteInPlace "$out/shell/plugins/panels/clock/BarWidget.qml" \
-        --replace-fail 'else if (b === Qt.MiddleButton) { if (root.bar) root.bar.run("omarchy-menu-timezone") }' \
-          'else if (b === Qt.MiddleButton) root.togglePanel()'
-      ${pkgs.python3}/bin/python3 ${../../scripts/patch-transparent-foreground-process} \
-        "$out/shell/plugins/bar/Bar.qml"
-      substituteInPlace "$out/shell/plugins/panels/network/Panel.qml" \
-        --replace-fail 'readonly property int count: 4' \
-          'readonly property int count: 3' \
-        --replace-fail 'if (provider === "Custom") {
-      var launcher = "omarchy-launch-floating-terminal-with-presentation"
-      root.bar.run(launcher + " " + Util.shellQuote(root.dnsCommand(provider)))
-      root.close()
-      return
-    }' \
-          'if (provider === "Custom") return' \
-        --replace-fail 'readonly property bool canRunSpeedTest: !!info.iface' \
-          'readonly property bool canRunSpeedTest: false'
-      substituteInPlace "$out/shell/plugins/panels/network/Panel.qml" \
-        --replace-fail '          DnsProviderPill {
-            provider: "Custom"
-            index: 3
-            tooltipText: "Set custom DNS servers"
-            width: dnsRow.cellWidth
-            onClicked: root.setDns(provider)
-          }
-' "$empty"
-      install -Dm644 ${safeShellConfig} "$out/config/omarchy/shell.json"
-      install -Dm644 ${omarchySource}/default/omarchy/launcher.hides "$out/default/omarchy/launcher.hides"
-      install -Dm644 ${safeMenu} "$out/default/omarchy/omarchy-menu.jsonc"
-      for helper in ${lib.concatStringsSep " " compatibilityHelpers}; do
-        cat > "$out/bin/$helper" <<EOF
-#!/bin/sh
-export COMPAT_ADAPTER_NAME=$helper
-exec omanixy-compat-adapter "\$@"
-EOF
-        chmod 0555 "$out/bin/$helper"
-      done
+      function isProtected(security, openSecurity) {' \
+              --replace-fail '    isProtected: isProtected,' \
+                '    isEnterpriseSecurity: isEnterpriseSecurity,
+          filterWifiNetworks: filterWifiNetworks,
+          supportedDnsProviders: supportedDnsProviders,
+          isProtected: isProtected,'
+            substituteInPlace "$out/shell/plugins/panels/network/Panel.qml" \
+              --replace-fail 'readonly property var dnsProviders: ["DHCP", "Cloudflare", "Google", "Custom"]' \
+                'readonly property var dnsProviders: Model.supportedDnsProviders()' \
+              --replace-fail 'function syncWifiNetworks() {
+          var nets = []
+          var networks = wifiNetworkObjects || []' \
+                'function syncWifiNetworks() {
+          var nets = []
+          var networks = Model.filterWifiNetworks(wifiNetworkObjects, WifiSecurityType.Wpa2Eap, WifiSecurityType.WpaEap)' \
+              --replace-fail 'return net.security !== WifiSecurityType.Wpa2Eap && net.security !== WifiSecurityType.WpaEap' \
+                'return !Model.isEnterpriseSecurity(net.security, WifiSecurityType.Wpa2Eap, WifiSecurityType.WpaEap)'
+            substituteInPlace "$out/shell/plugins/panels/clock/BarWidget.qml" \
+              --replace-fail 'else if (b === Qt.MiddleButton) { if (root.bar) root.bar.run("omarchy-menu-timezone") }' \
+                'else if (b === Qt.MiddleButton) root.togglePanel()'
+            ${pkgs.python3}/bin/python3 ${../../scripts/patch-transparent-foreground-process} \
+              "$out/shell/plugins/bar/Bar.qml"
+            substituteInPlace "$out/shell/plugins/panels/network/Panel.qml" \
+              --replace-fail 'readonly property int count: 4' \
+                'readonly property int count: 3' \
+              --replace-fail 'if (provider === "Custom") {
+            var launcher = "omarchy-launch-floating-terminal-with-presentation"
+            root.bar.run(launcher + " " + Util.shellQuote(root.dnsCommand(provider)))
+            root.close()
+            return
+          }' \
+                'if (provider === "Custom") return' \
+              --replace-fail 'readonly property bool canRunSpeedTest: !!info.iface' \
+                'readonly property bool canRunSpeedTest: false'
+            substituteInPlace "$out/shell/plugins/panels/network/Panel.qml" \
+              --replace-fail '          DnsProviderPill {
+                  provider: "Custom"
+                  index: 3
+                  tooltipText: "Set custom DNS servers"
+                  width: dnsRow.cellWidth
+                  onClicked: root.setDns(provider)
+                }
+      ' "$empty"
+            install -Dm644 ${safeShellConfig} "$out/config/omarchy/shell.json"
+            install -Dm644 ${omarchySource}/default/omarchy/launcher.hides "$out/default/omarchy/launcher.hides"
+            install -Dm644 ${safeMenu} "$out/default/omarchy/omarchy-menu.jsonc"
+            for helper in ${lib.concatStringsSep " " compatibilityHelpers}; do
+              cat > "$out/bin/$helper" <<EOF
+      #!/bin/sh
+      export COMPAT_ADAPTER_NAME=$helper
+      exec omanixy-compat-adapter "\$@"
+      EOF
+              chmod 0555 "$out/bin/$helper"
+            done
     '';
     passthru = {
       inherit omarchySource safeMenu safeShellConfig selectedFeatures compatibilityHelpers;
@@ -327,8 +327,8 @@ EOF
         (consumer: lib.hasSuffix "/" consumer || lib.hasSuffix ".qml" consumer)
         (throw "no executable QML consumer for ${name}")
         (if name == "omarchy-capture-screenshot"
-         then [ "shell/plugins/" ]
-         else contract.postPatchConsumer);
+        then [ "shell/plugins/" ]
+        else contract.postPatchConsumer);
     })
     (lib.getAttrs compatibilityHelpers contractSource.helpers);
   adapterSources = [
