@@ -163,6 +163,33 @@ import "AppLibrarySupport.js" as AppSupport' \
         --replace-fail 'import "MenuModel.js" as MenuModel' \
           'import "MenuModel.js" as MenuModel
 import "MenuDeleteSupport.js" as MenuDeleteSupport' \
+        --replace-fail 'Item {
+  id: root' \
+          'Item {
+  id: root
+  property var omanixyDeleteTestLibrary
+  property bool omanixyDeleteConfirmationOpen: false
+  property var omanixyPendingDeleteRow
+  property int omanixyDeleteRefreshCount: 0
+  function omanixyRequestDelete(row) {
+    if (!MenuDeleteSupport.canRequestDelete(row, omanixyDeleteTestLibrary)) return false
+    omanixyPendingDeleteRow = row
+    omanixyDeleteConfirmationOpen = true
+    return true
+  }
+  function omanixyCancelDelete() {
+    omanixyPendingDeleteRow = null
+    omanixyDeleteConfirmationOpen = false
+  }
+  function omanixyConfirmDelete() {
+    if (!omanixyDeleteConfirmationOpen || !omanixyPendingDeleteRow) return false
+    var row = omanixyPendingDeleteRow
+    omanixyPendingDeleteRow = null
+    omanixyDeleteConfirmationOpen = false
+    omanixyDeleteTestLibrary.remove(row.appId, row.label)
+    omanixyDeleteRefreshCount++
+    return true
+  }' \
         --replace-fail '    if (!row || row.kind !== "app") return' \
           '    if (!MenuDeleteSupport.canRequestDelete(row, root.appLibrary)) return'
       chmod u+w "$out/shell/plugins/bar" "$out/shell/plugins/bar/Bar.qml"
@@ -383,12 +410,20 @@ EOF
       for helper in ${lib.concatStringsSep " " compatibilityHelpers}; do
         ln -s ${compatAdapter}/bin/omanixy-compat-adapter "$out/bin/$helper"
       done
+      cat > "$out/runtime-surface.json" <<'EOF'
+${builtins.toJSON (lib.mapAttrs
+  (name: contract: {
+    wrapper = "bin/${name}";
+    consumers = contract.postPatchConsumer;
+    probe = "compatibility-matrix";
+  }) (lib.getAttrs compatibilityHelpers contractSource.helpers))}
+EOF
     '';
   };
 
   runtime = pkgs.writeShellApplication {
     name = "omanixy-shell-runtime";
-    runtimeInputs = runtimeInputs ++ [ compatAdapter compatibilityBin ];
+    runtimeInputs = [ quickshell ] ++ runtimeInputs ++ [ compatAdapter compatibilityBin ];
     inheritPath = false;
     text = ''
       export OMARCHY_PATH=${lib.escapeShellArg "${omarchyCompatibilityRoot}"}

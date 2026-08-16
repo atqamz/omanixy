@@ -85,6 +85,9 @@ def main() -> int:
     actual_bin = {path.name for path in (compatibility_bin / "bin").iterdir() if path.is_symlink()}
     if actual_bin != set(helpers):
         die("runtime compatibility bin does not equal the adapted-helper ledger")
+    runtime_surface = read_json(compatibility_bin / "runtime-surface.json")
+    if set(runtime_surface) != actual_bin:
+        die("generated runtime surface does not equal the executable helper surface")
     result = subprocess.run(
         ["bash", str(test_path), str(repo), str(root), str(compatibility_bin / "bin")],
         capture_output=True,
@@ -121,8 +124,17 @@ def main() -> int:
             if not isinstance(consumer, str) or not (source / consumer).exists():
                 die(f"helper {helper} has a missing pinned consumer path: {consumer}")
         for consumer in post_patch_consumers:
-            if not isinstance(consumer, str) or not (root / consumer).exists():
-                die(f"helper {helper} has a missing post-patch consumer path: {consumer}")
+            if not isinstance(consumer, str):
+                die(f"helper {helper} has an invalid post-patch consumer")
+        surface = runtime_surface.get(helper)
+        if not isinstance(surface, dict):
+            die(f"helper {helper} has no generated runtime surface entry")
+        if surface.get("wrapper") != f"bin/{helper}":
+            die(f"helper {helper} has a disconnected generated wrapper")
+        if surface.get("consumers") != post_patch_consumers or surface.get("probe") != "compatibility-matrix":
+            die(f"helper {helper} has a disconnected generated consumer mapping")
+        if any(not isinstance(consumer, str) or not (root / consumer).exists() for consumer in surface["consumers"]):
+            die(f"helper {helper} has a missing generated post-patch consumer")
         if helper not in actual_bin:
             die(f"helper {helper} is absent from the executable post-patch helper surface")
         if contract.get("reachable") is True and helper != "omarchy-shell" and helper not in runtime_probes:

@@ -103,8 +103,8 @@ done
 if test -f "$test_root/launch.log"; then
   grep -Fxq 'org.example.User.desktop' "$test_root/launch.log"
 else
-  printf '%s\n' 'SESSION_UNAVAILABLE: real UWSM launch requires an active Wayland/UWSM session'
+  printf '%s\n' 'SESSION_UNAVAILABLE: live UWSM smoke unclaimed; safe package and generated-command checks completed'
   exit 0
 fi
 
-printf '%s\n' 'LIVE_SMOKE_PASSED: real UWSM launch recorder observed the desktop id'
+printf '%s\n' 'LIVE_SMOKE_CLAIMED: real UWSM launch recorder observed the desktop id'

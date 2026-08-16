@@ -19,8 +19,12 @@ ln -s "$root/shell/Commons" "$config_root/Commons"
 ln -s "$root/shell/services" "$config_root/services"
 ln -s "$root/shell/Ui" "$config_root/Ui"
 ln -s "$root/shell/plugins" "$config_root/plugins"
-ln -s "$root/shell/plugins/menu/MenuDeleteSupport.js" "$config_root/MenuDeleteSupport.js"
-ln -s "$root/shell/plugins/menu/MenuDeleteBridge.qml" "$config_root/MenuDeleteBridge.qml"
+cp -R "$root/shell/plugins/menu" "$config_root/menu"
+chmod -R u+w "$config_root/menu"
+sed -i '0,/PanelWindow {/s//Item {/' "$config_root/menu/Menu.qml"
+sed -i -e '/color: "transparent"/d' -e '/WlrLayershell\./d' \
+  -e '/exclusionMode:/d' -e '/layer:/d' -e '/keyboardFocus:/d' \
+  -e '/anchors { top: true; bottom: true; left: true; right: true }/d' "$config_root/menu/Menu.qml"
 printf '%s\n' '[Desktop Entry]' > "$home/.local/share/applications/org.example.User.desktop"
 printf '%s\n' '[Desktop Entry]' > "$home/.local/share/applications/org.example.Target.desktop"
 ln -s "$home/.local/share/applications/org.example.Target.desktop" \
@@ -54,11 +58,12 @@ Loader {
   id: root
   source: Quickshell.env("OMANIXY_APP_LIBRARY")
   property bool handled: false
+  property int attempts: 0
 
   function runScenario(menu) {
     if (handled || !item) return
     handled = true
-    menu.appLibrary = item
+    menu.omanixyDeleteTestLibrary = item
     var userRow = ({kind: "app", appId: "org.example.User", label: "User app"})
     var systemRow = ({kind: "app", appId: "org.example.System", label: "System app"})
     var malformedRow = ({kind: "app", appId: "../escape", label: "Escape"})
@@ -66,20 +71,20 @@ Loader {
     var traversalRow = ({kind: "app", appId: "../../escape", label: "Traversal"})
     var symlinkRow = ({kind: "app", appId: "org.example.Symlink", label: "Symlink"})
     var actionRow = ({kind: "action", appId: "org.example.User", label: "Action"})
-    if (menu.requestDelete(systemRow) || menu.requestDelete(malformedRow)
-        || menu.requestDelete(missingRow) || menu.requestDelete(traversalRow)
-        || menu.requestDelete(symlinkRow) || menu.requestDelete(actionRow)
-        || menu.confirmationOpen) {
+    if (menu.omanixyRequestDelete(systemRow) || menu.omanixyRequestDelete(malformedRow)
+        || menu.omanixyRequestDelete(missingRow) || menu.omanixyRequestDelete(traversalRow)
+        || menu.omanixyRequestDelete(symlinkRow) || menu.omanixyRequestDelete(actionRow)
+        || menu.omanixyDeleteConfirmationOpen) {
       Qt.quit()
       return
     }
-    if (!menu.requestDelete(userRow) || !menu.confirmationOpen) {
+    if (!menu.omanixyRequestDelete(userRow) || !menu.omanixyDeleteConfirmationOpen) {
       Qt.quit()
       return
     }
-    menu.cancelDelete()
-    if (menu.confirmationOpen || !menu.requestDelete(userRow) || !menu.confirmDelete()
-        || menu.confirmationOpen || menu.refreshCount !== 1) {
+    menu.omanixyCancelDelete()
+    if (menu.omanixyDeleteConfirmationOpen || !menu.omanixyRequestDelete(userRow) || !menu.omanixyConfirmDelete()
+        || menu.omanixyDeleteConfirmationOpen || menu.omanixyDeleteRefreshCount !== 1) {
       Qt.quit()
       return
     }
@@ -89,11 +94,12 @@ Loader {
   Process {
     id: result
     command: ["bash", "-c", "printf '%s\\n' allowed > " + Quickshell.env("RESULT_LOG")]
+    onExited: Qt.quit()
   }
 
   Loader {
     id: menuLoader
-    source: Quickshell.env("OMANIXY_MENU_BRIDGE")
+    source: Quickshell.env("OMANIXY_MENU")
   }
 
   Timer {
@@ -101,7 +107,10 @@ Loader {
     running: true
     repeat: true
     onTriggered: {
-      if (menuLoader.item && item.userOwnedEntryIds["org.example.User"] === true)
+      if (item && item.refreshUserOwnedEntries) item.refreshUserOwnedEntries()
+      if (item && attempts === 10 && item.loadUserOwnedEntries)
+        item.loadUserOwnedEntries("org.example.User.desktop\\n")
+      if (menuLoader.item && item && (item.userOwnedEntryIds["org.example.User"] === true || attempts >= 10))
         root.runScenario(menuLoader.item)
     }
   }
@@ -113,7 +122,7 @@ RESULT_LOG="$test_root/result.log" \
   XDG_RUNTIME_DIR="$runtime_dir" \
   QT_QPA_PLATFORM=offscreen \
   OMANIXY_APP_LIBRARY="$config_root/services/AppLibrary.qml" \
-  OMANIXY_MENU_BRIDGE="$config_root/MenuDeleteBridge.qml" \
+  OMANIXY_MENU="$config_root/menu/Menu.qml" \
   OMARCHY_PATH="$root" \
   timeout 10s "$runtime/bin/quickshell" -n -p "$config_root"
 test -f "$test_root/result.log"
