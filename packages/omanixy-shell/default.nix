@@ -158,6 +158,7 @@ import "AppLibrarySupport.js" as AppSupport' \
     if (command) Util.execDetached(command)'
       chmod u+w "$out/shell/plugins/menu" "$out/shell/plugins/menu/Menu.qml"
       install -Dm644 ${./MenuDeleteSupport.js} "$out/shell/plugins/menu/MenuDeleteSupport.js"
+      install -Dm644 ${./MenuDeleteBridge.qml} "$out/shell/plugins/menu/MenuDeleteBridge.qml"
       substituteInPlace "$out/shell/plugins/menu/Menu.qml" \
         --replace-fail 'import "MenuModel.js" as MenuModel' \
           'import "MenuModel.js" as MenuModel

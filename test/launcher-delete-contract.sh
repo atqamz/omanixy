@@ -20,7 +20,11 @@ ln -s "$root/shell/services" "$config_root/services"
 ln -s "$root/shell/Ui" "$config_root/Ui"
 ln -s "$root/shell/plugins" "$config_root/plugins"
 ln -s "$root/shell/plugins/menu/MenuDeleteSupport.js" "$config_root/MenuDeleteSupport.js"
+ln -s "$root/shell/plugins/menu/MenuDeleteBridge.qml" "$config_root/MenuDeleteBridge.qml"
 printf '%s\n' '[Desktop Entry]' > "$home/.local/share/applications/org.example.User.desktop"
+printf '%s\n' '[Desktop Entry]' > "$home/.local/share/applications/org.example.Target.desktop"
+ln -s "$home/.local/share/applications/org.example.Target.desktop" \
+  "$home/.local/share/applications/org.example.Symlink.desktop"
 cat > "$test_root/bin/update-desktop-database" <<'EOF'
 #!/usr/bin/env bash
 exit 0
@@ -59,11 +63,17 @@ Item {
       var userRow = ({kind: "app", appId: "org.example.User", label: "User app"})
       var systemRow = ({kind: "app", appId: "org.example.System", label: "System app"})
       var malformedRow = ({kind: "app", appId: "../escape", label: "Escape"})
+      var missingRow = ({kind: "app", appId: "org.example.Missing", label: "Missing"})
+      var traversalRow = ({kind: "app", appId: "../../escape", label: "Traversal"})
+      var symlinkRow = ({kind: "app", appId: "org.example.Symlink", label: "Symlink"})
       var actionRow = ({kind: "action", appId: "org.example.User", label: "Action"})
       item.userOwnedEntryIds = ({})
       if (MenuDeleteSupport.canRequestDelete(userRow, item)
           || MenuDeleteSupport.canRequestDelete(systemRow, item)
           || MenuDeleteSupport.canRequestDelete(malformedRow, item)
+          || MenuDeleteSupport.canRequestDelete(missingRow, item)
+          || MenuDeleteSupport.canRequestDelete(traversalRow, item)
+          || MenuDeleteSupport.canRequestDelete(symlinkRow, item)
           || MenuDeleteSupport.canRequestDelete(actionRow, item)) {
         Qt.quit()
         return
