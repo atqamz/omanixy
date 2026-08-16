@@ -120,8 +120,9 @@ The audit is a static discovery guard, not proof of semantic completeness.
 The structured compatibility manifest adds referenced-helper hashes, consumer
 edges, adapter ownership, and focused-test edges, while closure checks make
 those relationships fail closed.
-Focused adapter tests provide behavioral evidence and Wayland/Hyprland smoke
-provides integration evidence.
+Focused adapter tests provide behavioral evidence.
+Live Wayland, Hyprland, and UWSM smoke is separate integration evidence and is
+not claimed by this branch.
 
 ## Native Quickshell backend mapping
 
