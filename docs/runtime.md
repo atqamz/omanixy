@@ -256,14 +256,16 @@ Examples:
 systemctl --user restart omanixy-shell
 systemctl --user status omanixy-shell
 journalctl --user -u omanixy-shell
-omanixy-shell shell ping
 ```
 
 ## Baseline and deferred surfaces
 
 The baseline proves that Quickshell starts, Quattro loads from the pinned
-compatibility root, the configured native and adapted widgets render, plugin
-discovery initializes, and IPC ping works.
+compatibility root, the configured native and adapted widgets render, and
+plugin discovery initializes.
+The IPC wrapper contract is covered separately by `test/ipc-wrapper.sh`, which
+tests argument forwarding, graphical-session validation, bounded failure
+handling, and controlled IPC invocation.
 The default menu is intentionally smaller than the upstream Omarchy menu.
 Every actionable baseline row is backed by a native command, an audited
 adapter, or a host-owned session action.
@@ -287,6 +289,5 @@ The default baseline does not enable those security-sensitive surfaces.
 Inspect the rendered unit and activation output through Home Manager, then
 use `systemctl --user status omanixy-shell` and
 `journalctl --user -u omanixy-shell`.
-Run `omanixy-shell shell ping` only after the service is running.
 The shell source, runtime pair, metadata, ledger, and checks should be reviewed
 together for every upgrade.

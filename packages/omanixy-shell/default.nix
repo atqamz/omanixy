@@ -24,7 +24,7 @@ let
     network = [ iproute2 iputils iw networkmanager qrencode ];
     audio = [ pipewire pulseaudio wireplumber ];
     bluetooth = [ bluez util-linux ];
-    screenshot = [ grim hyprland hyprpicker procps slurp ];
+    screenshot = [ grim hyprland hyprpicker procps slurp wl-clipboard ];
     clipboard = [ wl-clipboard wtype xdg-utils ];
     power = [ power-profiles-daemon upower ];
     monitor = [ brightnessctl fontconfig glib gtk3 libnotify procps ];
