@@ -9,6 +9,7 @@ fi
 compatibility_command=${COMPAT_ADAPTER_NAME:-${0##*/}}
 if [[ -n ${OMANIXY_CONSUMER_MARKER:-} ]]; then
   compatibility_marker="$OMANIXY_CONSUMER_MARKER.$compatibility_command"
+  # shellcheck disable=SC2154 # the EXIT trap assigns status before use.
   trap 'status=$?; if [[ $status == 0 ]]; then printf "%s\n" "$compatibility_command" > "$compatibility_marker"; fi; exit "$status"' EXIT
 fi
 

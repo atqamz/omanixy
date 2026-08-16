@@ -6,7 +6,7 @@
     "nixpkgs": "241313f4e8e508cb9b13278c2b0fa25b9ca27163"
   },
   "adapter": "packages/omanixy-shell/compat-adapter.bash",
-  "adapterHash": "63c7c84e592b5dcd165b91ccb67ccd99d306f5b91fd3a01d2aa6ec0aadd1c23d",
+  "adapterHash": "3c561e60606b9e8db3ce211fe4a5cfa89dc7c30ee530b719e40fa7dea61288f8",
   "adapterSources": [
     "packages/omanixy-shell/adapters/common.bash",
     "packages/omanixy-shell/adapters/weather.bash",

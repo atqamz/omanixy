@@ -12,6 +12,7 @@ assert lib.assertOneOf "omanixy supported system" pkgs.stdenv.hostPlatform.syste
 let
   inherit (pkgs) stdenvNoCC;
 
+  fontconfigFile = pkgs.makeFontsConf { fontDirectories = [ ]; };
   baselineSource = builtins.fromJSON (builtins.readFile ../../upstream/shell-baseline.json);
   featureSelection = import ../../lib/feature-selection.nix { inherit lib; baseline = baselineSource; };
   contractSource = builtins.fromJSON (builtins.readFile ../../upstream/compatibility-contracts.json);
@@ -24,7 +25,7 @@ let
     network = [ iproute2 iputils iw networkmanager qrencode ];
     audio = [ pipewire pulseaudio wireplumber ];
     bluetooth = [ bluez util-linux ];
-    screenshot = [ grim hyprland hyprpicker procps slurp wl-clipboard ];
+    screenshot = [ fontconfig grim hyprland hyprpicker procps slurp wl-clipboard ];
     clipboard = [ wl-clipboard wtype xdg-utils ];
     power = [ power-profiles-daemon upower ];
     monitor = [ brightnessctl fontconfig glib gtk3 libnotify procps ];
@@ -375,7 +376,7 @@ EOF
         ln -s ${compatAdapter}/bin/omanixy-compat-adapter "$out/bin/$helper"
       done
       ${pkgs.python3}/bin/python3 ${../../scripts/generate-postpatch-runtime-surface} \
-        ${omarchyCompatibilityRoot} "$out" ${quickshell}/bin/quickshell ${lib.escapeShellArg (builtins.toJSON helperConsumers)}
+        ${omarchyCompatibilityRoot} "$out" ${quickshell}/bin/quickshell ${fontconfigFile} ${pkgs.bash}/bin/bash ${lib.escapeShellArg (builtins.toJSON helperConsumers)}
     '';
   };
 
@@ -384,6 +385,7 @@ EOF
     runtimeInputs = [ quickshell ] ++ runtimeInputs ++ [ compatAdapter compatibilityBin ];
     inheritPath = false;
     text = ''
+      export FONTCONFIG_FILE=${fontconfigFile}
       export OMARCHY_PATH=${lib.escapeShellArg "${omarchyCompatibilityRoot}"}
       export QS_DISABLE_FILE_WATCHER=1
       export QS_NO_RELOAD_POPUP=1

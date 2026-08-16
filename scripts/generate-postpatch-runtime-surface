@@ -56,17 +56,17 @@ CONSUMER_TRIGGERS = {
     "omarchy-system-stats": "consumer.item.bar = headlessBar; consumer.item.open()",
     "omarchy-bluetooth-device": "consumer.item.runDeviceAction({ address: \"00:11:22:33:44:55\" }, \"connect\", \"connecting\")",
     "omarchy-bluetooth-power": "consumer.item.toggleBluetooth()",
-    "omarchy-brightness-display": "consumer.item.setBrightness(50)",
+    "omarchy-brightness-display": "consumer.item.bar = headlessBar; consumer.item.focusedMonitor = \"eDP-1\"; consumer.item.setBrightness(50)",
     "omarchy-capture-screenshot": "consumer.item.runAction(\"omarchy-capture-screenshot\")",
     "omarchy-clipboard-open": "consumer.item.openSelected({ historyIndex: 0 })",
     "omarchy-clipboard-paste-file": "consumer.item.applySelected({ entryType: \"image\", mime: \"image/png\", path: \"/tmp/probe.png\", historyIndex: 0 })",
     "omarchy-clipboard-paste-text": "consumer.item.applySelected({ entryType: \"text\", fullText: \"probe\", historyIndex: 0 })",
     "omarchy-display-text-size": "consumer.item.setTextSize(12)",
-    "omarchy-hyprland-monitor-scaling": "consumer.item.setScale(1)",
+    "omarchy-hyprland-monitor-scaling": "consumer.item.bar = headlessBar; consumer.item.displays = [{ name: \"DP-1\", focused: true, width: 1920, height: 1080 }]; consumer.item.focusSection = \"scale\"; consumer.item.selectedIndex = 0; consumer.item.activateCursor()",
     "omarchy-menu-emoji-insert": "consumer.item.applySelected(\"😀\")",
     "omarchy-monitor-state": "consumer.item.refresh()",
-    "omarchy-network-password": "consumer.item.togglePassword()",
-    "omarchy-network-qr": "consumer.item.generate(\"wlan0\")",
+    "omarchy-network-password": "consumer.item.opened = true; consumer.item.iface = \"wlan0\"; consumer.item.togglePassword()",
+    "omarchy-network-qr": "consumer.item.opened = true; consumer.item.generate(\"wlan0\")",
     "omarchy-network-status": "consumer.item.open()",
     "omarchy-network-band": "consumer.item.open()",
     "omarchy-dns": "consumer.item.open()",
@@ -262,6 +262,39 @@ HEADLESS_SOURCE_PATCHES = {
 
 
 HEADLESS_TEXT_PATCHES = {
+    "omarchy-brightness-display": (
+        '  moduleName: "omarchy.monitor"',
+        '  moduleName: "omarchy.monitor"\n'
+        '  bar: QtObject {\n'
+        '    property color barForeground: "white"\n'
+        '    property color foreground: "white"\n'
+        '    property string fontFamily: "Sans"\n'
+        '    property bool vertical: false\n'
+        '    property int barSize: 24\n'
+        '  }',
+    ),
+    "omarchy-hyprland-monitor-scaling": (
+        '  moduleName: "omarchy.monitor"',
+        '  moduleName: "omarchy.monitor"\n'
+        '  bar: QtObject {\n'
+        '    property color barForeground: "white"\n'
+        '    property color foreground: "white"\n'
+        '    property string fontFamily: "Sans"\n'
+        '    property bool vertical: false\n'
+        '    property int barSize: 24\n'
+        '  }',
+    ),
+    "omarchy-monitor-state": (
+        '  moduleName: "omarchy.monitor"',
+        '  moduleName: "omarchy.monitor"\n'
+        '  bar: QtObject {\n'
+        '    property color barForeground: "white"\n'
+        '    property color foreground: "white"\n'
+        '    property string fontFamily: "Sans"\n'
+        '    property bool vertical: false\n'
+        '    property int barSize: 24\n'
+        '  }',
+    ),
     "omarchy-network-password": (
         '  property string iface: ""',
         '  property string iface: "wlan0"',
@@ -270,14 +303,16 @@ HEADLESS_TEXT_PATCHES = {
 
 
 def main() -> int:
-    if len(sys.argv) != 5:
-        print(f"usage: {sys.argv[0]} ROOT COMPATIBILITY_BIN QUICKSHELL MAPPING_JSON", file=sys.stderr)
+    if len(sys.argv) != 7:
+        print(f"usage: {sys.argv[0]} ROOT COMPATIBILITY_BIN QUICKSHELL FONTCONFIG_FILE PROBE_SHELL MAPPING_JSON", file=sys.stderr)
         return 2
 
     root = Path(sys.argv[1])
     compatibility_bin = Path(sys.argv[2])
     quickshell = Path(sys.argv[3])
-    mapping = json.loads(sys.argv[4])
+    fontconfig_file = Path(sys.argv[4])
+    probe_shell = Path(sys.argv[5])
+    mapping = json.loads(sys.argv[6])
     if not isinstance(mapping, dict):
         fail("consumer mapping is not an object")
 
@@ -356,6 +391,10 @@ def main() -> int:
         probe_bin = probe_root / "bin"
         probe_qs.mkdir(parents=True, exist_ok=True)
         probe_bin.mkdir(parents=True, exist_ok=True)
+        probe_image = probe_root / "probe.png"
+        probe_image.write_bytes(b"probe")
+        for directory in ("shell", "default"):
+            shutil.copytree(root / directory, probe_root / directory, dirs_exist_ok=True)
         for module in ("Commons", "Ui"):
             shutil.copytree(root / "shell" / module, probe_qs / module)
         keyboard_panel = probe_qs / "Ui" / "KeyboardPanel.qml"
@@ -372,7 +411,22 @@ def main() -> int:
                 continue
             target = probe_bin / path.name
             if not target.exists():
-                target.symlink_to(path)
+                target.write_text(
+                    "#!/bin/sh\n"
+                    "set -eu\n"
+                    f"real={json.dumps(str(path))}\n"
+                    f"helper={json.dumps(path.name)}\n"
+                    "if COMPAT_ADAPTER_NAME=\"$helper\" OMANIXY_CONSUMER_MARKER= \"$real\" \"$@\"; then\n"
+                    "  if [ -n \"${OMANIXY_CONSUMER_MARKER:-}\" ]; then\n"
+                    "    printf '%s\\n' \"$helper\" > \"$OMANIXY_CONSUMER_MARKER.$helper\"\n"
+                    "  fi\n"
+                    "else\n"
+                    "  status=$?\n"
+                    "  exit \"$status\"\n"
+                    "fi\n",
+                    encoding="utf-8",
+                )
+                target.chmod(stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
         backend_path = probe_bin / "omanixy-probe-backend"
         backend_path.write_text(
             "#!/bin/sh\n"
@@ -381,16 +435,18 @@ def main() -> int:
             "  pw-dump) printf '%s\\n' '[{\"id\":1,\"type\":\"PipeWire:Interface:Node\",\"info\":{\"props\":{\"media.class\":\"Audio/Sink\",\"node.name\":\"probe-sink\"}}},{\"id\":1,\"type\":\"PipeWire:Interface:Node\",\"info\":{\"props\":{\"media.class\":\"Audio/Source\",\"node.name\":\"probe-source\"}}}]' ;;\n"
             "  pactl) case ${1:-} in get-default-sink) printf '%s\\n' probe-sink ;; get-default-source) printf '%s\\n' probe-source ;; esac ;;\n"
             "  wpctl) if [ \"${1:-}\" = inspect ]; then printf '%s\\n' 'node.name = \"probe-sink\"'; fi ;;\n"
-            "  nmcli) nmcli_state=\"${XDG_RUNTIME_DIR:-/tmp}/omanixy-probe-nmcli-band\"; case \"$*\" in *'DEVICE,TYPE,STATE device status'*) printf '%s\\n' 'wlp0s20f3:wifi:connected' 'CloudflareWARP:tun:connected' 'tailscale0:tun:connected' 'lo:loopback:connected' 'p2p-dev-wlp0s20f3:wifi-p2p:disconnected' ;; *'GENERAL.CON-UUID device show'*) printf '%s\\n' 'probe-uuid' ;; *'802-11-wireless-security.key-mgmt'*'connection show uuid'*) printf '%s\\n' 'wpa-psk' 'probe-password' '' ;; *'802-11-wireless.ssid'*'connection show uuid'*) printf '%s\\n' 'probe-network' 'wpa-psk' 'probe-password' 'no' '' ;; *'GENERAL.STATE device show'*) printf '%s\\n' '100 (connected)' ;; *'GENERAL.CONNECTION device show'*) printf '%s\\n' 'probe-network' ;; *'FREQ,SSID device wifi list'*) printf '%s\\n' '2412:probe-network' '5180:probe-network' ;; *'connection modify'*) last=; for arg do last=$arg; done; printf '%s\\n' \"$last\" > \"$nmcli_state\" ;; *'connection up'*) : ;; *'802-11-wireless.band connection show'*) if [ -r \"$nmcli_state\" ]; then cat \"$nmcli_state\"; fi ;; *) printf '%s\\n' 'probe:wlan0:yes:connected:192.0.2.1/24:192.0.2.254' ;; esac ;;\n"
+            "  nmcli) nmcli_state=\"${XDG_RUNTIME_DIR:-/tmp}/omanixy-probe-nmcli-band\"; case \"$*\" in *'DEVICE,TYPE,STATE device status'*) printf '%s\\n' 'wlp0s20f3:wifi:connected' 'CloudflareWARP:tun:connected' 'tailscale0:tun:connected' 'lo:loopback:connected' 'p2p-dev-wlp0s20f3:wifi-p2p:disconnected' ;; *'GENERAL.CON-UUID device show'*) printf '%s\\n' 'probe-uuid' ;; *'802-11-wireless.ssid'*'connection show uuid'*) printf '%s\\n' 'probe-network' 'wpa-psk' 'probe-password' 'no' '' ;; *'802-11-wireless-security.key-mgmt'*'connection show uuid'*) printf '%s\\n' 'wpa-psk' 'probe-password' '' ;; *'GENERAL.STATE device show'*) printf '%s\\n' '100 (connected)' ;; *'GENERAL.CONNECTION device show'*) printf '%s\\n' 'probe-network' ;; *'FREQ,SSID device wifi list'*) printf '%s\\n' '2412:probe-network' '5180:probe-network' ;; *'connection modify'*) last=; for arg do last=$arg; done; printf '%s\\n' \"$last\" > \"$nmcli_state\" ;; *'connection up'*) : ;; *'802-11-wireless.band connection show'*) if [ -r \"$nmcli_state\" ]; then cat \"$nmcli_state\"; fi ;; *) printf '%s\\n' 'probe:wlan0:yes:connected:192.0.2.1/24:192.0.2.254' ;; esac ;;\n"
             "  qrencode) printf '%s\\n' probe-qr ;;\n"
             "  bluetoothctl) if [ \"${1:-}\" = list ]; then printf '%s\\n' 'Controller 00:11:22:33:44:55 probe'; elif [ \"${1:-}\" = show ]; then printf '%s\\n' 'Powered: yes'; fi ;;\n"
             "  upower) if [ \"${1:-}\" = -e ]; then printf '%s\\n' /org/freedesktop/UPower/devices/DisplayDevice; else printf '%s\\n' '  state:           charging'; fi ;;\n"
-            "  powerprofilesctl) printf '%s\\n' '  balanced:' ;;\n"
-            "  hyprctl) case ${1:-} in monitors) printf '%s\\n' '[{\"name\":\"DP-1\",\"focused\":true,\"scale\":1,\"x\":0,\"y\":0,\"width\":1920,\"height\":1080}]' ;; getoption) printf '%s\\n' '{\"int\":0}' ;; esac ;;\n"
+            "  powerprofilesctl) case ${1:-} in get) printf '%s\\n' balanced ;; list) printf '%s\\n' '* balanced:' '  performance:' '  power-saver:' ;; set) : ;; esac ;;\n"
+            "  hyprctl) case ${1:-} in monitors) if [ \"${OMANIXY_PROBE_HELPER:-}\" = omarchy-monitor-state ]; then printf '%s\\n' '[{\"name\":\"eDP-1\",\"focused\":true,\"activeWorkspace\":{\"id\":1},\"scale\":1.25,\"refreshRate\":60,\"x\":0,\"y\":0,\"width\":1920,\"height\":1080}]'; else printf '%s\\n' '[{\"name\":\"DP-1\",\"focused\":true,\"activeWorkspace\":{\"id\":1},\"scale\":1,\"refreshRate\":60,\"x\":0,\"y\":0,\"width\":1920,\"height\":1080}]'; fi ;; clients) printf '%s\\n' '[]' ;; getoption) printf '%s\\n' '{\"int\":0}' ;; esac ;;\n"
             "  brightnessctl) printf '%s\\n' 'Device brightness, 50%' ;;\n"
+            "  fc-match) printf '%s\\n' monospace ;;\n"
             "  curl) printf '%s\\n' 'Probe|0C|0km/h' ;;\n"
             "  grim) last=; for arg do last=$arg; done; if [ \"$last\" != - ]; then : > \"$last\"; fi ;;\n"
             "  slurp) printf '%s\\n' '0,0 100x100' ;;\n"
+            "  wl-paste) case \"$*\" in *--list-types*) printf '%s\\n' text/plain ;; *--watch*) : ;; *) printf '%s' probe ;; esac ;;\n"
             "  ip) if [ \"${1:-}\" = -j ] && [ \"${2:-}\" = route ]; then printf '%s\\n' '[{\"dev\":\"wlan0\",\"gateway\":\"192.0.2.254\",\"prefsrc\":\"192.0.2.1\"}]'; elif [ \"${1:-}\" = -j ] && [ \"${2:-}\" = addr ]; then printf '%s\\n' '[{\"addr_info\":[{\"family\":\"inet\",\"prefixlen\":24}]}]'; else printf '%s\\n' '1.1.1.1 via 192.0.2.254 dev wlan0 src 192.0.2.1'; fi ;;\n"
             "  iw) printf '%s\\n' 'Connected to 00:11:22:33:44:55 (on wlp0s20f3)' 'SSID: probe-network' 'freq: 2412' 'signal: -40.00 dBm' 'tx bitrate: 54.0 MBit/s' ;;\n"
             "  ping) printf '%s\\n' '64 bytes from 192.0.2.254: time=1.00 ms' ;;\n"
@@ -406,16 +462,29 @@ def main() -> int:
             encoding="utf-8",
         )
         backend_path.chmod(stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
+        shell_path = probe_bin / "bash"
+        shell_path.write_text(
+            "#!/bin/sh\n"
+            f"shell={json.dumps(str(probe_shell))}\n"
+            "case ${1:-} in\n"
+            "  -lc|-c) shift; exec \"$shell\" --noprofile --norc -c \"${1:-}\" ;;\n"
+            "  *) exec \"$shell\" \"$@\" ;;\n"
+            "esac\n",
+            encoding="utf-8",
+        )
+        shell_path.chmod(stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
         for backend in (
-            "brightnessctl", "bluetoothctl", "curl", "grim", "gsettings", "gtk-launch", "hyprctl",
+            "brightnessctl", "bluetoothctl", "curl", "fc-match", "grim", "gsettings", "gtk-launch", "hyprctl",
             "nmcli", "notify-send", "pactl", "powerprofilesctl", "pw-dump", "qrencode", "rfkill",
-            "slurp", "systemctl", "update-desktop-database", "upower", "wl-copy", "wtype", "wpctl", "xdg-open", "hyprpicker",
+            "slurp", "systemctl", "update-desktop-database", "upower", "wl-copy", "wl-paste", "wtype", "wpctl", "xdg-open", "hyprpicker", "setsid",
             "ip", "iw", "ping", "busctl", "date", "pgrep", "pkill",
         ):
             target = probe_bin / backend
             if not target.exists():
                 target.symlink_to(backend_path)
         trigger = CONSUMER_TRIGGERS.get(helper)
+        if trigger is not None:
+            trigger = trigger.replace('"/tmp/probe.png"', json.dumps(str(probe_image)))
         probe_consumer_path = consumer_path
         if trigger:
             probe_consumer_path = probe_root / "consumer" / consumer_path.name
@@ -454,11 +523,26 @@ def main() -> int:
                     fail(f"{helper} headless probe source-shape drifted")
                 text = text.replace(assignment, "    void node")
             probe_consumer_path.write_text(text, encoding="utf-8")
+        monitor_probe = helper in {"omarchy-monitor-state", "omarchy-hyprland-monitor-scaling"}
+        open_before_trigger = (
+            not monitor_probe
+            and helper not in {"omarchy-network-password", "omarchy-network-qr"}
+        )
+        trigger_open = (
+            "if (consumer.item && typeof consumer.item.open === \"function\") consumer.item.open(); "
+            if open_before_trigger
+            else ""
+        )
+        trigger_body = f"{trigger_open}{trigger};"
+        trigger_dispatch = (
+            trigger_body
+            if monitor_probe
+            else f"Qt.callLater(function() {{ {trigger_body} }});"
+        )
         trigger_timer = (
             f"    Timer {{ interval: 500; repeat: true; running: true; onTriggered: "
-            f"if (consumer.status === Loader.Ready) {{ Qt.callLater(function() {{ "
-            f"if (consumer.item && typeof consumer.item.open === \"function\") consumer.item.open(); "
-            f"{trigger}; }}); if (++harness.triggerCount >= 10) stop() }} }}\n"
+            f"if (consumer.status === Loader.Ready) {{ {trigger_dispatch} "
+            f"if (++harness.triggerCount >= 10) stop() }} }}\n"
             if trigger
             else ""
         )
@@ -467,36 +551,34 @@ def main() -> int:
             "import Quickshell\n"
             "import Quickshell.Io\n"
             "ShellRoot {\n"
-            "  Item {\n"
-            "    id: harness\n"
-            "    property int triggerCount: 0\n"
-            "    function findPressable(item) {\n"
-            "      if (item && typeof item.triggerPress === \"function\") return item\n"
-            "      var children = item && item.children ? item.children : []\n"
-            "      for (var i = 0; i < children.length; i++) {\n"
-            "        var found = findPressable(children[i])\n"
-            "        if (found) return found\n"
-            "      }\n"
-            "      return null\n"
+            "  id: harness\n"
+            "  property int triggerCount: 0\n"
+            "  function findPressable(item) {\n"
+            "    if (item && typeof item.triggerPress === \"function\") return item\n"
+            "    var children = item && item.children ? item.children : []\n"
+            "    for (var i = 0; i < children.length; i++) {\n"
+            "      var found = findPressable(children[i])\n"
+            "      if (found) return found\n"
             "    }\n"
-            "    QtObject {\n"
-            "      id: headlessBar\n"
-            "      property color barForeground: \"white\"\n"
-            "      property color foreground: \"white\"\n"
-            "      property string fontFamily: \"Sans\"\n"
-            "      property bool vertical: false\n"
-            "      property int barSize: 24\n"
-            "      function hideTooltip(item) {}\n"
-            "      function run(command) {\n"
-            "        var value = String(command || \"\")\n"
-            "        if (value.indexOf(\"omarchy-weather-status\") !== -1) Quickshell.execDetached([\"omarchy-weather-status\"])\n"
-            "        if (value.indexOf(\"omarchy-notification-send\") !== -1) Quickshell.execDetached([\"omarchy-notification-send\", \"probe\"])\n"
-            "      }\n"
+            "    return null\n"
+            "  }\n"
+            "  QtObject {\n"
+            "    id: headlessBar\n"
+            "    property color barForeground: \"white\"\n"
+            "    property color foreground: \"white\"\n"
+            "    property string fontFamily: \"Sans\"\n"
+            "    property bool vertical: false\n"
+            "    property int barSize: 24\n"
+            "    function hideTooltip(item) {}\n"
+            "    function run(command) {\n"
+            "      var value = String(command || \"\")\n"
+            "      if (value.indexOf(\"omarchy-weather-status\") !== -1) Quickshell.execDetached([\"omarchy-weather-status\"])\n"
+            "      if (value.indexOf(\"omarchy-notification-send\") !== -1) Quickshell.execDetached([\"omarchy-notification-send\", \"probe\"])\n"
             "    }\n"
-            f"    Loader {{ id: consumer; source: {json.dumps(str(probe_consumer_path))} }}\n"
+            "  }\n"
+            f"  Loader {{ id: consumer; source: {json.dumps(str(probe_consumer_path))} }}\n"
             + trigger_timer
-            + "    Timer { interval: 12000; running: true; onTriggered: Qt.quit() }\n"
-            + "  }\n"
+            + "  Timer { interval: 12000; running: true; onTriggered: Qt.quit() }\n"
             + "}\n",
             encoding="utf-8",
         )
@@ -507,6 +589,7 @@ def main() -> int:
             f"printf '%s\\t%s\\n' CONSUMER_PROBE {json.dumps(helper)}\n"
             f"export QML2_IMPORT_PATH={json.dumps(str(probe_root))}:{json.dumps(str(compatibility_bin))}\n"
             f"export OMARCHY_PATH={json.dumps(str(probe_root))}\n"
+            f"export FONTCONFIG_FILE={json.dumps(str(fontconfig_file))}\n"
             f"export PATH={json.dumps(str(probe_bin))}:{json.dumps(str(compatibility_bin / 'bin'))}:$PATH\n"
             "export QT_QPA_PLATFORM=offscreen\n"
             f"marker_path=\"${{TMPDIR:-/tmp}}/omanixy-consumer-{helper}-$$\"\n"
@@ -515,10 +598,17 @@ def main() -> int:
             f"home_dir=\"${{TMPDIR:-/tmp}}/omanixy-home-{helper}-$$\"\n"
             "mkdir -p \"$runtime_dir\" \"$home_dir/.cache\"\n"
             "chmod 700 \"$runtime_dir\"\n"
-            "rm -f \"$marker_path\".*\n"
+            + (
+                "mkdir -p \"$home_dir/.local/share/applications\"\n"
+                "printf '%s\\n' '[Desktop Entry]' 'Type=Application' 'Name=Probe' 'Exec=true' > \"$home_dir/.local/share/applications/org.example.User.desktop\"\n"
+                if helper == "omarchy-remove-launcher-entry"
+                else ""
+            )
+            + "rm -f \"$marker_path\".*\n"
             "trap 'rm -f \"$marker_path\".* \"$log_path\"; rm -rf \"$runtime_dir\" \"$home_dir\"' EXIT\n"
             "export OMANIXY_CONSUMER_MARKER=\"$marker_path\"\n"
             f"export OMANIXY_PROBE_BACKEND_PATH={json.dumps(str(probe_bin))}\n"
+            f"export OMANIXY_PROBE_HELPER={json.dumps(helper)}\n"
             "unset COMPAT_ADAPTER_NAME\n"
             "export XDG_RUNTIME_DIR=\"$runtime_dir\"\n"
             "export XDG_CONFIG_HOME=\"$home_dir/.config\"\n"

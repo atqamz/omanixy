@@ -61,6 +61,7 @@ screenshot_path=$(runtime_path "$screenshot_runtime")
 test -x "$screenshot_runtime/bin/omarchy-capture-screenshot"
 test -x "$screenshot_runtime/bin/omarchy-notification-send"
 PATH="$screenshot_path" command -v grim >/dev/null
+PATH="$screenshot_path" command -v fc-match >/dev/null
 PATH="$screenshot_path" command -v wl-copy >/dev/null
 PATH="$screenshot_path" command -v notify-send >/dev/null
 test ! -x "$screenshot_runtime/bin/omarchy-weather-status"

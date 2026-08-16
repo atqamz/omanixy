@@ -1289,6 +1289,23 @@ printf 'CASE\tomarchy-weather-location\tmissingBackend\n' >> "$case_log"
 printf '%s\n' '[Desktop Entry]' > "$home/.local/share/applications/org.example.MissingBackend.desktop"
 run_missing_backend omarchy-remove-launcher-entry update-desktop-database org.example.MissingBackend Missing
 
+run_invalid_args_status() {
+  local helper=$1
+  shift
+  local status=0
+  if HOME="$home" PATH="$bin:$PATH" run_adapter "$helper" "$@" 2>"$test_root/error"; then
+    printf '%s\n' "$helper accepted invalid arguments" >&2
+    exit 1
+  else
+    status=$?
+  fi
+  test "$status" -eq 2
+}
+
+run_invalid_args_status omarchy-audio-output-set-default --unexpected
+run_invalid_args_status omarchy-capture-screenshot unsupported
+run_invalid_args_status omarchy-notification-send --urgency invalid Headline
+
 for helper in \
   omarchy-audio-input-set-default \
   omarchy-audio-output-set-default \
