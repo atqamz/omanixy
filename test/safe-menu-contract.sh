@@ -4,6 +4,7 @@ set -euo pipefail
 runtime=${1:?runtime package path required}
 compatibility_root=${2:?compatibility root path required}
 uwsm_test=${3:?UWSM integration test path required}
+quickshell=${4:?selected Quickshell executable required}
 menu="$compatibility_root/default/omarchy/omarchy-menu.jsonc"
 test_root=$(mktemp -d)
 trap 'rm -rf "$test_root"' EXIT
@@ -107,7 +108,7 @@ while IFS= read -r command; do
   done < <(grep -oE 'omarchy-[a-z0-9][a-z0-9-]*' <<<"$command" | sort -u)
 done < <(jq -r '.. | objects | .action?, .when?, .checked?, .provider? | strings' "$normalized_menu")
 
-bash "$uwsm_test" "$runtime" "$compatibility_root"
+bash "$uwsm_test" "$runtime" "$compatibility_root" "$quickshell"
 
 for executable in systemctl loginctl; do
   PATH="$runtime_path" command -v "$executable" >/dev/null

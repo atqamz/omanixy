@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo=${1:?repository path required}
-flake=$repo/flake.nix
+supported_systems=${2:?evaluated supported systems JSON required}
 metadata=$repo/upstream/omarchy.yaml
 matrix=$repo/upstream/porting-matrix.yaml
 lockfile=$repo/flake.lock
@@ -67,7 +67,8 @@ jq -e \
   --arg adapter_hash "$adapter_hash" \
   '.adapter == $adapter and .adapterHash == $adapter_hash and (.adapterSources | type) == "array" and .behavioralTests == $tests and (.helpers | type) == "object"' \
   "$manifest" >/dev/null
-grep -Fq 'assertOneOf "omanixy supported system"' "$flake"
 test "$(find "$repo" -type f -name '*.qml' -print -quit)" = ""
+jq -e --argjson systems "$supported_systems" '$systems == ["x86_64-linux", "aarch64-linux"]' \
+  <<< '{}'
 
 printf '%s\n' 'pin invariants passed'

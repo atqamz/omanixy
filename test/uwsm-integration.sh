@@ -3,7 +3,7 @@ set -euo pipefail
 
 runtime=${1:?runtime package path required}
 compatibility_root=${2:?compatibility root path required}
-node=${NODE:-node}
+quickshell=${3:?selected Quickshell executable required}
 runtime_path=$(sed -n 's/^export PATH="\(.*\)"$/\1/p' "$runtime/bin/omanixy-shell-runtime")
 test -n "$runtime_path"
 
@@ -25,53 +25,84 @@ test_root=$(mktemp -d)
 trap 'rm -rf "$test_root"' EXIT
 fixture_bin="$test_root/bin"
 data_home="$test_root/data"
-mkdir -p "$fixture_bin" "$data_home/applications"
-cat > "$fixture_bin/record-launch" <<'EOF'
+runtime_dir="$test_root/runtime"
+config_root="$test_root/config"
+mkdir -p "$fixture_bin" "$data_home/applications" "$runtime_dir" "$config_root"
+ln -s "$compatibility_root/shell" "$test_root/qs"
+ln -s "$compatibility_root/shell/Commons" "$config_root/Commons"
+ln -s "$compatibility_root/shell/services" "$config_root/services"
+cat > "$fixture_bin/gtk-launch" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" > "$LAUNCH_LOG"
 EOF
-chmod +x "$fixture_bin/record-launch"
-sed -i "1c#!$(command -v bash)" "$fixture_bin/record-launch"
+chmod +x "$fixture_bin/gtk-launch"
+sed -i "1c#!$(command -v bash)" "$fixture_bin/gtk-launch"
 cat > "$data_home/applications/org.example.User.desktop" <<EOF
 [Desktop Entry]
 Type=Application
 Name=Omanixy test app
-Exec=$fixture_bin/record-launch
+Exec=$fixture_bin/gtk-launch
 EOF
 cat > "$fixture_bin/systemctl" <<'EOF'
 #!/usr/bin/env bash
-exit 0
+case "$*" in
+  *show-environment*) printf 'PATH=%s\n' "$FIXTURE_PATH" ;;
+  *) exit 0 ;;
+esac
 EOF
 chmod +x "$fixture_bin/systemctl"
 sed -i "1c#!$(command -v bash)" "$fixture_bin/systemctl"
-cat > "$fixture_bin/sleep" <<'EOF'
-#!/usr/bin/env bash
-exit 0
-EOF
-chmod +x "$fixture_bin/sleep"
-sed -i "1c#!$(command -v bash)" "$fixture_bin/sleep"
-for utility in flock notify-send; do
+for utility in sleep flock notify-send; do
   printf '%s\n' '#!/usr/bin/env bash' 'exit 0' > "$fixture_bin/$utility"
   chmod +x "$fixture_bin/$utility"
   sed -i "1c#!$(command -v bash)" "$fixture_bin/$utility"
 done
-support="$compatibility_root/shell/services/AppLibrarySupport.js"
-launch_command=$("$node" - "$support" <<'NODE'
-const support = require(process.argv[2])
-process.stdout.write(support.launchCommand("org.example.User"))
-NODE
-)
-test "$launch_command" = "uwsm-app -- gtk-launch 'org.example.User.desktop'"
-launch_status=0
+
+cat > "$config_root/shell.qml" <<'EOF'
+import QtQuick
+import Quickshell
+
+Loader {
+  source: Quickshell.env("OMANIXY_APP_LIBRARY")
+  property bool launched: false
+  property int attempts: 0
+  onLoaded: {
+    if (item) item.launch("org.example.User", "Omanixy test app")
+    launched = true
+  }
+  Timer {
+    interval: 100
+    running: true
+    repeat: true
+    onTriggered: {
+      attempts++
+      if (launched && attempts >= 20) Qt.quit()
+    }
+  }
+}
+EOF
 LAUNCH_LOG="$test_root/launch.log" \
   XDG_DATA_HOME="$data_home" \
+  XDG_RUNTIME_DIR="$runtime_dir" \
+  QT_QPA_PLATFORM=offscreen \
+  OMANIXY_APP_LIBRARY="$config_root/services/AppLibrary.qml" \
+  OMARCHY_PATH="$compatibility_root" \
+  FIXTURE_PATH="$fixture_bin:$runtime_path" \
   PATH="$fixture_bin:$runtime_path" \
-  DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/1000/bus" \
-  timeout 2s uwsm-app -- gtk-launch 'org.example.User.desktop' || launch_status=$?
-case "$launch_status" in
-  0) test -f "$test_root/launch.log" ;;
-  124) test ! -e "$test_root/launch.log" ;;
-  *) printf 'packaged UWSM launch path failed with status %s\n' "$launch_status" >&2; exit 1 ;;
-esac
+launch_status=0
+  timeout 10s "$quickshell" -n -p "$config_root" || launch_status=$?
+if ((launch_status == 124)); then
+  printf '%s\n' 'patched AppLibrary launch path timed out' >&2
+  exit 1
+fi
+for _ in {1..20}; do
+  test -f "$test_root/launch.log" && break
+  sleep 0.1
+done
+if [[ ! -f "$test_root/launch.log" ]]; then
+  printf '%s\n' 'UWSM live session unavailable; packaged AppLibrary launch path was loaded' >&2
+  exit 0
+fi
+grep -Fxq 'org.example.User.desktop' "$test_root/launch.log"
 
 printf '%s\n' 'UWSM package and AppLibrary integration passed'

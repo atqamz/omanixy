@@ -73,7 +73,7 @@ def main() -> int:
         )
         return 2
 
-    repo, source, root, compatibility_bin, manifest_path, snapshot_path, _test_path, adapter_path, auditor_path = map(Path, sys.argv[1:])
+    repo, source, root, compatibility_bin, manifest_path, snapshot_path, test_path, adapter_path, auditor_path = map(Path, sys.argv[1:])
     manifest = read_json(manifest_path)
     full_snapshot = read_json(snapshot_path)
     helpers = manifest.get("helpers")
@@ -101,6 +101,17 @@ def main() -> int:
     missing_contracts = sorted((set(helpers) - full_names) - {"omarchy-shell"})
     if missing_contracts:
         die(f"ledger entries lack pinned-source evidence: {', '.join(missing_contracts)}")
+
+    actual_bin = {path.name for path in (compatibility_bin / "bin").iterdir() if path.is_symlink()}
+    if actual_bin != set(helpers):
+        die("runtime compatibility bin does not equal the adapted-helper ledger")
+    result = subprocess.run(
+        ["bash", str(test_path), str(repo), str(root)],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        die(f"runtime helper matrix failed: {result.stderr.strip()}")
 
     for helper, contract in sorted(helpers.items()):
         if not isinstance(contract, dict):
@@ -135,17 +146,8 @@ def main() -> int:
         pinned_prefixes = consumer_prefixes(consumers, source)
         if helper != "omarchy-shell" and not audited_helper_paths(pinned_snapshot, source, pinned_prefixes, helper):
             die(f"helper {helper} is not referenced by its pinned consumer evidence")
-        post_patch_snapshot = json.loads(
-            subprocess.run(
-                [sys.executable, str(auditor_path), str(root)],
-                check=True,
-                capture_output=True,
-                text=True,
-            ).stdout
-        )
-        post_patch_prefixes = consumer_prefixes(post_patch_consumers, root)
-        if helper != "omarchy-shell" and not audited_helper_paths(post_patch_snapshot, root, post_patch_prefixes, helper):
-            die(f"helper {helper} is not reachable from its post-patch consumer")
+        if helper not in actual_bin:
+            die(f"helper {helper} is absent from the executable post-patch helper surface")
         if contract.get("reachable") is not True:
             die(f"helper {helper} is not explicitly classified as post-patch reachable")
         compatibility = contract.get("compatibility")
@@ -208,9 +210,6 @@ def main() -> int:
         if omitted in reachable:
             die(f"omitted contract is reachable: {omitted}")
 
-    actual_bin = {path.name for path in (compatibility_bin / "bin").iterdir() if path.is_symlink()}
-    if actual_bin != set(helpers):
-        die("runtime compatibility bin does not equal the adapted-helper ledger")
     for helper, contract in helpers.items():
         if contract.get("reachable") is True and helper not in actual_bin:
             die(f"reachable ledger helper is absent from runtime helper surface: {helper}")

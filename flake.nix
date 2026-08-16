@@ -148,7 +148,7 @@
             {
               nativeBuildInputs = [ pkgs.bash pkgs.gnugrep pkgs.jq pkgs.ripgrep (pkgs.python3.withPackages (ps: [ ps.pyyaml ])) ];
             } ''
-            ${pkgs.bash}/bin/bash ${./test/pin-invariants.sh} ${./.}
+            ${pkgs.bash}/bin/bash ${./test/pin-invariants.sh} ${./.} '${builtins.toJSON supportedSystems}'
             touch "$out"
           '';
           ipc-wrapper = pkgs.runCommand "omanixy-ipc-wrapper"
@@ -271,7 +271,7 @@
           '';
           contract-closure = pkgs.runCommand "omanixy-contract-closure"
             {
-              nativeBuildInputs = [ pkgs.coreutils pkgs.jq pkgs.python3 ];
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gawk pkgs.gnugrep pkgs.gnused pkgs.jq pkgs.procps pkgs.python3 pkgs.util-linux ];
             } ''
             ${pkgs.python3}/bin/python3 ${./scripts/check-contract-closure} \
               ${./.} ${runtime.passthru.omarchySource} ${compatibilityRoot} ${runtime.passthru.compatibilityBin} \
@@ -313,7 +313,7 @@
             {
               nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.gnused pkgs.jq pkgs.python3 pkgs.nodejs ];
             } ''
-            ${pkgs.bash}/bin/bash ${./test/safe-menu-contract.sh} ${runtime} ${compatibilityRoot} ${./test/uwsm-integration.sh}
+            ${pkgs.bash}/bin/bash ${./test/safe-menu-contract.sh} ${runtime} ${compatibilityRoot} ${./test/uwsm-integration.sh} ${runtime}/bin/quickshell
             touch "$out"
           '';
           qml-patch-behavior = pkgs.runCommand "omanixy-qml-patch-behavior"
@@ -334,7 +334,7 @@
             {
               nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.gnused pkgs.nodejs ];
             } ''
-            ${pkgs.bash}/bin/bash ${./test/uwsm-integration.sh} ${runtime} ${compatibilityRoot}
+            ${pkgs.bash}/bin/bash ${./test/uwsm-integration.sh} ${runtime} ${compatibilityRoot} ${runtime}/bin/quickshell
             touch "$out"
           '';
         });
