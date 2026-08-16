@@ -20,12 +20,6 @@ if ((uwsm_help_status == 0)); then
 else
   grep -Fq 'DBUS_SESSION_BUS_ADDRESS' <<<"$uwsm_help"
 fi
-real_launch_status=0
-PATH="$runtime_path" timeout 3s "$uwsm_app" -- gtk-launch org.example.User.desktop >/dev/null 2>&1 || real_launch_status=$?
-if ((real_launch_status != 0)); then
-  printf '%s\n' 'real UWSM live launch unavailable; controlled AppLibrary boundary follows' >&2
-fi
-
 test_root=$(mktemp -d)
 trap 'rm -rf "$test_root"' EXIT
 fixture_bin="$test_root/bin"

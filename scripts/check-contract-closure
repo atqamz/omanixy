@@ -92,6 +92,11 @@ def main() -> int:
     )
     if result.returncode != 0:
         die(f"runtime helper matrix failed: {result.stderr.strip()}")
+    runtime_probes = {
+        fields[1]
+        for line in result.stdout.splitlines()
+        if (fields := line.split("\t")) and len(fields) >= 3 and fields[0] == "CASE" and fields[2] == "valid"
+    }
 
     for helper, contract in sorted(helpers.items()):
         if not isinstance(contract, dict):
@@ -120,6 +125,8 @@ def main() -> int:
                 die(f"helper {helper} has a missing post-patch consumer path: {consumer}")
         if helper not in actual_bin:
             die(f"helper {helper} is absent from the executable post-patch helper surface")
+        if contract.get("reachable") is True and helper != "omarchy-shell" and helper not in runtime_probes:
+            die(f"helper {helper} has no executable post-patch consumer probe")
         if contract.get("reachable") is not True:
             die(f"helper {helper} is not explicitly classified as post-patch reachable")
         compatibility = contract.get("compatibility")
