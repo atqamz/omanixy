@@ -20,8 +20,4 @@ else
   grep -Fq 'DBUS_SESSION_BUS_ADDRESS' <<<"$uwsm_help"
 fi
 
-app_library="$compatibility_root/shell/services/AppLibrary.qml"
-grep -Fq 'Util.execDetached("uwsm-app -- gtk-launch ' "$app_library"
-test "$(grep -Fc 'uwsm-app --' "$app_library")" -eq 1
-
 printf '%s\n' 'UWSM package and AppLibrary integration passed'

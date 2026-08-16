@@ -34,16 +34,24 @@ def names(snapshot: dict) -> set[str]:
     return values
 
 
-def contains_contract(path: Path, contract: str) -> bool:
-    paths = [path] if path.is_file() else sorted(path.rglob("*"))
-    for candidate in paths:
-        if candidate.is_file():
-            try:
-                if contract in candidate.read_text(errors="replace"):
-                    return True
-            except OSError:
-                continue
+def audited_helper_paths(snapshot: dict, root: Path, prefixes: list[str], helper: str) -> bool:
+    for entry in snapshot.get("direct_omarchy_helpers", []):
+        if not isinstance(entry, dict) or entry.get("name") != helper:
+            continue
+        path = entry.get("path")
+        if not isinstance(path, str):
+            continue
+        if any(path == prefix or path.startswith(prefix.rstrip("/") + "/") for prefix in prefixes):
+            return True
     return False
+
+
+def consumer_prefixes(paths: list[str], root: Path) -> list[str]:
+    prefixes = []
+    for path in paths:
+        candidate = root / path
+        prefixes.append(str(candidate.relative_to(root)))
+    return prefixes
 
 
 def adapter_hash(repo: Path, manifest: dict) -> str:
@@ -123,9 +131,20 @@ def main() -> int:
             if not isinstance(consumer, str) or not (root / consumer).exists():
                 die(f"helper {helper} has a missing post-patch consumer path: {consumer}")
             post_patch_paths.append(root / consumer)
-        if helper != "omarchy-shell" and not any(contains_contract(path, helper) for path in consumer_paths):
+        pinned_snapshot = full_snapshot
+        pinned_prefixes = consumer_prefixes(consumers, source)
+        if helper != "omarchy-shell" and not audited_helper_paths(pinned_snapshot, source, pinned_prefixes, helper):
             die(f"helper {helper} is not referenced by its pinned consumer evidence")
-        if helper != "omarchy-shell" and not any(contains_contract(path, helper) for path in post_patch_paths):
+        post_patch_snapshot = json.loads(
+            subprocess.run(
+                [sys.executable, str(auditor_path), str(root)],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout
+        )
+        post_patch_prefixes = consumer_prefixes(post_patch_consumers, root)
+        if helper != "omarchy-shell" and not audited_helper_paths(post_patch_snapshot, root, post_patch_prefixes, helper):
             die(f"helper {helper} is not reachable from its post-patch consumer")
         if contract.get("reachable") is not True:
             die(f"helper {helper} is not explicitly classified as post-patch reachable")

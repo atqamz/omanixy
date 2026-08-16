@@ -146,7 +146,7 @@
         {
           pin-invariants = pkgs.runCommand "omanixy-pin-invariants"
             {
-              nativeBuildInputs = [ pkgs.bash pkgs.gnugrep pkgs.jq pkgs.ripgrep ];
+              nativeBuildInputs = [ pkgs.bash pkgs.gnugrep pkgs.jq pkgs.ripgrep (pkgs.python3.withPackages (ps: [ ps.pyyaml ])) ];
             } ''
             ${pkgs.bash}/bin/bash ${./test/pin-invariants.sh} ${./.}
             touch "$out"

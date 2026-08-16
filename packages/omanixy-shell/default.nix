@@ -20,7 +20,7 @@ let
   baselineConfig = builtins.removeAttrs baselineSource [ "featurePlugins" "featureDependencies" "featureOrder" "migrations" ];
   blockedPluginIds = builtins.toJSON baselineConfig.disabledPlugins;
   featureRuntimeInputs = with pkgs; {
-    core = [ bash coreutils findutils gawk gnugrep gnused inotify-tools jq quickshell systemd util-linux ];
+    core = [ bash coreutils findutils gawk gnugrep gnused inotify-tools jq systemd util-linux ];
     network = [ iproute2 iputils iw networkmanager qrencode ];
     audio = [ pipewire pulseaudio wireplumber ];
     bluetooth = [ bluez util-linux ];
@@ -344,7 +344,7 @@ EOF
 
   ipc = pkgs.writeShellApplication {
     name = "omanixy-shell";
-    runtimeInputs = with pkgs; [ coreutils quickshell ];
+    runtimeInputs = [ pkgs.coreutils quickshell ];
     inheritPath = false;
     text = builtins.replaceStrings
       [ "@OMARCHY_PATH@" ]

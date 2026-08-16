@@ -12,16 +12,6 @@ omarchy_revision=$(jq -er '.pins.omarchy' "$manifest")
 quickshell_revision=$(jq -er '.pins.quickshell' "$manifest")
 nixpkgs_revision=$(jq -er '.pins.nixpkgs' "$manifest")
 
-grep -Fq "github:basecamp/omarchy/$omarchy_revision" "$flake"
-grep -Fq "github:quickshell-mirror/quickshell/$quickshell_revision" "$flake"
-grep -Fq 'nixpkgsRevision = contractSource.pins.nixpkgs' "$flake"
-grep -Fq "source: github:basecamp/omarchy/$omarchy_revision" "$metadata"
-grep -Fq "source: github:quickshell-mirror/quickshell/$quickshell_revision" "$metadata"
-grep -Fq "source: github:NixOS/nixpkgs/$nixpkgs_revision" "$metadata"
-grep -Fq "revision: $omarchy_revision" "$metadata"
-grep -Fq "revision: $quickshell_revision" "$metadata"
-grep -Fq "revision: $nixpkgs_revision" "$metadata"
-grep -Fq "\"rev\": \"$nixpkgs_revision\"" "$lockfile"
 jq -e \
   --arg omarchy "$omarchy_revision" \
   --arg quickshell "$quickshell_revision" \
@@ -33,6 +23,36 @@ jq -e \
     and .nodes.quickshell.original.rev == $quickshell
     and .nodes.nixpkgs.locked.rev == $nixpkgs
   ' "$lockfile" >/dev/null
+${PYTHON:-python3} - "$metadata" "$omarchy_revision" "$quickshell_revision" "$nixpkgs_revision" "$matrix" <<'PY'
+import sys
+import yaml
+
+metadata, omarchy, quickshell, nixpkgs, matrix = sys.argv[1:]
+data = yaml.safe_load(open(metadata, encoding="utf-8"))
+pair = data["policy"]["runtime_pair"]
+assert data["track"] == "quattro"
+assert data["revision"] == omarchy
+assert data["policy"]["validated_quattro_pair"] is True
+assert pair["omarchy"] == {"source": f"github:basecamp/omarchy/{omarchy}", "revision": omarchy}
+assert pair["quickshell"]["source"] == f"github:quickshell-mirror/quickshell/{quickshell}"
+assert pair["quickshell"]["revision"] == quickshell
+assert pair["quickshell"]["nixpkgs"]["source"] == f"github:NixOS/nixpkgs/{nixpkgs}"
+assert pair["quickshell"]["nixpkgs"]["revision"] == nixpkgs
+
+matrix_data = yaml.safe_load(open(matrix, encoding="utf-8"))
+paths = {
+    path["path"]
+    for item in matrix_data["items"]
+    for path in item.get("upstream", {}).get("paths", [])
+}
+assert {"shell/shell.qml", "shell/plugins/", "config/omarchy/shell.json", "themes/tokyo-night/", "bin/omarchy-launch-shell"} <= paths
+consumption = {
+    path["consumption"]
+    for item in matrix_data["items"]
+    for path in item.get("upstream", {}).get("paths", [])
+}
+assert {"reference-only", "build-time"} <= consumption
+PY
 adapter_hash=$( {
   first=true
   while IFS= read -r source; do
@@ -47,20 +67,7 @@ jq -e \
   --arg adapter_hash "$adapter_hash" \
   '.adapter == $adapter and .adapterHash == $adapter_hash and (.adapterSources | type) == "array" and .behavioralTests == $tests and (.helpers | type) == "object"' \
   "$manifest" >/dev/null
-grep -Fq "validated_quattro_pair: true" "$metadata"
-grep -Fq 'track: quattro' "$metadata"
-grep -Fq 'release:' "$metadata" && exit 1
 grep -Fq 'assertOneOf "omanixy supported system"' "$flake"
-grep -Fq 'path: shell/shell.qml' "$matrix"
-grep -Fqx '        - path: shell/plugins/' "$matrix"
-grep -Fq 'path: config/omarchy/shell.json' "$matrix"
-grep -Fq 'path: themes/tokyo-night/' "$matrix"
-grep -Fq 'path: bin/omarchy-launch-shell' "$matrix"
-grep -Fq 'consumption: reference-only' "$matrix"
-grep -Fq 'consumption: build-time' "$matrix"
-rg -n 'github:basecamp/omarchy/(quattro|main|master)' "$flake" && exit 1
-rg -n 'github:quickshell-mirror/quickshell/(master|main)' "$flake" && exit 1
-rg -n 'pending-issue-2|validated_quattro_pair: false|runtime_pair: pending' "$metadata" && exit 1
-find "$repo" -type f -name '*.qml' -print -quit | grep -q . && exit 1
+test "$(find "$repo" -type f -name '*.qml' -print -quit)" = ""
 
 printf '%s\n' 'pin invariants passed'

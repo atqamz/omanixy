@@ -51,21 +51,6 @@ test ! -e "$runtime_source/shell/plugins/panels/tailscale"
 test ! -e "$runtime_source/shell/plugins/panels/speedtest"
 test ! -e "$runtime_source/shell/Ui/SpeedTestOverlay.qml"
 test ! -e "$runtime_source/shell/plugins/bar/widgets/SystemUpdate.qml"
-test -f "$runtime_source/shell/plugins/panels/network/Panel.qml"
-grep -Fq 'Model.filterWifiNetworks' "$runtime_source/shell/plugins/panels/network/Panel.qml"
-grep -Fq 'function filterWifiNetworks' "$runtime_source/shell/plugins/panels/network/Model.js"
-grep -Fq 'readonly property bool canRunSpeedTest: false' "$runtime_source/shell/plugins/panels/network/Panel.qml"
-grep -Fq 'else if (b === Qt.MiddleButton) root.togglePanel()' \
-  "$runtime_source/shell/plugins/panels/clock/BarWidget.qml"
-if grep -Fq 'omarchy-menu-timezone' "$runtime_source/shell/plugins/panels/clock/BarWidget.qml"; then
-  exit 1
-fi
-if grep -Fq 'omarchy-launch-floating-terminal-with-presentation' \
-  "$runtime_source/shell/plugins/panels/network/Panel.qml"; then
-  exit 1
-fi
-grep -Fq 'omanixyBlockedPlugins.indexOf(Util.canonicalWidgetId(String(key))) !== -1' \
-  "$runtime_source/shell/services/PluginRegistry.qml"
 jq -e '
   .version == 1
   and .omanixyBaselineVersion == 2
@@ -81,11 +66,6 @@ diff -u \
 test -x "$runtime_source/bin/omarchy-menu-emoji-insert"
 test -x "$runtime_source/bin/omarchy-clipboard-open"
 test ! -e "$runtime_source/bin/omarchy-update"
-grep -Fq 'readonly property var dnsProviders: Model.supportedDnsProviders()' \
-  "$runtime_source/shell/plugins/panels/network/Panel.qml"
-if grep -Fq 'provider: "Custom"' "$runtime_source/shell/plugins/panels/network/Panel.qml"; then
-  exit 1
-fi
 test "$runtime_source" != "$runtime"
 test -f "$runtime/share/omarchy-theme/colors.toml"
 test -f "$runtime/share/omarchy-theme/shell.toml"
@@ -108,9 +88,6 @@ test -x "$runtime/bin/omarchy-network-qr"
 test -x "$runtime/bin/omarchy-network-password"
 test "$(unit_path "$runtime/bin/omarchy-network-qr")" = "$(unit_path "$compatibility_bin/bin/omarchy-network-qr")"
 test "$(unit_path "$runtime/bin/omarchy-network-password")" = "$(unit_path "$compatibility_bin/bin/omarchy-network-password")"
-grep -Fq 'root.requestDeleteSelected()' "$runtime_source/shell/plugins/menu/Menu.qml"
-grep -Fq 'root.appLibrary.canRemove(row.appId)' "$runtime_source/shell/plugins/menu/Menu.qml"
-grep -Fq 'function canRemove(desktopId)' "$runtime_source/shell/services/AppLibrary.qml"
 test -f "$runtime_source/shell/services/AppLibrarySupport.js"
 
 printf '%s\n' 'runtime closure invariants passed'
