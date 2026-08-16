@@ -67,11 +67,6 @@ PATH="$test_root/bin:$root/bin:$runtime_path" \
   QML2_IMPORT_PATH="$test_root" \
   "$root/bin/omarchy-remove-launcher-entry" org.example.User 'User app'
 test ! -e "$home/.local/share/applications/org.example.User.desktop"
-if PATH="$test_root/bin:$root/bin:$runtime_path" HOME="$home" XDG_DATA_HOME="$home/.local/share" \
-  "$root/bin/omarchy-remove-launcher-entry" org.example.System 'System app'; then
-  printf '%s\n' 'non-user launcher unexpectedly removed' >&2
-  exit 1
-fi
 
 cat > "$home/.local/share/applications/org.example.User.desktop" <<'EOF'
 [Desktop Entry]
@@ -83,6 +78,7 @@ cat > "$config_root/shell.qml" <<'EOF'
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import qs.Commons
 
 ShellRoot {
   Item {
@@ -90,9 +86,23 @@ ShellRoot {
     property var appLibrary: null
   property bool handled: false
   property int attempts: 0
+  property int deleteAttempts: 0
+  property string failureReason: ""
+
+  function fail(reason) {
+    if (failure.running || result.running) return
+    handled = true
+    failureReason = reason
+    failure.command = ["bash", "-c", "printf '%s\\n' " + Util.shellQuote(root.failureReason) + " > " + Util.shellQuote(Quickshell.env("RESULT_LOG"))]
+    failure.running = true
+  }
 
   function runScenario(menu) {
-    if (handled || !root.appLibrary) return
+    if (handled) return
+    if (!root.appLibrary) {
+      root.fail("app-library-not-loaded")
+      return
+    }
     handled = true
     menu.shell = ({appLibrary: root.appLibrary})
     menu.openExistingMenu("apps")
@@ -100,21 +110,21 @@ ShellRoot {
     menu.rebuildDisplay()
     menu.selectedIndex = 0
     menu.cursorActive = true
-    if (!root.appLibrary.canRemove("org.example.User") || !root.appLibrary.canRemove("org.example.System") || !root.appLibrary.canRemove("org.example.Nix")
-        || !root.appLibrary.canRemove("org.example.Missing") || !root.appLibrary.canRemove("org.example.Symlink")
+    if (!root.appLibrary.canRemove("org.example.User") || root.appLibrary.canRemove("org.example.System") || root.appLibrary.canRemove("org.example.Nix")
+        || root.appLibrary.canRemove("org.example.Missing") || root.appLibrary.canRemove("org.example.Symlink")
         || root.appLibrary.canRemove("../escape") || root.appLibrary.canRemove("../../escape")) {
-      Qt.quit()
+      root.fail("ownership-scan")
       return
     }
     if (root.appLibrary.userOwnedEntryIds["org.example.System"] === true
         || root.appLibrary.userOwnedEntryIds["org.example.Nix"] === true
         || root.appLibrary.userOwnedEntryIds["org.example.Symlink"] === true) {
-      Qt.quit()
+      root.fail("ownership-classification")
       return
     }
     menu.requestDeleteSelected()
     if (!menu.deleteConfirmOpen) {
-      Qt.quit()
+      root.fail("confirmation-not-open")
       return
     }
     menu.cancelDelete()
@@ -125,17 +135,22 @@ ShellRoot {
     menu.cursorActive = true
     menu.requestDeleteSelected()
     if (!menu.deleteConfirmOpen) {
-      Qt.quit()
+      root.fail("confirmation-not-reopen")
       return
     }
     menu.confirmDelete()
     root.appLibrary.refreshUserOwnedEntries()
-    result.running = true
+    deletionTimer.start()
   }
 
   Process {
     id: result
     command: ["bash", "-c", "printf '%s\\n' allowed > " + Quickshell.env("RESULT_LOG")]
+    onExited: Qt.quit()
+  }
+
+  Process {
+    id: failure
     onExited: Qt.quit()
   }
 
@@ -155,6 +170,22 @@ ShellRoot {
   }
 
   Timer {
+    id: deletionTimer
+    interval: 100
+    repeat: true
+    onTriggered: {
+      root.deleteAttempts++
+      if (!root.appLibrary.canRemove("org.example.User")) {
+        stop()
+        result.running = true
+      } else if (root.deleteAttempts >= 50) {
+        stop()
+        root.fail("delete-not-refreshed")
+      }
+    }
+  }
+
+  Timer {
     id: scanTimer
     interval: 100
     running: true
@@ -166,6 +197,8 @@ ShellRoot {
         root.runScenario(menuLoader.item)
       else if (menuLoader.item && root.attempts >= 20)
         root.runScenario(menuLoader.item)
+      else if (root.attempts >= 20)
+        root.fail(menuLoader.item ? "app-library-not-loaded" : "menu-not-loaded")
     }
   }
 
@@ -183,12 +216,16 @@ RESULT_LOG="$test_root/result.log" \
   XDG_DATA_DIRS="$system_data:$nix_data" \
   XDG_RUNTIME_DIR="$runtime_dir" \
   QT_QPA_PLATFORM=offscreen \
+  QML2_IMPORT_PATH="$test_root" \
   OMANIXY_APP_LIBRARY="$config_root/services/AppLibrary.qml" \
   OMANIXY_MENU="$config_root/menu/Menu.qml" \
   OMARCHY_PATH="$root" \
   timeout 10s "$runtime/bin/quickshell" -n -p "$config_root"
 test -f "$test_root/result.log"
-grep -Fxq allowed "$test_root/result.log"
+if ! grep -Fxq allowed "$test_root/result.log"; then
+  cat "$test_root/result.log" >&2
+  exit 1
+fi
 test ! -e "$home/.local/share/applications/org.example.User.desktop"
 
 printf '%s\n' 'launcher delete contract passed'

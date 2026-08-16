@@ -20,8 +20,18 @@ if ((uwsm_help_status == 0)); then
 else
   grep -Fq 'DBUS_SESSION_BUS_ADDRESS' <<<"$uwsm_help"
 fi
-grep -Fq 'var command = AppSupport.launchCommand(id)' "$compatibility_root/shell/services/AppLibrary.qml"
-grep -Fq 'if (command) Util.execDetached(command)' "$compatibility_root/shell/services/AppLibrary.qml"
+node - "$compatibility_root/shell/services/AppLibrarySupport.js" <<'NODE'
+const support = require(process.argv[2]);
+for (const id of ["org.example.User", "org.example.User.desktop"]) {
+  if (support.launchCommand(id) !== "uwsm-app -- gtk-launch 'org.example.User.desktop'") {
+    throw new Error(`unexpected UWSM command for ${id}`);
+  }
+}
+if (support.launchCommand("../escape") !== "") {
+  throw new Error("invalid desktop id produced a launch command");
+}
+NODE
+test -f "$compatibility_root/shell/services/AppLibrarySupport.js"
 test_root=$(mktemp -d)
 trap 'rm -rf "$test_root"' EXIT
 fixture_bin="$test_root/bin"

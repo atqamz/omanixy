@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -140,25 +141,30 @@ def main() -> int:
         if not isinstance(consumer_probe, dict):
             die(f"helper {helper} has no executable generated consumer probe")
         executable = consumer_probe.get("executable")
-        adapter_name = consumer_probe.get("adapterName")
-        if executable != "bin/omanixy-compat-adapter" or adapter_name != helper:
+        probe_helper = consumer_probe.get("helper")
+        if probe_helper != helper or consumer_probe.get("invocation") != "generated-post-patch-consumer":
             die(f"helper {helper} has a disconnected generated consumer probe")
         probe_path = compatibility_bin / executable
         if not probe_path.is_file():
             die(f"helper {helper} has no packaged consumer executable")
+        expected_consumer_hash = surface.get("consumerSourceSha256")
+        if not isinstance(expected_consumer_hash, str) or hashlib.sha256((root / consumer).read_bytes()).hexdigest() != expected_consumer_hash:
+            die(f"helper {helper} generated consumer identity drifted")
         if any(not isinstance(consumer, str) or not (root / consumer).exists() for consumer in post_patch_consumers):
             die(f"helper {helper} has a missing declared post-patch consumer")
         if helper not in actual_bin:
             die(f"helper {helper} is absent from the executable post-patch helper surface")
         probe_result = subprocess.run(
             [str(probe_path)],
-            env={**os.environ, "COMPAT_ADAPTER_NAME": adapter_name},
+            env=os.environ.copy(),
             capture_output=True,
             text=True,
             timeout=5,
         )
         if probe_result.returncode == 127:
             die(f"helper {helper} generated consumer probe did not dispatch")
+        if not probe_result.stdout.startswith(f"CONSUMER_PROBE\t{helper}\n"):
+            die(f"helper {helper} generated consumer probe did not identify its consumer")
         if contract.get("reachable") is True and helper != "omarchy-shell" and helper not in runtime_probes:
             die(f"helper {helper} has no executable post-patch consumer probe")
         if contract.get("reachable") is not True:
@@ -215,10 +221,13 @@ def main() -> int:
                     break
             if not runtime_path:
                 die("selected runtime has no executable PATH")
-            native_env = dict(__import__("os").environ)
+            native_env = dict(os.environ)
             native_env["PATH"] = runtime_path
+            selected_uwsm_app = shutil.which("uwsm-app", path=runtime_path)
+            if not selected_uwsm_app:
+                die("selected runtime has no uwsm-app")
             result = subprocess.run(
-                ["bash", str(repo / probe)],
+                ["bash", str(repo / probe), selected_uwsm_app],
                 check=True,
                 capture_output=True,
                 text=True,

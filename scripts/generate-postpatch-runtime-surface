@@ -1,0 +1,86 @@
+#!/usr/bin/env python3
+"""Generate post-patch consumer identity and executable probes."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import stat
+import sys
+from pathlib import Path
+
+
+def fail(message: str) -> None:
+    print(f"post-patch runtime surface: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def main() -> int:
+    if len(sys.argv) != 4:
+        print(f"usage: {sys.argv[0]} ROOT COMPATIBILITY_BIN MAPPING_JSON", file=sys.stderr)
+        return 2
+
+    root = Path(sys.argv[1])
+    compatibility_bin = Path(sys.argv[2])
+    mapping = json.loads(sys.argv[3])
+    if not isinstance(mapping, dict):
+        fail("consumer mapping is not an object")
+
+    surface = {}
+    for helper, declaration in sorted(mapping.items()):
+        if not isinstance(declaration, dict):
+            fail(f"{helper} has an invalid consumer declaration")
+        consumer = declaration.get("consumer")
+        if not isinstance(consumer, str) or not consumer:
+            fail(f"{helper} has no post-patch consumer")
+        consumer_path = root / consumer
+        if consumer_path.is_dir():
+            candidates = sorted(
+                path
+                for path in consumer_path.rglob("*")
+                if path.is_file() and path.suffix in {".qml", ".js", ".json", ".jsonc"}
+            )
+            if helper == "omarchy-shell":
+                candidates = [root / "shell/shell.qml"]
+            else:
+                candidates = [path for path in candidates if helper.encode() in path.read_bytes()]
+            if not candidates:
+                fail(f"{helper} has no file consumer under {consumer}")
+            consumer_path = candidates[0]
+            consumer = str(consumer_path.relative_to(root))
+        if not consumer_path.is_file():
+            fail(f"{helper} consumer is missing: {consumer}")
+        source = consumer_path.read_bytes()
+        if helper != "omarchy-shell" and helper.encode() not in source:
+            fail(f"{helper} is not referenced by generated consumer {consumer}")
+
+        probe_name = f"omanixy-consumer-{helper}"
+        probe_path = compatibility_bin / "bin" / probe_name
+        probe_path.write_text(
+            "#!/bin/sh\n"
+            "set -eu\n"
+            f"test -f {json.dumps(str(consumer_path))}\n"
+            f"printf '%s\\t%s\\n' CONSUMER_PROBE {json.dumps(helper)}\n"
+            f"export COMPAT_ADAPTER_NAME={json.dumps(helper)}\n"
+            f"exec timeout 4s {json.dumps(str(compatibility_bin / 'bin' / helper))} \"$@\"\n",
+            encoding="utf-8",
+        )
+        probe_path.chmod(stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
+        surface[helper] = {
+            "consumer": consumer,
+            "consumerSourceSha256": hashlib.sha256(source).hexdigest(),
+            "consumerProbe": {
+                "executable": f"bin/{probe_name}",
+                "helper": helper,
+                "invocation": "generated-post-patch-consumer",
+            },
+        }
+    (compatibility_bin / "runtime-surface.json").write_text(
+        json.dumps(surface, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

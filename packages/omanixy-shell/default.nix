@@ -339,18 +339,11 @@ EOF
   compatibilityHelpers = lib.filter
     (helper: builtins.elem (helperFeatures.${helper} or "core") selectedFeatures)
     allCompatibilityHelpers;
-  helperConsumer = helper:
-    let feature = helperFeatures.${helper} or "core"; in
-    if feature == "audio" then "shell/plugins/panels/audio/Panel.qml"
-    else if feature == "bluetooth" then "shell/plugins/panels/bluetooth/Panel.qml"
-    else if feature == "clipboard" then "shell/plugins/clipboard/Clipboard.qml"
-    else if feature == "display" || feature == "monitor" then "shell/plugins/panels/monitor/Panel.qml"
-    else if feature == "launcher" then "shell/plugins/menu/Menu.qml"
-    else if feature == "network" then "shell/plugins/panels/network/Panel.qml"
-    else if feature == "notification" then "shell/services/AppLibrary.qml"
-    else if feature == "power" then "shell/plugins/panels/power/Panel.qml"
-    else if feature == "weather" then "shell/plugins/panels/weather/Panel.qml"
-    else "shell/services/AppLibrary.qml";
+  helperConsumers = lib.mapAttrs
+    (name: contract: {
+      consumer = builtins.head contract.postPatchConsumer;
+    })
+    (lib.getAttrs compatibilityHelpers contractSource.helpers);
   adapterSources = [
     ./adapters/common.bash
     ./adapters/weather.bash
@@ -395,16 +388,8 @@ EOF
       for helper in ${lib.concatStringsSep " " compatibilityHelpers}; do
         ln -s ${compatAdapter}/bin/omanixy-compat-adapter "$out/bin/$helper"
       done
-cat > "$out/runtime-surface.json" <<'EOF'
-${builtins.toJSON (lib.mapAttrs
-  (name: _: {
-    consumer = helperConsumer name;
-    consumerProbe = {
-      executable = "bin/omanixy-compat-adapter";
-      adapterName = name;
-    };
-  }) (lib.getAttrs compatibilityHelpers contractSource.helpers))}
-EOF
+      ${pkgs.python3}/bin/python3 ${../../scripts/generate-postpatch-runtime-surface} \
+        ${omarchyCompatibilityRoot} "$out" ${lib.escapeShellArg (builtins.toJSON helperConsumers)}
     '';
   };
 
