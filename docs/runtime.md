@@ -127,6 +127,9 @@ The generated post-patch consumer probes and their fixtures are a separate
 They are referenced only by the flake checks, so the test scaffolding is
 outside the runtime closure while the probes still bind to the packaged
 dispatcher and helper links they validate.
+The `probes` output records the helper path it was generated against, and the
+closure check rejects a probe set whose recorded helper path or helper coverage
+does not match the helper surface whose identity it is validating.
 Omanixy never copies the upstream `bin/` tree or creates a mutable Omarchy
 filesystem.
 
@@ -147,8 +150,15 @@ The upstream package list, Arch tools, `pacman`, `yay`, and
 `atqamz/universe` are not dependencies.
 The generated wrappers do not append the host `PATH`.
 
-The dispatcher carries two named, accepted test seams, and they are the only
-way its pinned `PATH` and its command identity can be observed from outside.
+The dispatcher selects the helper it runs from `COMPAT_ADAPTER_NAME`, falling
+back to the name of the link it was invoked through.
+That variable is the documented dispatch mechanism rather than a test seam:
+every compatibility-root `bin/` shim exports it so one dispatcher can serve
+every helper name, and setting it selects the same helper that invoking that
+helper's link would.
+
+Beyond that dispatch input the dispatcher carries two named, accepted test
+seams that expose its pinned `PATH` and its dispatched command identity.
 `OMANIXY_PROBE_BACKEND_PATH`, when set, prepends the named directory to the
 pinned backend `PATH`, and `OMANIXY_CONSUMER_MARKER`, when set, writes the
 dispatched command name to a marker file after a successful invocation.

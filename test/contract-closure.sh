@@ -23,8 +23,9 @@ snapshot_b=$test_root/b.json
 cmp "$snapshot_a" "$snapshot_b"
 cmp "$snapshot_a" "$snapshot"
 
+checker_probes=$compatibility_probes
 run_checker() {
-  "${PYTHON:-python3}" "$checker" "$repo" "$pinned_source" "$1" "$compatibility_bin" "$compatibility_probes" "${OMANIXY_RUNTIME:?selected runtime required}" "$2" "$snapshot" "$3" "$adapter" "$auditor" 2>"$checker_error"
+  "${PYTHON:-python3}" "$checker" "$repo" "$pinned_source" "$1" "$compatibility_bin" "$checker_probes" "${OMANIXY_RUNTIME:?selected runtime required}" "$2" "$snapshot" "$3" "$adapter" "$auditor" 2>"$checker_error"
 }
 
 expect_rejection() {
@@ -45,7 +46,7 @@ cp -R -- "$compatibility_root" "$mutated_root"
 chmod -R u+w "$mutated_root"
 chmod u+w "$mutated_root/shell/services/AppLibrary.qml"
 printf '%s\n' 'command: ["omarchy-unknown-contract"]' >> "$mutated_root/shell/services/AppLibrary.qml"
-expect_rejection 'an unledgered reachable helper' \
+expect_rejection 'referenced consumer-source drift' \
   'generated consumer identity drifted' "$mutated_root" "$manifest"
 
 drift_manifest=$test_root/drift.json
@@ -73,5 +74,25 @@ printf '%s\n' 'Process { command: ["omarchy-unknown-contract"] }' \
 expect_rejection 'a newly reachable unlisted contract' \
   'reachable contracts lack ledger disposition: omarchy-unknown-contract' \
   "$unledgered_root" "$manifest"
+
+foreign_probes=$test_root/foreign-probes
+mkdir -p "$foreign_probes/bin"
+for probe in "$compatibility_probes/bin/"*; do
+  ln -s "$probe" "$foreign_probes/bin/${probe##*/}"
+done
+jq '.compatibilityBin = "/nix/store/00000000000000000000000000000000-foreign-compatibility-bin"' \
+  "$compatibility_probes/probe-surface.json" > "$foreign_probes/probe-surface.json"
+checker_probes=$foreign_probes
+expect_rejection 'consumer probes built against another helper surface' \
+  'consumer probes were generated against a different runtime helper path' \
+  "$compatibility_root" "$manifest"
+
+jq --arg helper omarchy-network-status \
+  '.helpers = (.helpers | map(select(. != $helper)))' \
+  "$compatibility_probes/probe-surface.json" > "$foreign_probes/probe-surface.json"
+expect_rejection 'consumer probes missing a helper' \
+  'consumer probes do not cover the executable helper surface' \
+  "$compatibility_root" "$manifest"
+checker_probes=$compatibility_probes
 
 printf '%s\n' 'contract closure adversarial checks passed'

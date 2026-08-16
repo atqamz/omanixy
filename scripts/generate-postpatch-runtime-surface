@@ -657,6 +657,22 @@ def main() -> int:
     (compatibility_bin / "runtime-surface.json").write_text(
         json.dumps(surface, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
+    (probe_out / "probe-surface.json").write_text(
+        json.dumps(
+            {
+                "compatibilityBin": str(compatibility_bin),
+                "helpers": sorted(
+                    helper
+                    for helper, entry in surface.items()
+                    if "executable" in entry["consumerProbe"]
+                ),
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     return 0
 
 

@@ -96,6 +96,12 @@ def main() -> int:
     runtime_surface = read_json(compatibility_bin / "runtime-surface.json")
     if set(runtime_surface) != actual_bin:
         die("generated runtime surface does not equal the executable helper surface")
+    probe_surface = read_json(compatibility_probes / "probe-surface.json")
+    if probe_surface.get("compatibilityBin") != str(compatibility_bin):
+        die("consumer probes were generated against a different runtime helper path")
+    expected_probe_helpers = sorted(actual_bin - {"omarchy-shell"})
+    if probe_surface.get("helpers") != expected_probe_helpers:
+        die("consumer probes do not cover the executable helper surface")
     probe_plan = []
 
     for helper, contract in sorted(helpers.items()):
