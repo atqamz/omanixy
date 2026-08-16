@@ -46,14 +46,14 @@ def adapter_hash(repo: Path, manifest: dict) -> str:
 
 
 def main() -> int:
-    if len(sys.argv) != 10:
+    if len(sys.argv) != 11:
         print(
-            f"usage: {sys.argv[0]} REPO PINNED_SOURCE COMPAT_ROOT COMPAT_BIN MANIFEST SNAPSHOT TEST ADAPTER AUDITOR",
+            f"usage: {sys.argv[0]} REPO PINNED_SOURCE COMPAT_ROOT COMPAT_BIN RUNTIME MANIFEST SNAPSHOT TEST ADAPTER AUDITOR",
             file=sys.stderr,
         )
         return 2
 
-    repo, source, root, compatibility_bin, manifest_path, snapshot_path, test_path, adapter_path, auditor_path = map(Path, sys.argv[1:])
+    repo, source, root, compatibility_bin, runtime, manifest_path, snapshot_path, test_path, adapter_path, auditor_path = map(Path, sys.argv[1:])
     manifest = read_json(manifest_path)
     full_snapshot = read_json(snapshot_path)
     helpers = manifest.get("helpers")
@@ -168,17 +168,27 @@ def main() -> int:
         probe = contract.get("probe")
         if not isinstance(provider, str) or not provider:
             die(f"native entry {capability} has no normalized provider")
-        if not isinstance(probe, str) or not (source / probe).is_file():
+        if not isinstance(probe, str) or not (repo / probe).is_file():
             die(f"native entry {capability} has no executable package probe")
         probe_result = contract.get("probeResult")
         if not isinstance(probe_result, str) or not probe_result:
             die(f"native entry {capability} has no normalized probe result")
         try:
+            runtime_path = ""
+            for line in (runtime / "bin/omanixy-shell-runtime").read_text().splitlines():
+                if line.startswith('export PATH="'):
+                    runtime_path = line.split('"', 2)[1]
+                    break
+            if not runtime_path:
+                die("selected runtime has no executable PATH")
+            native_env = dict(__import__("os").environ)
+            native_env["PATH"] = runtime_path
             result = subprocess.run(
-                ["bash", str(source / probe)],
+                ["bash", str(repo / probe)],
                 check=True,
                 capture_output=True,
                 text=True,
+                env=native_env,
             )
         except (OSError, subprocess.CalledProcessError) as error:
             die(f"native probe failed for {capability}: {error}")

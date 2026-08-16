@@ -22,7 +22,7 @@ cmp "$snapshot_a" "$snapshot_b"
 cmp "$snapshot_a" "$snapshot"
 
 run_checker() {
-  "${PYTHON:-python3}" "$checker" "$repo" "$pinned_source" "$1" "$compatibility_bin" "$2" "$snapshot" "$3" "$adapter" "$auditor"
+  "${PYTHON:-python3}" "$checker" "$repo" "$pinned_source" "$1" "$compatibility_bin" "${OMANIXY_RUNTIME:?selected runtime required}" "$2" "$snapshot" "$3" "$adapter" "$auditor"
 }
 
 mutated_root=$test_root/mutated-root
