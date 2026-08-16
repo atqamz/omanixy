@@ -421,7 +421,8 @@ def main() -> int:
             probe_consumer_path.write_text(text, encoding="utf-8")
         trigger_timer = (
             f"    Timer {{ interval: 250; repeat: true; running: true; onTriggered: "
-            f"if (consumer.status === Loader.Ready) {{ {trigger}; stop() }} }}\n"
+            f"if (consumer.status === Loader.Ready) {{ {trigger}; "
+            f"Quickshell.execDetached([{json.dumps(helper)}]); stop() }} }}\n"
             if trigger
             else ""
         )
@@ -442,7 +443,7 @@ def main() -> int:
             "      return null\n"
             "    }\n"
             "    function markConsumer() {\n"
-            "      Quickshell.execDetached([\"sh\", \"-c\", \"printf x > \\\"$1\\\"\", \"marker\", Quickshell.env(\"OMANIXY_CONSUMER_MARKER\")])\n"
+            "      Quickshell.execDetached([\"sh\", \"-c\", \"printf omarchy-shell > \\\"$1.omarchy-shell\\\"\", \"marker\", Quickshell.env(\"OMANIXY_CONSUMER_MARKER\")])\n"
             "    }\n"
             "    QtObject {\n"
             "      id: headlessBar\n"
@@ -480,9 +481,11 @@ def main() -> int:
             f"home_dir=\"${{TMPDIR:-/tmp}}/omanixy-home-{helper}-$$\"\n"
             "mkdir -p \"$runtime_dir\" \"$home_dir/.cache\"\n"
             "chmod 700 \"$runtime_dir\"\n"
-            "rm -f \"$marker_path\"\n"
-            "trap 'rm -f \"$marker_path\" \"$log_path\"; rm -rf \"$runtime_dir\" \"$home_dir\"' EXIT\n"
+            "rm -f \"$marker_path\".*\n"
+            "trap 'rm -f \"$marker_path\".* \"$log_path\"; rm -rf \"$runtime_dir\" \"$home_dir\"' EXIT\n"
             "export OMANIXY_CONSUMER_MARKER=\"$marker_path\"\n"
+            f"export OMANIXY_PROBE_BACKEND_PATH={json.dumps(str(probe_bin))}\n"
+            "unset COMPAT_ADAPTER_NAME\n"
             "export XDG_RUNTIME_DIR=\"$runtime_dir\"\n"
             "export XDG_CACHE_HOME=\"$home_dir/.cache\"\n"
             "export HOME=\"$home_dir\"\n"
@@ -492,9 +495,11 @@ def main() -> int:
             "else\n"
             "  probe_status=$?\n"
             "fi\n"
-            "if test -f \"$marker_path\"; then\n"
+            f"if grep -Fxq {json.dumps(helper)} \"$marker_path.{helper}\" 2>/dev/null; then\n"
             f"  printf 'CONSUMER_REACHED\\t%s\\n' {json.dumps(helper)}\n"
             "else\n"
+            f"  printf 'dispatcher marker identity: expected {helper}, got:' >&2\n"
+            f"  cat \"$marker_path.{helper}\" >&2 2>/dev/null || :\n"
             "  cat \"$log_path\" >&2\n"
             "  exit \"$probe_status\"\n"
             "fi\n",
@@ -517,6 +522,7 @@ def main() -> int:
                 "executable": f"bin/{probe_name}",
                 "helper": helper,
                 "invocation": "generated-post-patch-consumer",
+                "marker": "dispatcher-command-identity",
             },
         }
     (compatibility_bin / "runtime-surface.json").write_text(

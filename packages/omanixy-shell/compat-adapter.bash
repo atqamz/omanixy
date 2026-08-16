@@ -1,11 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ -n ${OMANIXY_CONSUMER_MARKER:-} ]]; then
-  trap 'status=$?; : > "$OMANIXY_CONSUMER_MARKER"; exit "$status"' EXIT
+if [[ -n ${OMANIXY_PROBE_BACKEND_PATH:-} ]]; then
+  PATH="$OMANIXY_PROBE_BACKEND_PATH:$PATH"
+  export PATH
 fi
 
-case "${COMPAT_ADAPTER_NAME:-${0##*/}}" in
+compatibility_command=${COMPAT_ADAPTER_NAME:-${0##*/}}
+if [[ -n ${OMANIXY_CONSUMER_MARKER:-} ]]; then
+  compatibility_marker="$OMANIXY_CONSUMER_MARKER.$compatibility_command"
+  trap 'status=$?; printf "%s\\n" "$compatibility_command" > "$compatibility_marker"; exit "$status"' EXIT
+fi
+
+case "$compatibility_command" in
   omarchy-shell) exec @IPC@ "$@" ;;
   omarchy-weather-location) weather_location "$@" ;;
   omarchy-weather-status) weather_status "$@" ;;
@@ -35,5 +42,5 @@ case "${COMPAT_ADAPTER_NAME:-${0##*/}}" in
   omarchy-menu-emoji-insert) emoji_insert "$@" ;;
   omarchy-capture-screenshot) screenshot "$@" ;;
   omarchy-remove-launcher-entry) remove_launcher_entry "$@" ;;
-  *) fail "${COMPAT_ADAPTER_NAME:-${0##*/}}: unsupported compatibility command" 127 ;;
+  *) fail "$compatibility_command: unsupported compatibility command" 127 ;;
 esac

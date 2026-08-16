@@ -154,7 +154,11 @@ def main() -> int:
             die(f"helper {helper} has no executable generated consumer probe")
         executable = consumer_probe.get("executable")
         probe_helper = consumer_probe.get("helper")
-        if probe_helper != helper or consumer_probe.get("invocation") != "generated-post-patch-consumer":
+        if (
+            probe_helper != helper
+            or consumer_probe.get("invocation") != "generated-post-patch-consumer"
+            or consumer_probe.get("marker") != "dispatcher-command-identity"
+        ):
             die(f"helper {helper} has a disconnected generated consumer probe")
         probe_path = compatibility_bin / executable
         if not probe_path.is_file():
