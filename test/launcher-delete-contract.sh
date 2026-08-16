@@ -49,37 +49,16 @@ cat > "$config_root/shell.qml" <<'EOF'
 import QtQuick
 import Quickshell
 import Quickshell.Io
-import "MenuDeleteSupport.js" as MenuDeleteSupport
+
 Loader {
   id: root
   source: Quickshell.env("OMANIXY_APP_LIBRARY")
   property bool handled: false
-  property string removedId: ""
-  property bool confirmationOpen: false
-  property var pendingRow: null
-  property int refreshCount: 0
-  function requestDelete(row) {
-    if (!MenuDeleteSupport.canRequestDelete(row, item)) return false
-    pendingRow = row
-    confirmationOpen = true
-    return true
-  }
-  function cancelDelete() {
-    pendingRow = null
-    confirmationOpen = false
-  }
-  function confirmDelete() {
-    if (!confirmationOpen || !pendingRow) return false
-    var row = pendingRow
-    pendingRow = null
-    confirmationOpen = false
-    item.remove(row.appId, row.label)
-    refreshCount++
-    return true
-  }
-  function runScenario(appLibrary) {
-    if (handled) return
+
+  function runScenario(menu) {
+    if (handled || !item) return
     handled = true
+    menu.appLibrary = item
     var userRow = ({kind: "app", appId: "org.example.User", label: "User app"})
     var systemRow = ({kind: "app", appId: "org.example.System", label: "System app"})
     var malformedRow = ({kind: "app", appId: "../escape", label: "Escape"})
@@ -87,48 +66,47 @@ Loader {
     var traversalRow = ({kind: "app", appId: "../../escape", label: "Traversal"})
     var symlinkRow = ({kind: "app", appId: "org.example.Symlink", label: "Symlink"})
     var actionRow = ({kind: "action", appId: "org.example.User", label: "Action"})
-    appLibrary.userOwnedEntryIds = ({})
-    if (root.requestDelete(userRow) || root.requestDelete(systemRow)
-        || root.requestDelete(malformedRow) || root.requestDelete(missingRow)
-        || root.requestDelete(traversalRow) || root.requestDelete(symlinkRow)
-        || root.requestDelete(actionRow) || root.confirmationOpen) {
+    if (menu.requestDelete(systemRow) || menu.requestDelete(malformedRow)
+        || menu.requestDelete(missingRow) || menu.requestDelete(traversalRow)
+        || menu.requestDelete(symlinkRow) || menu.requestDelete(actionRow)
+        || menu.confirmationOpen) {
       Qt.quit()
       return
     }
-    appLibrary.userOwnedEntryIds = ({"org.example.User": true})
-    if (!root.requestDelete(userRow) || !root.confirmationOpen) {
+    if (!menu.requestDelete(userRow) || !menu.confirmationOpen) {
       Qt.quit()
       return
     }
-    root.cancelDelete()
-    if (root.confirmationOpen || !root.requestDelete(userRow) || !root.confirmDelete()
-        || root.confirmationOpen || root.refreshCount !== 1) {
+    menu.cancelDelete()
+    if (menu.confirmationOpen || !menu.requestDelete(userRow) || !menu.confirmDelete()
+        || menu.confirmationOpen || menu.refreshCount !== 1) {
       Qt.quit()
       return
     }
     result.running = true
   }
+
   Process {
     id: result
     command: ["bash", "-c", "printf '%s\\n' allowed > " + Quickshell.env("RESULT_LOG")]
-    running: true
-    onExited: Qt.quit()
   }
-  onLoaded: root.runScenario(item)
+
+  Loader {
+    id: menuLoader
+    source: Quickshell.env("OMANIXY_MENU_BRIDGE")
+  }
+
   Timer {
-    interval: 2000
+    interval: 100
     running: true
-    repeat: false
+    repeat: true
     onTriggered: {
-      if (!handled && item)
-        root.runScenario(item)
-      if (!handled) Qt.quit()
+      if (menuLoader.item && item.userOwnedEntryIds["org.example.User"] === true)
+        root.runScenario(menuLoader.item)
     }
   }
 }
 EOF
-printf '%s\n' '[Desktop Entry]' > "$home/.local/share/applications/org.example.User.desktop"
-printf '%s\n' '[Desktop Entry]' > "$home/.local/share/applications/org.example.User.desktop"
 RESULT_LOG="$test_root/result.log" \
   PATH="$test_root/bin:$root/bin:$runtime_path" \
   HOME="$home" XDG_DATA_HOME="$home/.local/share" \

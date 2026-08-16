@@ -170,6 +170,20 @@ def main() -> int:
             die(f"native entry {capability} has no normalized provider")
         if not isinstance(probe, str) or not (source / probe).is_file():
             die(f"native entry {capability} has no executable package probe")
+        probe_result = contract.get("probeResult")
+        if not isinstance(probe_result, str) or not probe_result:
+            die(f"native entry {capability} has no normalized probe result")
+        try:
+            result = subprocess.run(
+                ["bash", str(source / probe)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except (OSError, subprocess.CalledProcessError) as error:
+            die(f"native probe failed for {capability}: {error}")
+        if probe_result not in result.stdout.splitlines():
+            die(f"native probe result mismatch for {capability}")
 
     if not (repo / "test/ipc-wrapper.sh").is_file():
         die("omarchy-shell has no IPC behavioral test evidence")
