@@ -381,7 +381,7 @@ def main() -> int:
             "  pw-dump) printf '%s\\n' '[{\"id\":1,\"type\":\"PipeWire:Interface:Node\",\"info\":{\"props\":{\"media.class\":\"Audio/Sink\",\"node.name\":\"probe-sink\"}}},{\"id\":1,\"type\":\"PipeWire:Interface:Node\",\"info\":{\"props\":{\"media.class\":\"Audio/Source\",\"node.name\":\"probe-source\"}}}]' ;;\n"
             "  pactl) case ${1:-} in get-default-sink) printf '%s\\n' probe-sink ;; get-default-source) printf '%s\\n' probe-source ;; esac ;;\n"
             "  wpctl) if [ \"${1:-}\" = inspect ]; then printf '%s\\n' 'node.name = \"probe-sink\"'; fi ;;\n"
-            "  nmcli) nmcli_state=\"${XDG_RUNTIME_DIR:-/tmp}/omanixy-probe-nmcli-band\"; case \"$*\" in *'DEVICE,TYPE,STATE device status'*) printf '%s\\n' 'wlp0s20f3:wifi:connected' 'CloudflareWARP:tun:connected' 'tailscale0:tun:connected' 'lo:loopback:connected' 'p2p-dev-wlp0s20f3:wifi-p2p:disconnected' ;; *'GENERAL.STATE device show'*) printf '%s\\n' '100 (connected)' ;; *'GENERAL.CONNECTION device show'*) printf '%s\\n' 'probe-network' ;; *'FREQ,SSID device wifi list'*) printf '%s\\n' '2412:probe-network' '5180:probe-network' ;; *'connection modify'*) last=; for arg do last=$arg; done; printf '%s\\n' \"$last\" > \"$nmcli_state\" ;; *'connection up'*) : ;; *'802-11-wireless.band connection show'*) if [ -r \"$nmcli_state\" ]; then cat \"$nmcli_state\"; fi ;; *) printf '%s\\n' 'probe:wlan0:yes:connected:192.0.2.1/24:192.0.2.254' ;; esac ;;\n"
+            "  nmcli) nmcli_state=\"${XDG_RUNTIME_DIR:-/tmp}/omanixy-probe-nmcli-band\"; case \"$*\" in *'DEVICE,TYPE,STATE device status'*) printf '%s\\n' 'wlp0s20f3:wifi:connected' 'CloudflareWARP:tun:connected' 'tailscale0:tun:connected' 'lo:loopback:connected' 'p2p-dev-wlp0s20f3:wifi-p2p:disconnected' ;; *'GENERAL.CON-UUID device show'*) printf '%s\\n' 'probe-uuid' ;; *'802-11-wireless-security.key-mgmt'*'connection show uuid'*) printf '%s\\n' 'wpa-psk' 'probe-password' '' ;; *'802-11-wireless.ssid'*'connection show uuid'*) printf '%s\\n' 'probe-network' 'wpa-psk' 'probe-password' 'no' '' ;; *'GENERAL.STATE device show'*) printf '%s\\n' '100 (connected)' ;; *'GENERAL.CONNECTION device show'*) printf '%s\\n' 'probe-network' ;; *'FREQ,SSID device wifi list'*) printf '%s\\n' '2412:probe-network' '5180:probe-network' ;; *'connection modify'*) last=; for arg do last=$arg; done; printf '%s\\n' \"$last\" > \"$nmcli_state\" ;; *'connection up'*) : ;; *'802-11-wireless.band connection show'*) if [ -r \"$nmcli_state\" ]; then cat \"$nmcli_state\"; fi ;; *) printf '%s\\n' 'probe:wlan0:yes:connected:192.0.2.1/24:192.0.2.254' ;; esac ;;\n"
             "  qrencode) printf '%s\\n' probe-qr ;;\n"
             "  bluetoothctl) if [ \"${1:-}\" = list ]; then printf '%s\\n' 'Controller 00:11:22:33:44:55 probe'; elif [ \"${1:-}\" = show ]; then printf '%s\\n' 'Powered: yes'; fi ;;\n"
             "  upower) if [ \"${1:-}\" = -e ]; then printf '%s\\n' /org/freedesktop/UPower/devices/DisplayDevice; else printf '%s\\n' '  state:           charging'; fi ;;\n"
@@ -398,7 +398,8 @@ def main() -> int:
             "  date) printf '%s\\n' '2026-01-01_00-00-00' ;;\n"
             "  pgrep) exit 1 ;;\n"
             "  pkill) : ;;\n"
-            "  notify-send|wl-copy|wtype|gtk-launch|update-desktop-database|xdg-open|gsettings|setsid|systemctl|rfkill|hyprpicker) : ;;\n"
+            "  hyprpicker) trap 'exit 0' TERM INT; while :; do :; done ;;\n"
+            "  notify-send|wl-copy|wtype|gtk-launch|update-desktop-database|xdg-open|gsettings|setsid|systemctl|rfkill) : ;;\n"
             "  *) : ;;\n"
             "esac\n"
             ":\n",

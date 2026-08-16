@@ -98,15 +98,17 @@ user-manager sessions or workloads.
 
 Quattro is consumed from a deterministic immutable compatibility root through
 `OMARCHY_PATH`.
-The root contains only the pinned source files required by the supported
-runtime graph, including shared QML libraries, shell services, the baseline
-bar widgets, and reachable panels and overlays.
+The root contains the pinned source view used by the supported runtime graph,
+including shared QML libraries, shell services, the baseline bar widgets, and
+the copied panel and overlay sources needed by the registry.
 It applies seven narrow patch sites: the disabled-plugin floor on bar widgets,
 enterprise Wi-Fi filtering through the network panel's model, removal of the
 Custom DNS provider/action/pill, hiding the unsupported speed-test action,
 clock middle-click routing, the native bar transparency fallback, and a
 user-owned launcher-delete guard.
-Unsupported first-party plugin directories are not copied into the view.
+Some unsupported first-party plugin directories are omitted from the view,
+while copied baseline modules remain unreachable when disabled by the
+immutable registry floor.
 The root supplies Omanixy's safe fallback shell configuration, launcher-hides
 file, audited default menu, and helper view.
 The root `bin/` contains dispatch wrappers only for helper names required by
