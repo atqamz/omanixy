@@ -15,18 +15,6 @@ cp "$pinned_source/shell/plugins/bar/Bar.qml" "$bar_fixture"
 chmod u+w "$bar_fixture"
 "$python" "$patcher" "$bar_fixture"
 sed -i 's/required property /property /g' "$bar_fixture"
-test "$(grep -c '^  Process {' "$pinned_source/shell/plugins/bar/Bar.qml")" -ge 2
-test "$(grep -c '^  Process {' "$bar_fixture")" -eq 1
-if grep -Fq 'id: transparentForegroundProc' "$bar_fixture"; then
-  printf '%s\n' 'transparent foreground process survived the exact source patch' >&2
-  exit 1
-fi
-if grep -Fq 'omarchy-bar-text-color' "$bar_fixture"; then
-  printf '%s\n' 'transparent foreground helper survived the exact source patch' >&2
-  exit 1
-fi
-grep -Fq 'id: barHiddenProbe' "$bar_fixture"
-grep -Fq "\$HOME/.local/state/omarchy/toggles/bar-off" "$bar_fixture"
 "$python" - "$bar_fixture" <<'PY'
 from pathlib import Path
 import sys

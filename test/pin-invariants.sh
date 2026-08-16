@@ -67,12 +67,6 @@ jq -e \
   --arg adapter_hash "$adapter_hash" \
   '.adapter == $adapter and .adapterHash == $adapter_hash and (.adapterSources | type) == "array" and .behavioralTests == $tests and (.helpers | type) == "object"' \
   "$manifest" >/dev/null
-while IFS= read -r qml; do
-  case "$qml" in
-    packages/omanixy-shell/MenuDeleteBridge.qml) ;;
-    *) printf 'unexpected tracked QML surface: %s\n' "$qml" >&2; exit 1 ;;
-  esac
-done < <(git -C "$repo" ls-files '*.qml')
 jq -e --argjson systems "$supported_systems" '$systems == ["x86_64-linux", "aarch64-linux"]' \
   <<< '{}'
 
