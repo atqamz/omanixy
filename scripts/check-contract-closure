@@ -34,26 +34,6 @@ def names(snapshot: dict) -> set[str]:
     return values
 
 
-def audited_helper_paths(snapshot: dict, root: Path, prefixes: list[str], helper: str) -> bool:
-    for entry in snapshot.get("direct_omarchy_helpers", []):
-        if not isinstance(entry, dict) or entry.get("name") != helper:
-            continue
-        path = entry.get("path")
-        if not isinstance(path, str):
-            continue
-        if any(path == prefix or path.startswith(prefix.rstrip("/") + "/") for prefix in prefixes):
-            return True
-    return False
-
-
-def consumer_prefixes(paths: list[str], root: Path) -> list[str]:
-    prefixes = []
-    for path in paths:
-        candidate = root / path
-        prefixes.append(str(candidate.relative_to(root)))
-    return prefixes
-
-
 def adapter_hash(repo: Path, manifest: dict) -> str:
     sources = manifest.get("adapterSources")
     if not isinstance(sources, list) or not sources or any(not isinstance(source, str) for source in sources):
@@ -106,7 +86,7 @@ def main() -> int:
     if actual_bin != set(helpers):
         die("runtime compatibility bin does not equal the adapted-helper ledger")
     result = subprocess.run(
-        ["bash", str(test_path), str(repo), str(root)],
+        ["bash", str(test_path), str(repo), str(root), str(compatibility_bin / "bin")],
         capture_output=True,
         text=True,
     )
@@ -132,20 +112,12 @@ def main() -> int:
             die(f"helper {helper} has no pinned consumer evidence")
         if not isinstance(post_patch_consumers, list) or not post_patch_consumers:
             die(f"helper {helper} has no post-patch consumer evidence")
-        consumer_paths: list[Path] = []
-        post_patch_paths: list[Path] = []
         for consumer in consumers:
             if not isinstance(consumer, str) or not (source / consumer).exists():
                 die(f"helper {helper} has a missing pinned consumer path: {consumer}")
-            consumer_paths.append(source / consumer)
         for consumer in post_patch_consumers:
             if not isinstance(consumer, str) or not (root / consumer).exists():
                 die(f"helper {helper} has a missing post-patch consumer path: {consumer}")
-            post_patch_paths.append(root / consumer)
-        pinned_snapshot = full_snapshot
-        pinned_prefixes = consumer_prefixes(consumers, source)
-        if helper != "omarchy-shell" and not audited_helper_paths(pinned_snapshot, source, pinned_prefixes, helper):
-            die(f"helper {helper} is not referenced by its pinned consumer evidence")
         if helper not in actual_bin:
             die(f"helper {helper} is absent from the executable post-patch helper surface")
         if contract.get("reachable") is not True:

@@ -4,11 +4,12 @@ set -euo pipefail
 repo=${1:?repository path required}
 compat_root=${2:?compatibility root path required}
 manifest=${3:?test matrix path required}
+runtime_bin=${4:?built runtime helper bin required}
 test_root=$(mktemp -d)
 trap 'rm -rf "$test_root"' EXIT
 
 output="$test_root/compat-adapters.log"
-bash "$repo/test/compat-adapters.sh" "$repo" "$compat_root" >"$output"
+bash "$repo/test/compat-adapters.sh" "$repo" "$compat_root" "$runtime_bin" >"$output"
 grep '^CASE' "$output" | cut -f2- | sort -u > "$test_root/actual"
 
 jq -e --arg actual "$test_root/actual" '

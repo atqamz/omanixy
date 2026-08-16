@@ -20,6 +20,11 @@ if ((uwsm_help_status == 0)); then
 else
   grep -Fq 'DBUS_SESSION_BUS_ADDRESS' <<<"$uwsm_help"
 fi
+real_launch_status=0
+PATH="$runtime_path" timeout 3s "$uwsm_app" -- gtk-launch org.example.User.desktop >/dev/null 2>&1 || real_launch_status=$?
+if ((real_launch_status != 0)); then
+  printf '%s\n' 'real UWSM live launch unavailable; controlled AppLibrary boundary follows' >&2
+fi
 
 test_root=$(mktemp -d)
 trap 'rm -rf "$test_root"' EXIT
@@ -37,6 +42,14 @@ printf '%s\n' "$*" > "$LAUNCH_LOG"
 EOF
 chmod +x "$fixture_bin/gtk-launch"
 sed -i "1c#!$(command -v bash)" "$fixture_bin/gtk-launch"
+cat > "$fixture_bin/uwsm-app" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" > "$UWSM_LOG"
+test "$1" = -- && test "$2" = gtk-launch
+exec gtk-launch "$3"
+EOF
+chmod +x "$fixture_bin/uwsm-app"
+sed -i "1c#!$(command -v bash)" "$fixture_bin/uwsm-app"
 cat > "$data_home/applications/org.example.User.desktop" <<EOF
 [Desktop Entry]
 Type=Application
@@ -81,15 +94,17 @@ Loader {
   }
 }
 EOF
+launch_status=0
 LAUNCH_LOG="$test_root/launch.log" \
   XDG_DATA_HOME="$data_home" \
   XDG_RUNTIME_DIR="$runtime_dir" \
   QT_QPA_PLATFORM=offscreen \
   OMANIXY_APP_LIBRARY="$config_root/services/AppLibrary.qml" \
   OMARCHY_PATH="$compatibility_root" \
+  UWSM_LOG="$test_root/uwsm.log" \
+  LAUNCH_LOG="$test_root/launch.log" \
   FIXTURE_PATH="$fixture_bin:$runtime_path" \
   PATH="$fixture_bin:$runtime_path" \
-launch_status=0
   timeout 10s "$quickshell" -n -p "$config_root" || launch_status=$?
 if ((launch_status == 124)); then
   printf '%s\n' 'patched AppLibrary launch path timed out' >&2
@@ -99,10 +114,9 @@ for _ in {1..20}; do
   test -f "$test_root/launch.log" && break
   sleep 0.1
 done
-if [[ ! -f "$test_root/launch.log" ]]; then
-  printf '%s\n' 'UWSM live session unavailable; packaged AppLibrary launch path was loaded' >&2
-  exit 0
-fi
+test -f "$test_root/uwsm.log"
+grep -Fxq -- '-- gtk-launch org.example.User.desktop' "$test_root/uwsm.log"
+test -f "$test_root/launch.log"
 grep -Fxq 'org.example.User.desktop' "$test_root/launch.log"
 
 printf '%s\n' 'UWSM package and AppLibrary integration passed'

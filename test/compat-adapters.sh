@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo=$(cd "${1:?repository path required}" && pwd)
+runtime_bin=${3:-}
 adapter="$repo/packages/omanixy-shell/compat-adapter-test.bash"
 test_root=$(mktemp -d)
 bin="$test_root/bin"
@@ -85,18 +86,32 @@ run_adapter() {
     TEST_PACTL_DSP="${TEST_PACTL_DSP:-}" \
     TEST_PACTL_LOG="${TEST_PACTL_LOG:-}" \
     COMPAT_ADAPTER_NAME="$command" \
-    bash "$adapter" "$@"
+  "$bin/$command" "$@"
 }
 
-ln -s "$adapter" "$bin/omarchy-weather-location"
-ln -s "$adapter" "$bin/omarchy-audio-output-set-default"
-ln -s "$adapter" "$bin/omarchy-menu-emoji-insert"
-ln -s "$adapter" "$bin/omarchy-notification-send"
-ln -s "$adapter" "$bin/omarchy-clipboard-paste-text"
-ln -s "$adapter" "$bin/omarchy-clipboard-paste-file"
-ln -s "$adapter" "$bin/omarchy-clipboard-open"
-ln -s "$adapter" "$bin/omarchy-capture-screenshot"
-ln -s "$adapter" "$bin/omarchy-remove-launcher-entry"
+link_adapter() { [[ -e "$bin/$1" ]] || ln -s "$adapter" "$bin/$1"; }
+if [[ -n "$runtime_bin" ]]; then
+  runtime_copy="$test_root/runtime-bin"
+  mkdir -p "$runtime_copy"
+  for helper in $(jq -r '.helpers | keys[]' "$repo/upstream/compatibility-contracts.json"); do
+    cp "$runtime_bin/$helper" "$runtime_copy/$helper"
+    sed -i 's|^export PATH=.*$|export PATH="${PATH}"|' "$runtime_copy/$helper"
+    chmod +x "$runtime_copy/$helper"
+    ln -s "$runtime_copy/$helper" "$bin/$helper"
+  done
+else
+  link_adapter omarchy-weather-location
+fi
+if [[ -z "$runtime_bin" ]]; then
+  link_adapter omarchy-audio-output-set-default
+  link_adapter omarchy-menu-emoji-insert
+  link_adapter omarchy-notification-send
+  link_adapter omarchy-clipboard-paste-text
+  link_adapter omarchy-clipboard-paste-file
+  link_adapter omarchy-clipboard-open
+  link_adapter omarchy-capture-screenshot
+  link_adapter omarchy-remove-launcher-entry
+fi
 
 HOME="$home" XDG_STATE_HOME="$home/.local/state" PATH="$bin:$PATH" \
   run_adapter omarchy-weather-location --set 'City & Name' '1.25,-2.5'
@@ -218,11 +233,11 @@ if TEST_PACTL_FAIL_MOVE=11 HOME="$home" PATH="$bin:$PATH" \
 fi
 grep -q 'rollback was incomplete' "$test_root/error"
 
-ln -s "$adapter" "$bin/omarchy-audio-sink-availability"
+link_adapter omarchy-audio-sink-availability
 HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-audio-sink-availability > "$test_root/sinks"
 grep -Fqx $'alsa_output.pci-1\t1' "$test_root/sinks"
 grep -Fqx $'alsa_output.usb-1\t0' "$test_root/sinks"
-ln -s "$adapter" "$bin/omarchy-audio-output-sink"
+link_adapter omarchy-audio-output-sink
 HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-audio-output-sink > "$test_root/default-sink"
 grep -Fqx -- 'alsa_output.pci-1' "$test_root/default-sink"
 TEST_PACTL_DSP=1 HOME="$home" PATH="$bin:$PATH" \
@@ -235,7 +250,7 @@ if HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-audio-output-sink 2>"$test
 fi
 unset TEST_PACTL_DSP TEST_PACTL_FAIL_SINK_INSPECTION
 grep -q 'DSP sink inspection failed' "$test_root/error"
-ln -s "$adapter" "$bin/omarchy-audio-input-set-default"
+link_adapter omarchy-audio-input-set-default
 HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-audio-input-set-default 44 alsa_input.pci-1
 grep -q '^wpctl set-default 44$' "$log"
 : > "$TEST_PACTL_LOG"
@@ -369,7 +384,7 @@ if [[ ${TEST_WEATHER_MALFORMED:-} == 1 ]]; then printf '%s\n' 'malformed'; else 
 EOF
 chmod +x "$bin/curl"
 sed -i "1c#!$(command -v bash)" "$bin/curl"
-ln -s "$adapter" "$bin/omarchy-weather-status"
+link_adapter omarchy-weather-status
 HOME="$home" XDG_STATE_HOME="$home/.local/state" PATH="$bin:$PATH" \
   run_adapter omarchy-weather-status > "$test_root/weather"
 grep -Fqx -- 'City & Name  ·  Temp 12°C  ·  Wind 5 km/h' "$test_root/weather"
@@ -552,7 +567,7 @@ fi
 EOF
 chmod +x "$bin/brightnessctl"
 sed -i "1c#!$(command -v bash)" "$bin/brightnessctl"
-ln -s "$adapter" "$bin/omarchy-brightness-display"
+link_adapter omarchy-brightness-display
 HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-brightness-display --no-osd --monitor eDP-1 50%
 grep -q '^brightnessctl set 50%$' "$log"
 if HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-brightness-display --monitor DP-1 50% 2>"$test_root/error"; then
@@ -621,7 +636,7 @@ printf '##\n  #\n'
 EOF
 chmod +x "$bin/nmcli" "$bin/qrencode"
 sed -i "1c#!$(command -v bash)" "$bin/nmcli" "$bin/qrencode"
-ln -s "$adapter" "$bin/omarchy-network-qr"
+link_adapter omarchy-network-qr
 TEST_QR_PAYLOAD="$test_root/qr-payload" HOME="$home" PATH="$bin:$PATH" \
   run_adapter omarchy-network-qr --meta wlan0 > "$test_root/qr"
 grep -Fqx $'meta\twlan0\tWPA\tMy;Wi,Fi:Zone' "$test_root/qr"
@@ -630,7 +645,7 @@ grep -Fqx 'WIFI:T:WPA;S:My\;Wi\,Fi\:Zone;P:s e\;cret;;' "$test_root/qr-payload"
 TEST_NMCLI_SPECIAL=1 TEST_QR_PAYLOAD="$test_root/qr-special-payload" HOME="$home" PATH="$bin:$PATH" \
   run_adapter omarchy-network-qr --meta wlan0 >/dev/null
 grep -Fqx 'WIFI:T:WPA;S:Quoted \" Wi-Fi;P:pass\"word;;' "$test_root/qr-special-payload"
-ln -s "$adapter" "$bin/omarchy-network-password"
+link_adapter omarchy-network-password
 HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-network-password wlan0 > "$test_root/password"
 grep -Fqx 's e;cret' "$test_root/password"
 if HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-network-password 2>"$test_root/error"; then
@@ -653,7 +668,7 @@ fi
 EOF
 chmod +x "$bin/ip"
 sed -i "1c#!$(command -v bash)" "$bin/ip"
-ln -s "$adapter" "$bin/omarchy-network-status"
+link_adapter omarchy-network-status
 HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-network-status --verbose > "$test_root/network"
 grep -Fqx -- $'iface\tfixture0' "$test_root/network"
 grep -Fqx -- $'type\tethernet' "$test_root/network"
@@ -664,13 +679,13 @@ fi
 grep -q 'route lookup timed out' "$test_root/error"
 TEST_IP_NO_ROUTE=1 HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-network-status >"$test_root/disconnected"
 grep -Fqx -- $'disconnected\t\t\t' "$test_root/disconnected"
-ln -s "$adapter" "$bin/omarchy-network-band"
+link_adapter omarchy-network-band
 if HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-network-band invalid extra 2>"$test_root/error"; then
   printf '%s\n' 'invalid network band arguments unexpectedly succeeded' >&2
   exit 1
 fi
 grep -q 'Usage: omarchy-network-band' "$test_root/error"
-ln -s "$adapter" "$bin/omarchy-dns"
+link_adapter omarchy-dns
 if HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-dns Invalid extra 2>"$test_root/error"; then
   printf '%s\n' 'invalid DNS arguments unexpectedly succeeded' >&2
   exit 1
@@ -794,8 +809,8 @@ printf '%s\n' "$*" >> "$TEST_RFKILL"
 EOF
 chmod +x "$bin/bluetoothctl" "$bin/rfkill"
 sed -i "1c#!$(command -v bash)" "$bin/bluetoothctl" "$bin/rfkill"
-ln -s "$adapter" "$bin/omarchy-bluetooth-device"
-ln -s "$adapter" "$bin/omarchy-bluetooth-power"
+link_adapter omarchy-bluetooth-device
+link_adapter omarchy-bluetooth-power
 if HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-bluetooth-device disconnect not-a-mac 2>"$test_root/error"; then
   printf '%s\n' 'malformed Bluetooth address unexpectedly succeeded' >&2
   exit 1
@@ -823,7 +838,7 @@ if TEST_BLUETOOTH_TIMEOUT=1 HOME="$home" PATH="$bin:$PATH" \
 fi
 grep -q 'Bluetooth controller lookup timed out' "$test_root/error"
 
-ln -s "$adapter" "$bin/omarchy-system-stats"
+link_adapter omarchy-system-stats
 printf '%s\n' 'MemTotal:       8388608 kB' 'MemAvailable:   4194304 kB' > "$test_root/meminfo"
 printf '%s\n' 'cpu 100 0 0 100 0 0 0 0 0 0' > "$test_root/stat-before"
 printf '%s\n' 'cpu 150 0 0 150 0 0 0 0 0 0' > "$test_root/stat-after"
@@ -859,7 +874,7 @@ EOF
 chmod +x "$bin/gsettings"
 sed -i "1c#!$(command -v bash)" "$bin/gsettings"
 export TEST_GSETTINGS_LOG="$test_root/gsettings"
-ln -s "$adapter" "$bin/omarchy-display-text-size"
+link_adapter omarchy-display-text-size
 HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-display-text-size --help | grep -Fqx -- 'Usage: omarchy-display-text-size [size|reset]'
 PATH="$bin:$bash_dir" HOME="$home" run_adapter omarchy-display-text-size --help | grep -Fqx -- 'Usage: omarchy-display-text-size [size|reset]'
 text_size_invalid_status=0
@@ -989,8 +1004,8 @@ HYPRCTL_LOG="$test_root/hyprctl" HOME="$home" PATH="$bin:$PATH" \
   run_adapter omarchy-brightness-display on
 grep -Fqx -- 'dispatch hl.dsp.dpms({ action = "disable" })' "$test_root/hyprctl"
 grep -Fqx -- 'dispatch hl.dsp.dpms({ action = "enable" })' "$test_root/hyprctl"
-ln -s "$adapter" "$bin/omarchy-monitor-state"
-ln -s "$adapter" "$bin/omarchy-hyprland-monitor-scaling"
+link_adapter omarchy-monitor-state
+link_adapter omarchy-hyprland-monitor-scaling
 HYPRCTL_LOG="$test_root/hyprctl" HOME="$home" PATH="$bin:$PATH" \
   run_adapter omarchy-monitor-state > "$test_root/monitor"
 head -n 1 "$test_root/monitor" | grep -Fqx -- '42'
@@ -1074,7 +1089,7 @@ sed -i "1c#!$(command -v bash)" "$bin/upower"
 mkdir -p "$test_root/power/BAT0"
 printf '%s\n' 10000000 > "$test_root/power/BAT0/power_now"
 printf '%s\n' 112 > "$test_root/power/BAT0/cycle_count"
-ln -s "$adapter" "$bin/omarchy-battery-status"
+link_adapter omarchy-battery-status
 OMARCHY_POWER_SUPPLY_PATH="$test_root/power" HOME="$home" PATH="$bin:$PATH" \
   run_adapter omarchy-battery-status --shell > "$test_root/battery"
 grep -Fqx $'percentage\t57%' "$test_root/battery"
@@ -1166,8 +1181,8 @@ printf '%s\n' "${TEST_BATTERY_STATE:-b true}"
 EOF
 chmod +x "$bin/busctl"
 sed -i "1c#!$(command -v bash)" "$bin/busctl"
-ln -s "$adapter" "$bin/omarchy-powerprofiles-list"
-ln -s "$adapter" "$bin/omarchy-powerprofiles-set"
+link_adapter omarchy-powerprofiles-list
+link_adapter omarchy-powerprofiles-set
 HOME="$home" XDG_STATE_HOME="$home/.local/state" PATH="$bin:$PATH" \
   run_adapter omarchy-powerprofiles-list --active-state > "$test_root/profiles"
 grep -Fqx $'performance\t0' "$test_root/profiles"

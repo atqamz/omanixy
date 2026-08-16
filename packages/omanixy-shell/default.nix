@@ -157,9 +157,13 @@ import "AppLibrarySupport.js" as AppSupport' \
           'var command = AppSupport.launchCommand(id)
     if (command) Util.execDetached(command)'
       chmod u+w "$out/shell/plugins/menu" "$out/shell/plugins/menu/Menu.qml"
+      install -Dm644 ${./MenuDeleteSupport.js} "$out/shell/plugins/menu/MenuDeleteSupport.js"
       substituteInPlace "$out/shell/plugins/menu/Menu.qml" \
+        --replace-fail 'import "MenuModel.js" as MenuModel' \
+          'import "MenuModel.js" as MenuModel
+import "MenuDeleteSupport.js" as MenuDeleteSupport' \
         --replace-fail '    if (!row || row.kind !== "app") return' \
-          '    if (!row || row.kind !== "app" || !root.appLibrary || !root.appLibrary.canRemove(row.appId)) return'
+          '    if (!MenuDeleteSupport.canRequestDelete(row, root.appLibrary)) return'
       chmod u+w "$out/shell/plugins/bar" "$out/shell/plugins/bar/Bar.qml"
       chmod u+w "$out/shell/plugins/panels/network/Model.js" "$out/shell/plugins/panels/network/Panel.qml"
       registry_file="$out/shell/services/PluginRegistry.qml"
