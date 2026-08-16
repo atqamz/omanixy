@@ -158,38 +158,10 @@ import "AppLibrarySupport.js" as AppSupport' \
     if (command) Util.execDetached(command)'
       chmod u+w "$out/shell/plugins/menu" "$out/shell/plugins/menu/Menu.qml"
       install -Dm644 ${./MenuDeleteSupport.js} "$out/shell/plugins/menu/MenuDeleteSupport.js"
-      install -Dm644 ${./MenuDeleteBridge.qml} "$out/shell/plugins/menu/MenuDeleteBridge.qml"
       substituteInPlace "$out/shell/plugins/menu/Menu.qml" \
         --replace-fail 'import "MenuModel.js" as MenuModel' \
           'import "MenuModel.js" as MenuModel
 import "MenuDeleteSupport.js" as MenuDeleteSupport' \
-        --replace-fail 'Item {
-  id: root' \
-          'Item {
-  id: root
-  property var omanixyDeleteTestLibrary
-  property bool omanixyDeleteConfirmationOpen: false
-  property var omanixyPendingDeleteRow
-  property int omanixyDeleteRefreshCount: 0
-  function omanixyRequestDelete(row) {
-    if (!MenuDeleteSupport.canRequestDelete(row, omanixyDeleteTestLibrary)) return false
-    omanixyPendingDeleteRow = row
-    omanixyDeleteConfirmationOpen = true
-    return true
-  }
-  function omanixyCancelDelete() {
-    omanixyPendingDeleteRow = null
-    omanixyDeleteConfirmationOpen = false
-  }
-  function omanixyConfirmDelete() {
-    if (!omanixyDeleteConfirmationOpen || !omanixyPendingDeleteRow) return false
-    var row = omanixyPendingDeleteRow
-    omanixyPendingDeleteRow = null
-    omanixyDeleteConfirmationOpen = false
-    omanixyDeleteTestLibrary.remove(row.appId, row.label)
-    omanixyDeleteRefreshCount++
-    return true
-  }' \
         --replace-fail '    if (!row || row.kind !== "app") return' \
           '    if (!MenuDeleteSupport.canRequestDelete(row, root.appLibrary)) return'
       chmod u+w "$out/shell/plugins/bar" "$out/shell/plugins/bar/Bar.qml"
@@ -410,12 +382,12 @@ EOF
       for helper in ${lib.concatStringsSep " " compatibilityHelpers}; do
         ln -s ${compatAdapter}/bin/omanixy-compat-adapter "$out/bin/$helper"
       done
-      cat > "$out/runtime-surface.json" <<'EOF'
+  cat > "$out/runtime-surface.json" <<'EOF'
 ${builtins.toJSON (lib.mapAttrs
-  (name: contract: {
+  (name: _: {
     wrapper = "bin/${name}";
-    consumers = contract.postPatchConsumer;
-    probe = "compatibility-matrix";
+    consumers = [ "bin/${name}" ];
+    probe = "runtime-matrix:${name}";
   }) (lib.getAttrs compatibilityHelpers contractSource.helpers))}
 EOF
     '';

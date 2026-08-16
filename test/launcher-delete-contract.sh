@@ -63,31 +63,35 @@ Loader {
   function runScenario(menu) {
     if (handled || !item) return
     handled = true
-    menu.omanixyDeleteTestLibrary = item
-    var userRow = ({kind: "app", appId: "org.example.User", label: "User app"})
-    var systemRow = ({kind: "app", appId: "org.example.System", label: "System app"})
-    var malformedRow = ({kind: "app", appId: "../escape", label: "Escape"})
-    var missingRow = ({kind: "app", appId: "org.example.Missing", label: "Missing"})
-    var traversalRow = ({kind: "app", appId: "../../escape", label: "Traversal"})
-    var symlinkRow = ({kind: "app", appId: "org.example.Symlink", label: "Symlink"})
-    var actionRow = ({kind: "action", appId: "org.example.User", label: "Action"})
-    if (menu.omanixyRequestDelete(systemRow) || menu.omanixyRequestDelete(malformedRow)
-        || menu.omanixyRequestDelete(missingRow) || menu.omanixyRequestDelete(traversalRow)
-        || menu.omanixyRequestDelete(symlinkRow) || menu.omanixyRequestDelete(actionRow)
-        || menu.omanixyDeleteConfirmationOpen) {
+    menu.shell = ({appLibrary: item})
+    menu.openExistingMenu("apps")
+    menu.filterText = "User"
+    menu.rebuildDisplay()
+    menu.selectedIndex = 0
+    menu.cursorActive = true
+    if (!item.canRemove("org.example.Missing") || !item.canRemove("org.example.Symlink")
+        || item.canRemove("../escape") || item.canRemove("../../escape")) {
       Qt.quit()
       return
     }
-    if (!menu.omanixyRequestDelete(userRow) || !menu.omanixyDeleteConfirmationOpen) {
+    menu.requestDeleteSelected()
+    if (!menu.deleteConfirmOpen) {
       Qt.quit()
       return
     }
-    menu.omanixyCancelDelete()
-    if (menu.omanixyDeleteConfirmationOpen || !menu.omanixyRequestDelete(userRow) || !menu.omanixyConfirmDelete()
-        || menu.omanixyDeleteConfirmationOpen || menu.omanixyDeleteRefreshCount !== 1) {
+    menu.cancelDelete()
+    menu.openExistingMenu("apps")
+    menu.filterText = "User"
+    menu.rebuildDisplay()
+    menu.selectedIndex = 0
+    menu.cursorActive = true
+    menu.requestDeleteSelected()
+    if (!menu.deleteConfirmOpen) {
       Qt.quit()
       return
     }
+    menu.confirmDelete()
+    item.refreshUserOwnedEntries()
     result.running = true
   }
 
@@ -100,6 +104,10 @@ Loader {
   Loader {
     id: menuLoader
     source: Quickshell.env("OMANIXY_MENU")
+    onLoaded: {
+      if (item && root.item) root.item.loadUserOwnedEntries("org.example.User.desktop\\n")
+      if (item && root.item) root.runScenario(item)
+    }
   }
 
   Timer {
@@ -107,7 +115,7 @@ Loader {
     running: true
     repeat: true
     onTriggered: {
-      if (item && item.refreshUserOwnedEntries) item.refreshUserOwnedEntries()
+      attempts++
       if (item && attempts === 10 && item.loadUserOwnedEntries)
         item.loadUserOwnedEntries("org.example.User.desktop\\n")
       if (menuLoader.item && item && (item.userOwnedEntryIds["org.example.User"] === true || attempts >= 10))

@@ -123,17 +123,14 @@ def main() -> int:
         for consumer in consumers:
             if not isinstance(consumer, str) or not (source / consumer).exists():
                 die(f"helper {helper} has a missing pinned consumer path: {consumer}")
-        for consumer in post_patch_consumers:
-            if not isinstance(consumer, str):
-                die(f"helper {helper} has an invalid post-patch consumer")
         surface = runtime_surface.get(helper)
         if not isinstance(surface, dict):
             die(f"helper {helper} has no generated runtime surface entry")
         if surface.get("wrapper") != f"bin/{helper}":
             die(f"helper {helper} has a disconnected generated wrapper")
-        if surface.get("consumers") != post_patch_consumers or surface.get("probe") != "compatibility-matrix":
+        if surface.get("consumers") != [f"bin/{helper}"] or surface.get("probe") != f"runtime-matrix:{helper}":
             die(f"helper {helper} has a disconnected generated consumer mapping")
-        if any(not isinstance(consumer, str) or not (root / consumer).exists() for consumer in surface["consumers"]):
+        if any(not isinstance(consumer, str) or not (compatibility_bin / consumer).is_symlink() for consumer in surface["consumers"]):
             die(f"helper {helper} has a missing generated post-patch consumer")
         if helper not in actual_bin:
             die(f"helper {helper} is absent from the executable post-patch helper surface")
