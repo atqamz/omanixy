@@ -1025,6 +1025,8 @@
       ],
       "reference": "shell/services/AppLibrary.qml",
       "hash": "68dd83a2141e9a8eda01a9ec5e2fbaaecf5d02d969178512cc6fec118fa23a31",
+      "provider": "packaged-uwsm",
+      "probe": "test/uwsm-integration.sh",
       "evidence": "UWSM client owns app-graphical.slice session scoping"
     }
   },

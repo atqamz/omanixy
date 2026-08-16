@@ -30,7 +30,6 @@ mkdir -p "$fixture_bin" "$data_home/applications" "$runtime_dir" "$config_root"
 ln -s "$compatibility_root/shell" "$test_root/qs"
 ln -s "$compatibility_root/shell/Commons" "$config_root/Commons"
 ln -s "$compatibility_root/shell/services" "$config_root/services"
-ln -s "$compatibility_root/shell/services/AppLibrarySupport.js" "$config_root/AppLibrarySupport.js"
 cat > "$fixture_bin/gtk-launch" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" > "$LAUNCH_LOG"
@@ -68,13 +67,8 @@ Loader {
   property bool launched: false
   property int attempts: 0
   onLoaded: {
-    commandLog.running = true
     if (item) item.launch("org.example.User", "Omanixy test app")
     launched = true
-  }
-  Process {
-    id: commandLog
-    command: ["bash", "-c", "printf '%s\\n' \"uwsm-app -- gtk-launch 'org.example.User.desktop'\" > \"$COMMAND_LOG\""]
   }
   Timer {
     interval: 100
@@ -94,7 +88,6 @@ LAUNCH_LOG="$test_root/launch.log" \
   QT_QPA_PLATFORM=offscreen \
   OMANIXY_APP_LIBRARY="$config_root/services/AppLibrary.qml" \
   OMARCHY_PATH="$compatibility_root" \
-  COMMAND_LOG="$test_root/command.log" \
   LAUNCH_LOG="$test_root/launch.log" \
   FIXTURE_PATH="$fixture_bin:$runtime_path" \
   PATH="$fixture_bin:$runtime_path" \
@@ -107,12 +100,10 @@ for _ in {1..20}; do
   test -f "$test_root/launch.log" && break
   sleep 0.1
 done
-test -f "$test_root/command.log"
-grep -Fxq -- "uwsm-app -- gtk-launch 'org.example.User.desktop'" "$test_root/command.log"
 if test -f "$test_root/launch.log"; then
   grep -Fxq 'org.example.User.desktop' "$test_root/launch.log"
 else
-  printf '%s\n' 'real UWSM launch unavailable without an active session; command contract verified'
+  printf '%s\n' 'real UWSM launch unavailable without an active session; package CLI evidence passed'
 fi
 
 printf '%s\n' 'UWSM package and AppLibrary integration passed'

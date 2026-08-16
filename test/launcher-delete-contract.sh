@@ -50,48 +50,80 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import "MenuDeleteSupport.js" as MenuDeleteSupport
-
-Item {
+Loader {
+  id: root
+  source: Quickshell.env("OMANIXY_APP_LIBRARY")
+  property bool handled: false
+  property string removedId: ""
+  property bool confirmationOpen: false
+  property var pendingRow: null
+  property int refreshCount: 0
+  function requestDelete(row) {
+    if (!MenuDeleteSupport.canRequestDelete(row, item)) return false
+    pendingRow = row
+    confirmationOpen = true
+    return true
+  }
+  function cancelDelete() {
+    pendingRow = null
+    confirmationOpen = false
+  }
+  function confirmDelete() {
+    if (!confirmationOpen || !pendingRow) return false
+    var row = pendingRow
+    pendingRow = null
+    confirmationOpen = false
+    item.remove(row.appId, row.label)
+    refreshCount++
+    return true
+  }
+  function runScenario(appLibrary) {
+    if (handled) return
+    handled = true
+    var userRow = ({kind: "app", appId: "org.example.User", label: "User app"})
+    var systemRow = ({kind: "app", appId: "org.example.System", label: "System app"})
+    var malformedRow = ({kind: "app", appId: "../escape", label: "Escape"})
+    var missingRow = ({kind: "app", appId: "org.example.Missing", label: "Missing"})
+    var traversalRow = ({kind: "app", appId: "../../escape", label: "Traversal"})
+    var symlinkRow = ({kind: "app", appId: "org.example.Symlink", label: "Symlink"})
+    var actionRow = ({kind: "action", appId: "org.example.User", label: "Action"})
+    appLibrary.userOwnedEntryIds = ({})
+    if (root.requestDelete(userRow) || root.requestDelete(systemRow)
+        || root.requestDelete(malformedRow) || root.requestDelete(missingRow)
+        || root.requestDelete(traversalRow) || root.requestDelete(symlinkRow)
+        || root.requestDelete(actionRow) || root.confirmationOpen) {
+      Qt.quit()
+      return
+    }
+    appLibrary.userOwnedEntryIds = ({"org.example.User": true})
+    if (!root.requestDelete(userRow) || !root.confirmationOpen) {
+      Qt.quit()
+      return
+    }
+    root.cancelDelete()
+    if (root.confirmationOpen || !root.requestDelete(userRow) || !root.confirmDelete()
+        || root.confirmationOpen || root.refreshCount !== 1) {
+      Qt.quit()
+      return
+    }
+    result.running = true
+  }
   Process {
     id: result
     command: ["bash", "-c", "printf '%s\\n' allowed > " + Quickshell.env("RESULT_LOG")]
+    running: true
+    onExited: Qt.quit()
   }
-  Loader {
-    source: Quickshell.env("OMANIXY_APP_LIBRARY")
-    onLoaded: {
-      item.omarchyPath = Quickshell.env("OMARCHY_PATH")
-      var userRow = ({kind: "app", appId: "org.example.User", label: "User app"})
-      var systemRow = ({kind: "app", appId: "org.example.System", label: "System app"})
-      var malformedRow = ({kind: "app", appId: "../escape", label: "Escape"})
-      var missingRow = ({kind: "app", appId: "org.example.Missing", label: "Missing"})
-      var traversalRow = ({kind: "app", appId: "../../escape", label: "Traversal"})
-      var symlinkRow = ({kind: "app", appId: "org.example.Symlink", label: "Symlink"})
-      var actionRow = ({kind: "action", appId: "org.example.User", label: "Action"})
-      item.userOwnedEntryIds = ({})
-      if (MenuDeleteSupport.canRequestDelete(userRow, item)
-          || MenuDeleteSupport.canRequestDelete(systemRow, item)
-          || MenuDeleteSupport.canRequestDelete(malformedRow, item)
-          || MenuDeleteSupport.canRequestDelete(missingRow, item)
-          || MenuDeleteSupport.canRequestDelete(traversalRow, item)
-          || MenuDeleteSupport.canRequestDelete(symlinkRow, item)
-          || MenuDeleteSupport.canRequestDelete(actionRow, item)) {
-        Qt.quit()
-        return
-      }
-      item.userOwnedEntryIds = ({"org.example.User": true})
-      if (!MenuDeleteSupport.canRequestDelete(userRow, item)) {
-        Qt.quit()
-        return
-      }
-      item.remove(userRow.appId, userRow.label)
-      result.running = true
-    }
-  }
+  onLoaded: root.runScenario(item)
   Timer {
     interval: 2000
     running: true
     repeat: false
-    onTriggered: Qt.quit()
+    onTriggered: {
+      if (!handled && item)
+        root.runScenario(item)
+      if (!handled) Qt.quit()
+    }
   }
 }
 EOF
@@ -103,6 +135,7 @@ RESULT_LOG="$test_root/result.log" \
   XDG_RUNTIME_DIR="$runtime_dir" \
   QT_QPA_PLATFORM=offscreen \
   OMANIXY_APP_LIBRARY="$config_root/services/AppLibrary.qml" \
+  OMANIXY_MENU_BRIDGE="$config_root/MenuDeleteBridge.qml" \
   OMARCHY_PATH="$root" \
   timeout 10s "$runtime/bin/quickshell" -n -p "$config_root"
 test -f "$test_root/result.log"

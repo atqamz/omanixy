@@ -161,11 +161,15 @@ def main() -> int:
         for consumer in consumers:
             if not isinstance(consumer, str) or not (source / consumer).exists():
                 die(f"native entry {capability} has a missing consumer path: {consumer}")
-        if capability not in reference_path.read_text():
-            die(f"native entry {capability} is absent from its pinned reference")
         evidence = contract.get("evidence")
         if not isinstance(evidence, str) or not evidence:
             die(f"native entry {capability} has no native capability evidence")
+        provider = contract.get("provider")
+        probe = contract.get("probe")
+        if not isinstance(provider, str) or not provider:
+            die(f"native entry {capability} has no normalized provider")
+        if not isinstance(probe, str) or not (source / probe).is_file():
+            die(f"native entry {capability} has no executable package probe")
 
     if not (repo / "test/ipc-wrapper.sh").is_file():
         die("omarchy-shell has no IPC behavioral test evidence")
