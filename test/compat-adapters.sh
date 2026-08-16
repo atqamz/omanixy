@@ -18,6 +18,7 @@ export XDG_DATA_HOME="$home/.local/share"
 export PATH="$bin:$PATH"
 export OMANIXY_ADAPTER_DIR="$repo/packages/omanixy-shell"
 case_log="$test_root/cases"
+record_case() { printf 'CASE\t%s\t%s\n' "$1" "$2" >> "$case_log"; }
 bash_dir=$(dirname "$(command -v bash)")
 env_bin=$(command -v env)
 
@@ -118,13 +119,19 @@ HOME="$home" XDG_STATE_HOME="$home/.local/state" PATH="$bin:$PATH" \
   run_adapter omarchy-weather-location --set 'City & Name' '1.25,-2.5'
 jq -e '.name == "City & Name" and .latitude == 1.25 and .longitude == -2.5' \
   "$state/settings/weather.json" >/dev/null
+record_case omarchy-weather-location valid
 
+weather_location_invalid_status=0
 if HOME="$home" XDG_STATE_HOME="$home/.local/state" PATH="$bin:$PATH" \
   run_adapter omarchy-weather-location --set broken 'not-coordinates' 2>"$test_root/error"; then
   printf '%s\n' 'malformed weather coordinates unexpectedly succeeded' >&2
   exit 1
+else
+  weather_location_invalid_status=$?
 fi
+test "$weather_location_invalid_status" -eq 2
 grep -q 'Invalid coordinates' "$test_root/error"
+record_case omarchy-weather-location invalidArgs
 
 printf '%s\n' 'audio' > "$log"
 cat > "$bin/wpctl" <<EOF
@@ -209,6 +216,7 @@ if grep -q '^pactl move-sink-input 14 ' "$log"; then
   printf '%s\n' 'DSP filter-chain stream was migrated unexpectedly' >&2
   exit 1
 fi
+record_case omarchy-audio-output-set-default valid
 if HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-audio-output-set-default 42 'sink with spaces' 2>"$test_root/error"; then
   printf '%s\n' 'mismatched PipeWire output unexpectedly succeeded' >&2
   exit 1
@@ -238,9 +246,11 @@ link_adapter omarchy-audio-sink-availability
 HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-audio-sink-availability > "$test_root/sinks"
 grep -Fqx $'alsa_output.pci-1\t1' "$test_root/sinks"
 grep -Fqx $'alsa_output.usb-1\t0' "$test_root/sinks"
+record_case omarchy-audio-sink-availability valid
 link_adapter omarchy-audio-output-sink
 HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-audio-output-sink > "$test_root/default-sink"
 grep -Fqx -- 'alsa_output.pci-1' "$test_root/default-sink"
+record_case omarchy-audio-output-sink valid
 TEST_PACTL_DSP=1 HOME="$home" PATH="$bin:$PATH" \
   run_adapter omarchy-audio-output-sink > "$test_root/dsp-sink"
 grep -Fqx -- 'alsa_output.pci-1' "$test_root/dsp-sink"
@@ -254,6 +264,7 @@ grep -q 'DSP sink inspection failed' "$test_root/error"
 link_adapter omarchy-audio-input-set-default
 HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-audio-input-set-default 44 alsa_input.pci-1
 grep -q '^wpctl set-default 44$' "$log"
+record_case omarchy-audio-input-set-default valid
 : > "$TEST_PACTL_LOG"
 export TEST_PACTL_FAIL_MOVE=21
 if HOME="$home" PATH="$bin:$PATH" \
@@ -276,6 +287,7 @@ else
 fi
 test "$audio_invalid_status" -eq 2
 grep -q 'Usage: omarchy-audio-output-set-default' "$test_root/error"
+record_case omarchy-audio-output-set-default invalidArgs
 
 cat > "$bin/wl-copy" <<'EOF'
 #!/usr/bin/env bash
@@ -296,6 +308,7 @@ sed -i "1c#!$(command -v bash)" "$bin/wl-copy" "$bin/wtype"
 TEST_CLIPBOARD="$test_root/clipboard" TEST_WTYPE="$test_root/wtype" \
   HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-menu-emoji-insert "$emoji"
 grep -Fqx -- "$emoji" "$test_root/clipboard"
+record_case omarchy-menu-emoji-insert valid
 TEST_CLIPBOARD="$test_root/clipboard" TEST_WTYPE="$test_root/wtype" TEST_WL_COPY_HOLD=1 TEST_WTYPE_FAIL=1 \
   HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-menu-emoji-insert "$emoji"
 TEST_CLIPBOARD="$test_root/clipboard" TEST_WTYPE="$test_root/wtype" \
@@ -308,6 +321,7 @@ grep -Fqx -- 'copied text' "$test_root/clipboard"
 TEST_CLIPBOARD="$test_root/clipboard" TEST_WTYPE="$test_root/wtype" \
   HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-clipboard-paste-text --copy-only --history-index 0
 grep -Fqx -- 'history text' "$test_root/clipboard"
+record_case omarchy-clipboard-paste-text valid
 if HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-clipboard-paste-text --history-index 0 'ignored text' 2>"$test_root/error"; then
   printf '%s\n' 'conflicting clipboard history and text arguments unexpectedly succeeded' >&2
   exit 1
@@ -317,6 +331,7 @@ printf '%s\n' 'file payload' > "$test_root/payload.txt"
 TEST_CLIPBOARD="$test_root/clipboard" TEST_WTYPE="$test_root/wtype" \
   HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-clipboard-paste-file --copy-only text/plain "$test_root/payload.txt"
 grep -Fqx -- 'file payload' "$test_root/clipboard"
+record_case omarchy-clipboard-paste-file valid
 cat > "$bin/xdg-open" <<EOF
 #!/usr/bin/env bash
 [[ \${TEST_XDG_OPEN_FAIL:-} == 1 ]] && exit 1
@@ -330,6 +345,7 @@ for _ in $(seq 1 10); do
   sleep 0.1
 done
 grep -Fqx -- 'history text' "$test_root/opened-entry"
+record_case omarchy-clipboard-open valid
 if TEST_XDG_OPEN_FAIL=1 HOME="$home" PATH="$bin:$PATH" \
   run_adapter omarchy-clipboard-open --history-index 0 2>"$test_root/error"; then
   printf '%s\n' 'failed clipboard opener unexpectedly succeeded' >&2
@@ -363,6 +379,7 @@ TEST_NOTIFICATION="$test_root/notification" TEST_NOTIFICATION_PRINT_ID=1 HOME="$
   run_adapter omarchy-notification-send 'Weather' 'Clear skies'
 mapfile -t notification_args < "$test_root/notification"
 [[ ${notification_args[*]} == '-a omarchy-action -u low Weather Clear skies' ]]
+record_case omarchy-notification-send valid
 TEST_NOTIFICATION="$test_root/notification" TEST_NOTIFICATION_PRINT_ID=1 HOME="$home" PATH="$bin:$PATH" \
   notification_id=$(run_adapter omarchy-notification-send 'Restart Foot' -r 42 -p)
 [[ $notification_id == 31415 ]]
@@ -372,12 +389,17 @@ TEST_NOTIFICATION="$test_root/notification" TEST_NOTIFICATION_PRINT_ID='' HOME="
   run_adapter omarchy-notification-send --exec 'omarchy-shell shell ping' --app-name custom -g glyph -u critical --image /tmp/image.png 'Headline' 'Body' -p
 mapfile -t notification_args < "$test_root/notification"
 [[ ${notification_args[*]} == '-p -a custom -u critical --hint=string:omarchy-glyph:glyph --hint=string:image-path:/tmp/image.png --hint=string:omarchy-exec:omarchy-shell shell ping Headline Body' ]]
+notification_invalid_status=0
 if TEST_NOTIFICATION="$test_root/notification" HOME="$home" PATH="$bin:$PATH" \
   run_adapter omarchy-notification-send 'Restart Foot' -r invalid 2>"$test_root/error"; then
   printf '%s\n' 'invalid notification replacement id unexpectedly succeeded' >&2
   exit 1
+else
+  notification_invalid_status=$?
 fi
+test "$notification_invalid_status" -eq 2
 grep -q 'Notification replacement id must be numeric' "$test_root/error"
+record_case omarchy-notification-send invalidArgs
 
 cat > "$bin/curl" <<'EOF'
 #!/usr/bin/env bash
@@ -389,6 +411,7 @@ link_adapter omarchy-weather-status
 HOME="$home" XDG_STATE_HOME="$home/.local/state" PATH="$bin:$PATH" \
   run_adapter omarchy-weather-status > "$test_root/weather"
 grep -Fqx -- 'City & Name  ·  Temp 12°C  ·  Wind 5 km/h' "$test_root/weather"
+record_case omarchy-weather-status valid
 if TEST_WEATHER_MALFORMED=1 HOME="$home" XDG_STATE_HOME="$home/.local/state" PATH="$bin:$PATH" \
   run_adapter omarchy-weather-status 2>"$test_root/error"; then
   printf '%s\n' 'malformed weather response unexpectedly succeeded' >&2
@@ -435,6 +458,7 @@ if kill -0 "$(<"$test_root/freeze.pid")" 2>/dev/null; then
   printf '%s\n' 'screenshot freeze process leaked' >&2
   exit 1
 fi
+record_case omarchy-capture-screenshot valid
 if TEST_GRIM_FAIL=1 XDG_PICTURES_DIR="$test_root/pictures" HOME="$home" PATH="$bin:$PATH" \
   run_adapter omarchy-capture-screenshot >"$test_root/error-output" 2>"$test_root/error"; then
   printf '%s\n' 'failed screenshot capture unexpectedly succeeded' >&2
@@ -482,11 +506,17 @@ TEST_NOTIFICATION="$test_root/screenshot-notification" XDG_PICTURES_DIR="$test_r
   HOME="$home" PATH="$bin:$PATH" \
   run_adapter omarchy-capture-screenshot --editor=custom-editor region slurp >/dev/null
 grep -Fq -- '--hint=string:omarchy-exec:custom-editor' "$test_root/screenshot-notification"
+record_case omarchy-capture-screenshot editor
+screenshot_invalid_status=0
 if HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-capture-screenshot invalid 2>"$test_root/error"; then
   printf '%s\n' 'invalid screenshot mode unexpectedly succeeded' >&2
   exit 1
+else
+  screenshot_invalid_status=$?
 fi
+test "$screenshot_invalid_status" -eq 2
 grep -q 'Usage: omarchy-capture-screenshot' "$test_root/error"
+record_case omarchy-capture-screenshot invalidArgs
 
 mkdir -p "$home/.local/share/applications"
 cat > "$bin/update-desktop-database" <<'EOF'
@@ -507,6 +537,7 @@ printf '%s\n' '[Desktop Entry]' > "$home/.local/share/applications/org.example.R
 XDG_DATA_HOME="$home/.local/share" HOME="$home" PATH="$bin:$PATH" \
   run_adapter omarchy-remove-launcher-entry org.example.Remove 'Remove me'
 test ! -e "$home/.local/share/applications/org.example.Remove.desktop"
+record_case omarchy-remove-launcher-entry valid
 printf '%s\n' '[Desktop Entry]' > "$home/.local/share/applications/org.example.Restore.desktop"
 if TEST_DESKTOP_DATABASE_FAIL_ONCE=1 XDG_DATA_HOME="$home/.local/share" HOME="$home" PATH="$bin:$PATH" \
   run_adapter omarchy-remove-launcher-entry org.example.Restore 'Restore me' 2>"$test_root/error"; then
@@ -571,6 +602,7 @@ sed -i "1c#!$(command -v bash)" "$bin/brightnessctl"
 link_adapter omarchy-brightness-display
 HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-brightness-display --no-osd --monitor eDP-1 50%
 grep -q '^brightnessctl set 50%$' "$log"
+record_case omarchy-brightness-display valid
 if HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-brightness-display --monitor DP-1 50% 2>"$test_root/error"; then
   printf '%s\n' 'external brightness unexpectedly succeeded' >&2
   exit 1
@@ -643,12 +675,14 @@ TEST_QR_PAYLOAD="$test_root/qr-payload" HOME="$home" PATH="$bin:$PATH" \
 grep -Fqx $'meta\twlan0\tWPA\tMy;Wi,Fi:Zone' "$test_root/qr"
 grep -Fqx '1' "$test_root/qr"
 grep -Fqx 'WIFI:T:WPA;S:My\;Wi\,Fi\:Zone;P:s e\;cret;;' "$test_root/qr-payload"
+record_case omarchy-network-qr valid
 TEST_NMCLI_SPECIAL=1 TEST_QR_PAYLOAD="$test_root/qr-special-payload" HOME="$home" PATH="$bin:$PATH" \
   run_adapter omarchy-network-qr --meta wlan0 >/dev/null
 grep -Fqx 'WIFI:T:WPA;S:Quoted \" Wi-Fi;P:pass\"word;;' "$test_root/qr-special-payload"
 link_adapter omarchy-network-password
 HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-network-password wlan0 > "$test_root/password"
 grep -Fqx 's e;cret' "$test_root/password"
+record_case omarchy-network-password valid
 if HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-network-password 2>"$test_root/error"; then
   printf '%s\n' 'invalid network password arguments unexpectedly succeeded' >&2
   exit 1
@@ -673,6 +707,7 @@ link_adapter omarchy-network-status
 HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-network-status --verbose > "$test_root/network"
 grep -Fqx -- $'iface\tfixture0' "$test_root/network"
 grep -Fqx -- $'type\tethernet' "$test_root/network"
+record_case omarchy-network-status valid
 if TEST_IP_TIMEOUT=1 HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-network-status 2>"$test_root/error"; then
   printf '%s\n' 'timed-out network route lookup unexpectedly succeeded' >&2
   exit 1
@@ -708,6 +743,7 @@ TEST_NMCLI_STATE="$test_root/nmcli-state" HOME="$home" PATH="$bin:$PATH" \
   run_adapter omarchy-network-band > "$test_root/band"
 grep -Fqx $'band\t5' "$test_root/band"
 grep -Fqx $'available\t2.4 5' "$test_root/band"
+record_case omarchy-network-band valid
 mv "$bin/iw" "$bin/iw.disabled"
 printf '%s\n' a no none 0 > "$test_root/nmcli-state"
 TEST_NMCLI_STATE="$test_root/nmcli-state" HOME="$home" PATH="$bin:$PATH" \
@@ -765,6 +801,7 @@ grep -q 'profile was not changed' "$test_root/error"
 TEST_NMCLI_STATE="$test_root/nmcli-state" HOME="$home" PATH="$bin:$PATH" \
   run_adapter omarchy-dns > "$test_root/dns"
 grep -Fqx DHCP "$test_root/dns"
+record_case omarchy-dns valid
 TEST_NMCLI_STATE="$test_root/nmcli-state" HOME="$home" PATH="$bin:$PATH" \
   run_adapter omarchy-dns Cloudflare
 grep -Fqx yes "$test_root/nmcli-state" && grep -Fqx '1.1.1.1,1.0.0.1' <(sed -n '3p' "$test_root/nmcli-state")
@@ -822,7 +859,9 @@ TEST_RFKILL="$test_root/rfkill" HOME="$home" PATH="$bin:$PATH" \
   run_adapter omarchy-bluetooth-power off
 HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-bluetooth-power is-on
 grep -q '^disconnect 00:11:22:33:44:55$' "$log"
+record_case omarchy-bluetooth-device valid
 grep -Fqx 'block bluetooth' "$test_root/rfkill"
+record_case omarchy-bluetooth-power valid
 if TEST_BLUETOOTH_FAIL=pair TEST_RFKILL="$test_root/rfkill" HOME="$home" PATH="$bin:$PATH" \
   run_adapter omarchy-bluetooth-device pair 00:11:22:33:44:55 2>"$test_root/error"; then
   printf '%s\n' 'failed Bluetooth pairing unexpectedly succeeded' >&2
@@ -852,6 +891,17 @@ OMARCHY_PROC_MEMINFO="$test_root/meminfo" \
 grep -Fqx $'cpu\t50%' "$test_root/system-stats"
 grep -Fqx $'memory\t4.0GiB / 8GiB' "$test_root/system-stats"
 grep -Fqx $'load\t0.42' "$test_root/system-stats"
+record_case omarchy-system-stats valid
+if OMARCHY_PROC_MEMINFO="$test_root/meminfo" \
+  OMARCHY_PROC_STAT_BEFORE="$test_root/stat-before" \
+  OMARCHY_PROC_LOADAVG="$test_root/loadavg" \
+  OMARCHY_CPU_SAMPLE_INTERVAL=0 HOME="$home" PATH="$bin:$PATH" \
+  run_adapter omarchy-system-stats > "$test_root/live-sampled-stats" 2>"$test_root/error"; then
+  printf '%s\n' 'live CPU sampling fabricated a result from a fixture baseline' >&2
+  cat "$test_root/live-sampled-stats" >&2
+  exit 1
+fi
+grep -Fq 'CPU statistics are invalid' "$test_root/error"
 if OMARCHY_PROC_MEMINFO="$test_root/meminfo" \
   OMARCHY_PROC_STAT_BEFORE="$test_root/stat-before" \
   OMARCHY_PROC_LOADAVG="$test_root/loadavg" \
@@ -887,8 +937,10 @@ else
 fi
 test "$text_size_invalid_status" -eq 2
 grep -Fq 'Text size must be an integer between 9 and 20' "$test_root/error"
+record_case omarchy-display-text-size invalidArgs
 HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-display-text-size 14
 grep -Fqx -- 'base-size = 14' "$home/.config/omarchy/shell.toml"
+record_case omarchy-display-text-size valid
 mkdir -p "$home/.config/ghostty"
 printf '%s\n' 'font-size = 9' > "$home/.config/ghostty/config"
 mkdir -p "$home/.config/alacritty" "$home/.config/kitty"
@@ -1010,9 +1062,11 @@ link_adapter omarchy-hyprland-monitor-scaling
 HYPRCTL_LOG="$test_root/hyprctl" HOME="$home" PATH="$bin:$PATH" \
   run_adapter omarchy-monitor-state > "$test_root/monitor"
 head -n 1 "$test_root/monitor" | grep -Fqx -- '42'
+record_case omarchy-monitor-state valid
 HYPRCTL_LOG="$test_root/hyprctl" HOME="$home" PATH="$bin:$PATH" \
   run_adapter omarchy-hyprland-monitor-scaling > "$test_root/scaling"
 grep -Fqx -- '1.25' "$test_root/scaling"
+record_case omarchy-hyprland-monitor-scaling valid
 HYPRCTL_LOG="$test_root/hyprctl" HOME="$home" PATH="$bin:$PATH" \
   run_adapter omarchy-hyprland-monitor-scaling up
 grep -Fqx -- 'eval hl.monitor({ output = "eDP-1", mode = "1920x1080@59.94", position = "auto", scale = 1.6 })' "$test_root/hyprctl"
@@ -1099,6 +1153,7 @@ grep -Fqx $'rate\t10W' "$test_root/battery"
 grep -Fqx $'size\t48Wh' "$test_root/battery"
 grep -Fqx $'time\t2h 30m' "$test_root/battery"
 grep -Fqx $'cycles\t112' "$test_root/battery"
+record_case omarchy-battery-status valid
 cat > "$bin/upower" <<'EOF'
 #!/usr/bin/env bash
 if [[ $1 == -e ]]; then
@@ -1189,10 +1244,12 @@ HOME="$home" XDG_STATE_HOME="$home/.local/state" PATH="$bin:$PATH" \
 grep -Fqx $'performance\t0' "$test_root/profiles"
 grep -Fqx $'balanced\t1' "$test_root/profiles"
 grep -Fqx $'power-saver\t0' "$test_root/profiles"
+record_case omarchy-powerprofiles-list valid
 TEST_PROFILE="$test_root/profile" HOME="$home" XDG_STATE_HOME="$home/.local/state" PATH="$bin:$PATH" \
   run_adapter omarchy-powerprofiles-set ac performance
 grep -Fqx performance "$test_root/profile"
 grep -Fqx performance "$state/powerprofiles/ac"
+record_case omarchy-powerprofiles-set valid
 TEST_PROFILE="$test_root/profile" OMARCHY_POWERPROFILES_STATE_DIR="$test_root/profile-state" \
   HOME="$home" XDG_STATE_HOME="$home/.local/state" PATH="$bin:$PATH" \
   run_adapter omarchy-powerprofiles-set autodetect power-saver
@@ -1239,16 +1296,19 @@ for utility in bash env timeout awk sed grep head sort tr jq mktemp cp rm mv chm
   ln -s "$(command -v "$utility")" "$missing_bin/$utility"
 done
 run_missing_backend() {
-  local helper=$1 backend=$2
+  local helper=$1 backend=$2 status=0
   shift 2
   if PATH="$missing_bin" HOME="$home" XDG_STATE_HOME="$home/.local/state" \
     XDG_CONFIG_HOME="$home/.config" XDG_DATA_HOME="$home/.local/share" \
     run_adapter "$helper" "$@" 2>"$test_root/error"; then
     printf '%s\n' "$helper succeeded without $backend" >&2
     exit 1
+  else
+    status=$?
   fi
+  test "$status" -eq 127
   grep -Fq "required backend is unavailable: $backend" "$test_root/error"
-  printf 'CASE\t%s\tmissingBackend\n' "$helper" >> "$case_log"
+  record_case "$helper" missingBackend
 }
 
 run_missing_backend omarchy-weather-status curl
@@ -1277,14 +1337,18 @@ run_missing_backend omarchy-notification-send notify-send Headline
 run_missing_backend omarchy-powerprofiles-list powerprofilesctl
 run_missing_backend omarchy-powerprofiles-set powerprofilesctl ac performance
 
+weather_location_missing_status=0
 if XDG_STATE_HOME="$test_root/no-weather-state" PATH="$missing_bin" HOME="$home" \
   XDG_CONFIG_HOME="$home/.config" XDG_DATA_HOME="$home/.local/share" \
   run_adapter omarchy-weather-location 2>"$test_root/error"; then
   printf '%s\n' 'omarchy-weather-location succeeded without curl' >&2
   exit 1
+else
+  weather_location_missing_status=$?
 fi
+test "$weather_location_missing_status" -eq 127
 grep -Fq 'required backend is unavailable: curl' "$test_root/error"
-printf 'CASE\tomarchy-weather-location\tmissingBackend\n' >> "$case_log"
+record_case omarchy-weather-location missingBackend
 
 printf '%s\n' '[Desktop Entry]' > "$home/.local/share/applications/org.example.MissingBackend.desktop"
 run_missing_backend omarchy-remove-launcher-entry update-desktop-database org.example.MissingBackend Missing
@@ -1306,45 +1370,6 @@ run_invalid_args_status omarchy-audio-output-set-default --unexpected
 run_invalid_args_status omarchy-capture-screenshot unsupported
 run_invalid_args_status omarchy-notification-send --urgency invalid Headline
 
-for helper in \
-  omarchy-audio-input-set-default \
-  omarchy-audio-output-set-default \
-  omarchy-audio-output-sink \
-  omarchy-audio-sink-availability \
-  omarchy-battery-status \
-  omarchy-bluetooth-device \
-  omarchy-bluetooth-power \
-  omarchy-brightness-display \
-  omarchy-capture-screenshot \
-  omarchy-clipboard-open \
-  omarchy-clipboard-paste-file \
-  omarchy-clipboard-paste-text \
-  omarchy-display-text-size \
-  omarchy-dns \
-  omarchy-hyprland-monitor-scaling \
-  omarchy-menu-emoji-insert \
-  omarchy-monitor-state \
-  omarchy-network-band \
-  omarchy-network-password \
-  omarchy-network-qr \
-  omarchy-network-status \
-  omarchy-notification-send \
-  omarchy-powerprofiles-list \
-  omarchy-powerprofiles-set \
-  omarchy-remove-launcher-entry \
-  omarchy-system-stats \
-  omarchy-weather-location \
-  omarchy-weather-status; do
-  printf 'CASE\t%s\tvalid\n' "$helper" >> "$case_log"
-done
-{
-  printf 'CASE\tomarchy-audio-output-set-default\tinvalidArgs\n'
-  printf 'CASE\tomarchy-capture-screenshot\tinvalidArgs\n'
-  printf 'CASE\tomarchy-capture-screenshot\teditor\n'
-  printf 'CASE\tomarchy-display-text-size\tinvalidArgs\n'
-  printf 'CASE\tomarchy-notification-send\tinvalidArgs\n'
-  printf 'CASE\tomarchy-weather-location\tinvalidArgs\n'
-} >> "$case_log"
-cat "$case_log"
+sort -u "$case_log"
 
 printf '%s\n' 'compat adapter tests passed'

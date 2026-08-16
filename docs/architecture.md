@@ -246,7 +246,7 @@ For the pinned Quattro revision, the runtime uses an immutable compatibility
 view because some reachable consumers construct absolute
 `OMARCHY_PATH/bin/...` paths.
 The view contains only the pinned source files required by the supported
-runtime graph, seven narrow compatibility patch sites, the safe fallback
+runtime graph, eight narrow compatibility patch sites, the safe fallback
 configuration, the audited default menu, and the helper surface.
 It preserves `passthru.omarchySource` as the exact source identity and exposes
 the view separately as `passthru.omarchyCompatibilityRoot`.

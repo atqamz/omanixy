@@ -7,7 +7,8 @@ quickshell_path=${3:?selected Quickshell store path required}
 omarchy_path=${4:?selected Omarchy source store path required}
 compatibility_root=${5:?compatibility root store path required}
 compatibility_bin=${6:?compatibility bin store path required}
-manifest=${7:?compatibility manifest path required}
+compatibility_probes=${7:?compatibility probes store path required}
+manifest=${8:?compatibility manifest path required}
 omarchy_revision=$(jq -er '.pins.omarchy' "$manifest")
 omarchy_short_revision=${omarchy_revision:0:12}
 quickshell_revision=$(jq -er '.pins.quickshell' "$manifest")
@@ -78,6 +79,21 @@ if grep -Fxq "$omarchy_path" "$closure_paths"; then
 fi
 grep -Fxq "$compatibility_root" "$closure_paths"
 grep -Fxq "$compatibility_bin" "$closure_paths"
+test "$compatibility_probes" != "$compatibility_bin"
+test -x "$compatibility_probes/bin/omanixy-consumer-omarchy-network-status"
+if grep -Fxq "$compatibility_probes" "$closure_paths"; then
+  printf '%s\n' 'consumer probe scaffolding is part of the shipped runtime closure' >&2
+  exit 1
+fi
+if find "$compatibility_bin" -mindepth 1 -name 'omanixy-consumer-*' -print -quit | grep -q .; then
+  printf '%s\n' 'consumer probe executables leaked into the runtime helper path' >&2
+  exit 1
+fi
+test ! -e "$compatibility_bin/probes"
+if PATH="$runtime_path" command -v omanixy-consumer-omarchy-network-status >/dev/null; then
+  printf '%s\n' 'consumer probe executables are reachable from the runtime PATH' >&2
+  exit 1
+fi
 if grep -E '/(pacman|yay|universe)([-/]|$)|/home/atqa([-/]|$)' "$closure_paths"; then
   exit 1
 fi

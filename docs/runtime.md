@@ -101,11 +101,12 @@ Quattro is consumed from a deterministic immutable compatibility root through
 The root contains the pinned source view used by the supported runtime graph,
 including shared QML libraries, shell services, the baseline bar widgets, and
 the copied panel and overlay sources needed by the registry.
-It applies seven narrow patch sites: the disabled-plugin floor on bar widgets,
+It applies eight narrow patch sites: the disabled-plugin floor on bar widgets,
 enterprise Wi-Fi filtering through the network panel's model, removal of the
 Custom DNS provider/action/pill, hiding the unsupported speed-test action,
-clock middle-click routing, the native bar transparency fallback, and a
-user-owned launcher-delete guard.
+clock middle-click routing, the native bar transparency fallback, a
+user-owned launcher-delete guard, and the validated app-library launch and
+removability path.
 Some unsupported first-party plugin directories are omitted from the view,
 while copied baseline modules remain unreachable when disabled by the
 immutable registry floor.
@@ -120,6 +121,12 @@ unmodified exact pinned source.
 The compatibility root is exposed separately as
 `runtime.passthru.omarchyCompatibilityRoot`.
 The helper path is exposed as `runtime.passthru.compatibilityBin`.
+The generated post-patch consumer probes and their fixtures are a separate
+`probes` output of the same derivation, exposed as
+`runtime.passthru.compatibilityProbes`.
+They are referenced only by the flake checks, so the test scaffolding is
+outside the runtime closure while the probes still bind to the packaged
+dispatcher and helper links they validate.
 Omanixy never copies the upstream `bin/` tree or creates a mutable Omarchy
 filesystem.
 
@@ -139,6 +146,20 @@ dependencies.
 The upstream package list, Arch tools, `pacman`, `yay`, and
 `atqamz/universe` are not dependencies.
 The generated wrappers do not append the host `PATH`.
+
+The dispatcher carries two named, accepted test seams, and they are the only
+way its pinned `PATH` and its command identity can be observed from outside.
+`OMANIXY_PROBE_BACKEND_PATH`, when set, prepends the named directory to the
+pinned backend `PATH`, and `OMANIXY_CONSUMER_MARKER`, when set, writes the
+dispatched command name to a marker file after a successful invocation.
+Both are unset in every packaged entrypoint, service unit, and menu action, so
+the hermetic guarantee holds for the shipped runtime; the deviation is that a
+caller running as the same user can opt back into an ambient backend lookup by
+setting the first variable.
+They exist so the generated consumer probes exercise the packaged dispatcher
+itself rather than a test-only rebuild, which is what binds the probe evidence
+to the shipped helper identity.
+
 The runtime closure and compatibility-root checks fail if an unsupported
 Omarchy executable surface appears.
 

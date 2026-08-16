@@ -303,21 +303,25 @@ HEADLESS_TEXT_PATCHES = {
 
 
 def main() -> int:
-    if len(sys.argv) != 7:
-        print(f"usage: {sys.argv[0]} ROOT COMPATIBILITY_BIN QUICKSHELL FONTCONFIG_FILE PROBE_SHELL MAPPING_JSON", file=sys.stderr)
+    if len(sys.argv) != 8:
+        print(f"usage: {sys.argv[0]} ROOT COMPATIBILITY_BIN PROBE_OUT QUICKSHELL FONTCONFIG_FILE PROBE_SHELL MAPPING_JSON", file=sys.stderr)
         return 2
 
     root = Path(sys.argv[1])
     compatibility_bin = Path(sys.argv[2])
-    quickshell = Path(sys.argv[3])
-    fontconfig_file = Path(sys.argv[4])
-    probe_shell = Path(sys.argv[5])
-    mapping = json.loads(sys.argv[6])
+    probe_out = Path(sys.argv[3])
+    quickshell = Path(sys.argv[4])
+    fontconfig_file = Path(sys.argv[5])
+    probe_shell = Path(sys.argv[6])
+    mapping = json.loads(sys.argv[7])
     if not isinstance(mapping, dict):
         fail("consumer mapping is not an object")
+    if probe_out == compatibility_bin:
+        fail("probe scaffolding must not be packaged into the runtime helper path")
 
     surface = {}
     (compatibility_bin / "qs").symlink_to(root / "shell")
+    (probe_out / "bin").mkdir(parents=True, exist_ok=True)
     for helper, declaration in sorted(mapping.items()):
         if not isinstance(declaration, dict):
             fail(f"{helper} has an invalid consumer declaration")
@@ -384,9 +388,9 @@ def main() -> int:
             continue
 
         probe_name = f"omanixy-consumer-{helper}"
-        probe_path = compatibility_bin / "bin" / probe_name
-        harness_path = compatibility_bin / "bin" / f"{probe_name}.qml"
-        probe_root = compatibility_bin / "probes" / helper
+        probe_path = probe_out / "bin" / probe_name
+        harness_path = probe_out / "bin" / f"{probe_name}.qml"
+        probe_root = probe_out / "probes" / helper
         probe_qs = probe_root / "qs"
         probe_bin = probe_root / "bin"
         probe_qs.mkdir(parents=True, exist_ok=True)

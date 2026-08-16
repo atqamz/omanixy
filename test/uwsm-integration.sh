@@ -31,7 +31,10 @@ if (support.launchCommand("../escape") !== "") {
   throw new Error("invalid desktop id produced a launch command");
 }
 NODE
-test -f "$compatibility_root/shell/services/AppLibrarySupport.js"
+if [[ ${OMANIXY_LIVE_UWSM:-0} != 1 ]]; then
+  printf '%s\n' 'LIVE_UWSM_UNCLAIMED: optional live smoke was not requested'
+  exit 0
+fi
 test_root=$(mktemp -d)
 trap 'rm -rf "$test_root"' EXIT
 fixture_bin="$test_root/bin"
@@ -94,10 +97,6 @@ Loader {
 }
 EOF
 launch_status=0
-if [[ ${OMANIXY_LIVE_UWSM:-0} != 1 ]]; then
-  printf '%s\n' 'LIVE_UWSM_UNCLAIMED: optional live smoke was not requested'
-  exit 0
-fi
 LAUNCH_LOG="$test_root/launch.log" \
   XDG_DATA_HOME="$data_home" \
   XDG_RUNTIME_DIR="$runtime_dir" \

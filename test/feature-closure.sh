@@ -7,6 +7,7 @@ audio_runtime=${3:?audio runtime path required}
 launcher_runtime=${4:?launcher runtime path required}
 screenshot_runtime=${5:?screenshot runtime path required}
 core_runtime=${6:?core runtime path required}
+monitor_runtime=${7:?monitor runtime path required}
 
 runtime_path() {
   sed -n 's/^export PATH="\(.*\)"$/\1/p' "$1/bin/omanixy-shell-runtime"
@@ -65,6 +66,28 @@ PATH="$screenshot_path" command -v fc-match >/dev/null
 PATH="$screenshot_path" command -v wl-copy >/dev/null
 PATH="$screenshot_path" command -v notify-send >/dev/null
 test ! -x "$screenshot_runtime/bin/omarchy-weather-status"
+
+monitor_path=$(runtime_path "$monitor_runtime")
+test -x "$monitor_runtime/bin/omarchy-monitor-state"
+test -x "$monitor_runtime/bin/omarchy-hyprland-monitor-scaling"
+test -x "$monitor_runtime/bin/omarchy-brightness-display"
+test ! -x "$monitor_runtime/bin/omarchy-capture-screenshot"
+PATH="$monitor_path" command -v brightnessctl >/dev/null
+PATH="$monitor_path" command -v hyprctl >/dev/null
+
+monitor_error=$(mktemp)
+for helper in omarchy-monitor-state omarchy-hyprland-monitor-scaling; do
+  if "$monitor_runtime/bin/$helper" >/dev/null 2>"$monitor_error"; then
+    printf '%s\n' "$helper unexpectedly succeeded without a live compositor" >&2
+    exit 1
+  fi
+  if grep -Fq 'required backend is unavailable' "$monitor_error"; then
+    printf '%s\n' "$helper lacks a pinned backend in the monitor feature runtime" >&2
+    cat "$monitor_error" >&2
+    exit 1
+  fi
+done
+rm -f "$monitor_error"
 
 core_path=$(runtime_path "$core_runtime")
 test -x "$core_runtime/bin/omarchy-system-stats"

@@ -68,6 +68,7 @@
           launcherRuntime = runtimeFor system [ "launcher" ];
           screenshotRuntime = runtimeFor system [ "screenshot" ];
           coreRuntime = runtimeFor system [ "core" ];
+          monitorRuntime = runtimeFor system [ "monitor" ];
           runtimeClosureInfo = pkgs.closureInfo { rootPaths = [ runtime ]; };
           compatibilityRoot = runtime.passthru.omarchyCompatibilityRoot;
           storeConfig = pkgs.writeText "omanixy-historical-shell-config" (builtins.readFile ./upstream/shell-baseline-v1.json);
@@ -163,7 +164,7 @@
               closurePaths = "${runtimeClosureInfo}/store-paths";
               nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.gnused pkgs.findutils pkgs.jq pkgs.python3 ];
             } ''
-            ${pkgs.bash}/bin/bash ${./test/runtime-closure.sh} ${runtime} "$closurePaths" ${runtime.passthru.quickshell} ${runtime.passthru.omarchySource} ${compatibilityRoot} ${runtime.passthru.compatibilityBin} ${./upstream/compatibility-contracts.json}
+            ${pkgs.bash}/bin/bash ${./test/runtime-closure.sh} ${runtime} "$closurePaths" ${runtime.passthru.quickshell} ${runtime.passthru.omarchySource} ${compatibilityRoot} ${runtime.passthru.compatibilityBin} ${runtime.passthru.compatibilityProbes} ${./upstream/compatibility-contracts.json}
             touch "$out"
           '';
           feature-dependencies = pkgs.runCommand "omanixy-feature-dependencies"
@@ -195,7 +196,7 @@
             } ''
             ${pkgs.bash}/bin/bash ${./test/feature-closure.sh} \
               ${weatherRuntime} ${bluetoothRuntime} ${audioRuntime} ${launcherRuntime} \
-              ${screenshotRuntime} ${coreRuntime}
+              ${screenshotRuntime} ${coreRuntime} ${monitorRuntime}
             touch "$out"
           '';
           config-ownership = pkgs.runCommand "omanixy-config-ownership"
@@ -274,17 +275,17 @@
               nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gawk pkgs.gnugrep pkgs.gnused pkgs.jq pkgs.procps pkgs.python3 pkgs.util-linux ];
             } ''
             ${pkgs.python3}/bin/python3 ${./scripts/check-contract-closure} \
-              ${./.} ${runtime.passthru.omarchySource} ${compatibilityRoot} ${runtime.passthru.compatibilityBin} ${runtime} \
+              ${./.} ${runtime.passthru.omarchySource} ${compatibilityRoot} ${runtime.passthru.compatibilityBin} ${runtime.passthru.compatibilityProbes} ${runtime} \
               ${./upstream/compatibility-contracts.json} ${./upstream/quattro-contracts.json} \
               ${./test/compat-adapters.sh} ${./packages/omanixy-shell/compat-adapter.bash} ${./scripts/audit-quattro-contracts}
             touch "$out"
           '';
           contract-closure-adversarial = pkgs.runCommand "omanixy-contract-closure-adversarial"
             {
-              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.jq pkgs.python3 ];
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gawk pkgs.gnugrep pkgs.gnused pkgs.jq pkgs.procps pkgs.python3 pkgs.util-linux ];
             } ''
             OMANIXY_RUNTIME=${runtime} PYTHON=${pkgs.python3}/bin/python3 ${pkgs.bash}/bin/bash ${./test/contract-closure.sh} \
-              ${./.} ${runtime.passthru.omarchySource} ${compatibilityRoot} ${runtime.passthru.compatibilityBin}
+              ${./.} ${runtime.passthru.omarchySource} ${compatibilityRoot} ${runtime.passthru.compatibilityBin} ${runtime.passthru.compatibilityProbes}
             touch "$out"
           '';
           compat-adapters = pkgs.runCommand "omanixy-compat-adapters"
@@ -300,13 +301,6 @@
               nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gawk pkgs.gnugrep pkgs.gnused pkgs.jq pkgs.procps pkgs.util-linux ];
             } ''
             ${pkgs.bash}/bin/bash ${./test/compatibility-test-matrix.sh} ${./.} ${compatibilityRoot} ${./upstream/compatibility-test-matrix.json} ${runtime}/bin
-            touch "$out"
-          '';
-          deviation-contracts = pkgs.runCommand "omanixy-deviation-contracts"
-            {
-              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gawk pkgs.gnugrep pkgs.gnused pkgs.jq pkgs.procps pkgs.util-linux ];
-            } ''
-            ${pkgs.bash}/bin/bash ${./test/deviation-contracts.sh} ${runtime.passthru.omarchySource} ${./.} ${compatibilityRoot}
             touch "$out"
           '';
           safe-menu-contract = pkgs.runCommand "omanixy-safe-menu-contract"

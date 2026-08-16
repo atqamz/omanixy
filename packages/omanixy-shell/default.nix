@@ -28,7 +28,7 @@ let
     screenshot = [ fontconfig grim hyprland hyprpicker procps slurp wl-clipboard ];
     clipboard = [ wl-clipboard wtype xdg-utils ];
     power = [ power-profiles-daemon upower ];
-    monitor = [ brightnessctl fontconfig glib gtk3 libnotify procps ];
+    monitor = [ brightnessctl fontconfig glib gtk3 hyprland libnotify procps ];
     weather = [ curl ];
     notification = [ libnotify ];
     launcher = [ desktop-file-utils gtk3 uwsm ];
@@ -369,16 +369,18 @@ let
     pname = "omanixy-compatibility-bin";
     version = lib.substring 0 12 omarchyRevision;
     dontUnpack = true;
+    outputs = [ "out" "probes" ];
     installPhase = ''
-      mkdir -p "$out/bin"
+      mkdir -p "$out/bin" "$probes/bin"
       ln -s ${compatAdapter}/bin/omanixy-compat-adapter "$out/bin/omanixy-compat-adapter"
       for helper in ${lib.concatStringsSep " " compatibilityHelpers}; do
         ln -s ${compatAdapter}/bin/omanixy-compat-adapter "$out/bin/$helper"
       done
       ${pkgs.python3}/bin/python3 ${../../scripts/generate-postpatch-runtime-surface} \
-        ${omarchyCompatibilityRoot} "$out" ${quickshell}/bin/quickshell ${fontconfigFile} ${pkgs.bash}/bin/bash ${lib.escapeShellArg (builtins.toJSON helperConsumers)}
+        ${omarchyCompatibilityRoot} "$out" "$probes" ${quickshell}/bin/quickshell ${fontconfigFile} ${pkgs.bash}/bin/bash ${lib.escapeShellArg (builtins.toJSON helperConsumers)}
     '';
   };
+  compatibilityProbes = compatibilityBin.probes;
 
   runtime = pkgs.writeShellApplication {
     name = "omanixy-shell-runtime";
@@ -414,7 +416,7 @@ pkgs.symlinkJoin {
     ln -s ${theme} "$out/share/omarchy-theme"
   '';
   passthru = {
-    inherit omarchyRevision quickshellRevision nixpkgsRevision omarchySource omarchyCompatibilityRoot compatibilityBin quickshell theme supportedSystems safeMenu safeShellConfig selectedFeatures compatibilityHelpers adapterSources adapterSourceHash;
+    inherit omarchyRevision quickshellRevision nixpkgsRevision omarchySource omarchyCompatibilityRoot compatibilityBin compatibilityProbes quickshell theme supportedSystems safeMenu safeShellConfig selectedFeatures compatibilityHelpers adapterSources adapterSourceHash;
     buildProvenance = {
       inherit omarchyRevision quickshellRevision nixpkgsRevision;
     };

@@ -296,7 +296,7 @@ system_stats() {
     fi
     timed 6 'CPU statistics sample interval' sleep "$interval" ||
       fail "$name: CPU statistics sample interval failed"
-    after=$(awk '$1 == "cpu" && NF >= 5 { for (i = 2; i <= NF; i++) if ($i !~ /^[0-9]+$/) exit 1; print; exit }' /proc/stat) ||
+    after=$(awk '$1 == "cpu" && NF >= 5 { for (i = 2; i <= NF; i++) if ($i !~ /^[0-9]+$/) exit 1; print; exit }' "$stat_before") ||
       fail "$name: CPU statistics are malformed"
   else
     [[ -r $stat_before && -r $stat_after ]] || fail "$name: CPU statistics sources are unavailable"

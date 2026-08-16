@@ -48,14 +48,16 @@ def adapter_hash(repo: Path, manifest: dict) -> str:
 
 
 def main() -> int:
-    if len(sys.argv) != 11:
+    if len(sys.argv) != 12:
         print(
-            f"usage: {sys.argv[0]} REPO PINNED_SOURCE COMPAT_ROOT COMPAT_BIN RUNTIME MANIFEST SNAPSHOT TEST ADAPTER AUDITOR",
+            f"usage: {sys.argv[0]} REPO PINNED_SOURCE COMPAT_ROOT COMPAT_BIN COMPAT_PROBES RUNTIME MANIFEST SNAPSHOT TEST ADAPTER AUDITOR",
             file=sys.stderr,
         )
         return 2
 
-    repo, source, root, compatibility_bin, runtime, manifest_path, snapshot_path, test_path, adapter_path, auditor_path = map(Path, sys.argv[1:])
+    repo, source, root, compatibility_bin, compatibility_probes, runtime, manifest_path, snapshot_path, test_path, adapter_path, auditor_path = map(Path, sys.argv[1:])
+    if compatibility_probes == compatibility_bin:
+        die("consumer probe scaffolding must live outside the runtime helper path")
     manifest = read_json(manifest_path)
     full_snapshot = read_json(snapshot_path)
     helpers = manifest.get("helpers")
@@ -94,18 +96,7 @@ def main() -> int:
     runtime_surface = read_json(compatibility_bin / "runtime-surface.json")
     if set(runtime_surface) != actual_bin:
         die("generated runtime surface does not equal the executable helper surface")
-    result = subprocess.run(
-        ["bash", str(test_path), str(repo), str(root), str(compatibility_bin / "bin")],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        die(f"runtime helper matrix failed: {result.stderr.strip()}")
-    runtime_probes = {
-        fields[1]
-        for line in result.stdout.splitlines()
-        if (fields := line.split("\t")) and len(fields) >= 3 and fields[0] == "CASE" and fields[2] == "valid"
-    }
+    probe_plan = []
 
     for helper, contract in sorted(helpers.items()):
         if not isinstance(contract, dict):
@@ -168,9 +159,11 @@ def main() -> int:
                 or consumer_probe.get("marker") != "dispatcher-command-identity-success-only-v1"
             ):
                 die(f"helper {helper} has a disconnected generated consumer probe")
-            probe_path = compatibility_bin / executable
+            probe_path = compatibility_probes / executable
             if not probe_path.is_file():
                 die(f"helper {helper} has no packaged consumer executable")
+            if (compatibility_bin / executable).exists():
+                die(f"helper {helper} consumer probe leaked into the runtime helper path")
         expected_consumer_hash = surface.get("consumerSourceSha256")
         if not isinstance(expected_consumer_hash, str) or hashlib.sha256((root / consumer).read_bytes()).hexdigest() != expected_consumer_hash:
             die(f"helper {helper} generated consumer identity drifted")
@@ -200,24 +193,7 @@ def main() -> int:
         if helper not in actual_bin:
             die(f"helper {helper} is absent from the executable post-patch helper surface")
         if helper != "omarchy-shell":
-            probe_result = subprocess.run(
-                [str(probe_path)],
-                env=os.environ.copy(),
-                capture_output=True,
-                text=True,
-                timeout=20,
-            )
-            if probe_result.returncode == 127:
-                die(f"helper {helper} generated consumer probe did not dispatch")
-            if not probe_result.stdout.startswith(f"CONSUMER_PROBE\t{helper}\n"):
-                die(f"helper {helper} generated consumer probe did not identify its consumer")
-            if f"CONSUMER_REACHED\t{helper}\n" not in probe_result.stdout:
-                die(
-                    f"helper {helper} generated consumer probe did not execute its consumer: "
-                    f"stdout={probe_result.stdout!r} stderr={probe_result.stderr!r}"
-                )
-        if contract.get("reachable") is True and helper != "omarchy-shell" and helper not in runtime_probes:
-            die(f"helper {helper} has no executable post-patch consumer probe")
+            probe_plan.append((helper, probe_path))
         if contract.get("reachable") is not True:
             die(f"helper {helper} is not explicitly classified as post-patch reachable")
         compatibility = contract.get("compatibility")
@@ -314,6 +290,41 @@ def main() -> int:
     for helper, contract in helpers.items():
         if contract.get("reachable") is True and helper not in actual_bin:
             die(f"reachable ledger helper is absent from runtime helper surface: {helper}")
+
+    result = subprocess.run(
+        ["bash", str(test_path), str(repo), str(root), str(compatibility_bin / "bin")],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        die(f"runtime helper matrix failed: {result.stderr.strip()}")
+    runtime_probes = {
+        fields[1]
+        for line in result.stdout.splitlines()
+        if (fields := line.split("\t")) and len(fields) >= 3 and fields[0] == "CASE" and fields[2] == "valid"
+    }
+    for helper, contract in sorted(helpers.items()):
+        if contract.get("reachable") is True and helper != "omarchy-shell" and helper not in runtime_probes:
+            die(f"helper {helper} has no executable post-patch consumer probe")
+
+    for helper, probe_path in probe_plan:
+        probe_result = subprocess.run(
+            [str(probe_path)],
+            env=os.environ.copy(),
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        if probe_result.returncode == 127:
+            die(f"helper {helper} generated consumer probe did not dispatch")
+        if not probe_result.stdout.startswith(f"CONSUMER_PROBE\t{helper}\n"):
+            die(f"helper {helper} generated consumer probe did not identify its consumer")
+        if f"CONSUMER_REACHED\t{helper}\n" not in probe_result.stdout:
+            die(
+                f"helper {helper} generated consumer probe did not execute its consumer: "
+                f"stdout={probe_result.stdout!r} stderr={probe_result.stderr!r}"
+            )
+
     print(f"contract closure passed: {len(helpers)} adapted, {len(native)} native, {len(full_names - declared - noise)} omitted")
     return 0
 
