@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -82,7 +83,11 @@ def main() -> int:
     if missing_contracts:
         die(f"ledger entries lack pinned-source evidence: {', '.join(missing_contracts)}")
 
-    actual_bin = {path.name for path in (compatibility_bin / "bin").iterdir() if path.is_symlink()}
+    actual_bin = {
+        path.name
+        for path in (compatibility_bin / "bin").iterdir()
+        if path.is_symlink() and path.name in helpers
+    }
     if actual_bin != set(helpers):
         die("runtime compatibility bin does not equal the adapted-helper ledger")
     runtime_surface = read_json(compatibility_bin / "runtime-surface.json")
@@ -126,24 +131,28 @@ def main() -> int:
         surface = runtime_surface.get(helper)
         if not isinstance(surface, dict):
             die(f"helper {helper} has no generated runtime surface entry")
-        if surface.get("wrapper") != f"bin/{helper}":
-            die(f"helper {helper} has a disconnected generated wrapper")
-        if not isinstance(surface.get("consumers"), list) or not surface["consumers"]:
-            die(f"helper {helper} has a disconnected generated consumer mapping")
-        if not isinstance(surface.get("sourceConsumers"), list) or not surface["sourceConsumers"]:
-            die(f"helper {helper} has no generated source consumer mapping")
-        if not isinstance(surface.get("probe"), str) or not (compatibility_bin / surface["probe"]).is_file():
+        consumer = surface.get("consumer")
+        consumer_probe = surface.get("consumerProbe")
+        if not isinstance(consumer, str) or not consumer:
+            die(f"helper {helper} has no generated consumer mapping")
+        if not (root / consumer).exists():
+            die(f"helper {helper} has a missing generated consumer")
+        if not isinstance(consumer_probe, dict):
             die(f"helper {helper} has no executable generated consumer probe")
-        if any(not isinstance(consumer, str) or not (compatibility_bin / consumer).is_file() for consumer in surface["consumers"]):
-            die(f"helper {helper} has a missing generated post-patch consumer")
-        if any(not isinstance(consumer, str) or not (root / consumer).exists() for consumer in surface["sourceConsumers"]):
-            die(f"helper {helper} has a missing generated source consumer")
+        executable = consumer_probe.get("executable")
+        adapter_name = consumer_probe.get("adapterName")
+        if executable != "bin/omanixy-compat-adapter" or adapter_name != helper:
+            die(f"helper {helper} has a disconnected generated consumer probe")
+        probe_path = compatibility_bin / executable
+        if not probe_path.is_file():
+            die(f"helper {helper} has no packaged consumer executable")
         if any(not isinstance(consumer, str) or not (root / consumer).exists() for consumer in post_patch_consumers):
             die(f"helper {helper} has a missing declared post-patch consumer")
         if helper not in actual_bin:
             die(f"helper {helper} is absent from the executable post-patch helper surface")
         probe_result = subprocess.run(
-            [str(compatibility_bin / surface["probe"])],
+            [str(probe_path)],
+            env={**os.environ, "COMPAT_ADAPTER_NAME": adapter_name},
             capture_output=True,
             text=True,
             timeout=5,

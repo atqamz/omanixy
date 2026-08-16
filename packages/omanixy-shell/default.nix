@@ -390,22 +390,19 @@ EOF
     version = lib.substring 0 12 omarchyRevision;
     dontUnpack = true;
     installPhase = ''
-      mkdir -p "$out/bin" "$out/probes"
+      mkdir -p "$out/bin"
+      ln -s ${compatAdapter}/bin/omanixy-compat-adapter "$out/bin/omanixy-compat-adapter"
       for helper in ${lib.concatStringsSep " " compatibilityHelpers}; do
         ln -s ${compatAdapter}/bin/omanixy-compat-adapter "$out/bin/$helper"
-        cat > "$out/probes/$helper" <<EOF
-#!${pkgs.bash}/bin/bash
-exec "$out/bin/$helper" "\$@"
-EOF
-        chmod +x "$out/probes/$helper"
       done
 cat > "$out/runtime-surface.json" <<'EOF'
 ${builtins.toJSON (lib.mapAttrs
   (name: _: {
-    wrapper = "bin/${name}";
-    consumers = [ "probes/${name}" ];
-    sourceConsumers = [ (helperConsumer name) ];
-    probe = "probes/${name}";
+    consumer = helperConsumer name;
+    consumerProbe = {
+      executable = "bin/omanixy-compat-adapter";
+      adapterName = name;
+    };
   }) (lib.getAttrs compatibilityHelpers contractSource.helpers))}
 EOF
     '';
@@ -430,6 +427,7 @@ pkgs.symlinkJoin {
     mkdir -p "$out/bin" "$out/share"
     ln -s ${quickshell}/bin/quickshell "$out/bin/quickshell"
     ln -s ${quickshell}/bin/qs "$out/bin/qs"
+    ln -s ${compatAdapter}/bin/omanixy-compat-adapter "$out/bin/omanixy-compat-adapter"
     ln -s ${pkgs.inotify-tools}/bin/inotifywait "$out/bin/inotifywait"
     ${lib.optionalString (builtins.elem "monitor" selectedFeatures || builtins.elem "screenshot" selectedFeatures) ''
     ln -s ${pkgs.hyprland}/bin/hyprctl "$out/bin/hyprctl"

@@ -5,11 +5,18 @@ repo=${1:?repository path required}
 compat_root=${2:?compatibility root path required}
 manifest=${3:?test matrix path required}
 runtime_bin=${4:?built runtime helper bin required}
+dispatcher="$runtime_bin/omanixy-compat-adapter"
+test -x "$dispatcher"
+case "$(readlink -f "$dispatcher")" in
+  /nix/store/*omanixy-compat-adapter*/bin/omanixy-compat-adapter) ;;
+  *) printf '%s\n' 'built runtime dispatcher is not the packaged compatibility adapter' >&2; exit 1 ;;
+esac
 test_root=$(mktemp -d)
 trap 'rm -rf "$test_root"' EXIT
 
 output="$test_root/compat-adapters.log"
-bash "$repo/test/compat-adapters.sh" "$repo" "$compat_root" "$runtime_bin" >"$output"
+PATH="$runtime_bin:$PATH" \
+  bash "$repo/test/compat-adapters.sh" "$repo" "$compat_root" "$runtime_bin" >"$output"
 grep '^CASE' "$output" | cut -f2- | sort -u > "$test_root/actual"
 
 jq -e --arg actual "$test_root/actual" '

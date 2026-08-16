@@ -85,8 +85,9 @@ import Quickshell
 import Quickshell.Io
 
 ShellRoot {
-  id: root
-  property var appLibrary: null
+  Item {
+    id: root
+    property var appLibrary: null
   property bool handled: false
   property int attempts: 0
 
@@ -102,6 +103,12 @@ ShellRoot {
     if (!root.appLibrary.canRemove("org.example.User") || !root.appLibrary.canRemove("org.example.System") || !root.appLibrary.canRemove("org.example.Nix")
         || !root.appLibrary.canRemove("org.example.Missing") || !root.appLibrary.canRemove("org.example.Symlink")
         || root.appLibrary.canRemove("../escape") || root.appLibrary.canRemove("../../escape")) {
+      Qt.quit()
+      return
+    }
+    if (root.appLibrary.userOwnedEntryIds["org.example.System"] === true
+        || root.appLibrary.userOwnedEntryIds["org.example.Nix"] === true
+        || root.appLibrary.userOwnedEntryIds["org.example.Symlink"] === true) {
       Qt.quit()
       return
     }
@@ -153,19 +160,20 @@ ShellRoot {
     running: true
     repeat: true
     onTriggered: {
-      attempts++
+      root.attempts++
       if (root.appLibrary && root.appLibrary.refreshUserOwnedEntries) root.appLibrary.refreshUserOwnedEntries()
       if (menuLoader.item && root.appLibrary && root.appLibrary.canRemove("org.example.User"))
         root.runScenario(menuLoader.item)
-      else if (menuLoader.item && attempts >= 20)
+      else if (menuLoader.item && root.attempts >= 20)
         root.runScenario(menuLoader.item)
     }
   }
 
-  Component.onCompleted: {
-    appLoader.active = true
-    menuLoader.active = true
-    scanTimer.start()
+    Component.onCompleted: {
+      appLoader.active = true
+      menuLoader.active = true
+      scanTimer.start()
+    }
   }
 }
 EOF
