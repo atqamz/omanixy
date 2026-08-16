@@ -128,14 +128,28 @@ def main() -> int:
             die(f"helper {helper} has no generated runtime surface entry")
         if surface.get("wrapper") != f"bin/{helper}":
             die(f"helper {helper} has a disconnected generated wrapper")
-        if not isinstance(surface.get("consumers"), list) or not surface["consumers"] or surface.get("probe") != f"runtime-matrix:{helper}":
+        if not isinstance(surface.get("consumers"), list) or not surface["consumers"]:
             die(f"helper {helper} has a disconnected generated consumer mapping")
-        if any(not isinstance(consumer, str) or not (root / consumer).exists() for consumer in surface["consumers"]):
+        if not isinstance(surface.get("sourceConsumers"), list) or not surface["sourceConsumers"]:
+            die(f"helper {helper} has no generated source consumer mapping")
+        if not isinstance(surface.get("probe"), str) or not (compatibility_bin / surface["probe"]).is_file():
+            die(f"helper {helper} has no executable generated consumer probe")
+        if any(not isinstance(consumer, str) or not (compatibility_bin / consumer).is_file() for consumer in surface["consumers"]):
             die(f"helper {helper} has a missing generated post-patch consumer")
+        if any(not isinstance(consumer, str) or not (root / consumer).exists() for consumer in surface["sourceConsumers"]):
+            die(f"helper {helper} has a missing generated source consumer")
         if any(not isinstance(consumer, str) or not (root / consumer).exists() for consumer in post_patch_consumers):
             die(f"helper {helper} has a missing declared post-patch consumer")
         if helper not in actual_bin:
             die(f"helper {helper} is absent from the executable post-patch helper surface")
+        probe_result = subprocess.run(
+            [str(compatibility_bin / surface["probe"])],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if probe_result.returncode == 127:
+            die(f"helper {helper} generated consumer probe did not dispatch")
         if contract.get("reachable") is True and helper != "omarchy-shell" and helper not in runtime_probes:
             die(f"helper {helper} has no executable post-patch consumer probe")
         if contract.get("reachable") is not True:

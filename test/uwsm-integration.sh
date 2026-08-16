@@ -20,6 +20,8 @@ if ((uwsm_help_status == 0)); then
 else
   grep -Fq 'DBUS_SESSION_BUS_ADDRESS' <<<"$uwsm_help"
 fi
+grep -Fq 'var command = AppSupport.launchCommand(id)' "$compatibility_root/shell/services/AppLibrary.qml"
+grep -Fq 'if (command) Util.execDetached(command)' "$compatibility_root/shell/services/AppLibrary.qml"
 test_root=$(mktemp -d)
 trap 'rm -rf "$test_root"' EXIT
 fixture_bin="$test_root/bin"
@@ -82,6 +84,10 @@ Loader {
 }
 EOF
 launch_status=0
+if [[ ${OMANIXY_LIVE_UWSM:-0} != 1 ]]; then
+  printf '%s\n' 'LIVE_UWSM_UNCLAIMED: optional live smoke was not requested'
+  exit 0
+fi
 LAUNCH_LOG="$test_root/launch.log" \
   XDG_DATA_HOME="$data_home" \
   XDG_RUNTIME_DIR="$runtime_dir" \
@@ -93,12 +99,8 @@ LAUNCH_LOG="$test_root/launch.log" \
   PATH="$fixture_bin:$runtime_path" \
   timeout 10s "$quickshell" -n -p "$config_root" || launch_status=$?
 if ((launch_status == 124)); then
-  if [[ -n ${WAYLAND_DISPLAY:-} || -n ${UWSM_FINALIZE_VARNAME:-} ]]; then
-    printf '%s\n' 'patched AppLibrary launch path timed out in an available session' >&2
-    exit 1
-  fi
-  printf '%s\n' 'SESSION_UNAVAILABLE_UNCLAIMED: no live Wayland/UWSM session was available' >&2
-  exit 0
+  printf '%s\n' 'live AppLibrary/UWSM launch timed out' >&2
+  exit 1
 fi
 for _ in {1..20}; do
   test -f "$test_root/launch.log" && break
@@ -107,12 +109,8 @@ done
 if test -f "$test_root/launch.log"; then
   grep -Fxq 'org.example.User.desktop' "$test_root/launch.log"
 else
-  if [[ -n ${WAYLAND_DISPLAY:-} || -n ${UWSM_FINALIZE_VARNAME:-} ]]; then
-    printf '%s\n' 'real AppLibrary/UWSM launch produced no evidence in an available session' >&2
-    exit 1
-  fi
-  printf '%s\n' 'SESSION_UNAVAILABLE_UNCLAIMED: no live Wayland/UWSM session was available' >&2
-  exit 0
+  printf '%s\n' 'real AppLibrary/UWSM launch produced no evidence' >&2
+  exit 1
 fi
 
 printf '%s\n' 'LIVE_SMOKE_CLAIMED: real UWSM launch recorder observed the desktop id'

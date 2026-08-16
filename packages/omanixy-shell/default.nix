@@ -390,16 +390,22 @@ EOF
     version = lib.substring 0 12 omarchyRevision;
     dontUnpack = true;
     installPhase = ''
-      mkdir -p "$out/bin"
+      mkdir -p "$out/bin" "$out/probes"
       for helper in ${lib.concatStringsSep " " compatibilityHelpers}; do
         ln -s ${compatAdapter}/bin/omanixy-compat-adapter "$out/bin/$helper"
+        cat > "$out/probes/$helper" <<EOF
+#!${pkgs.bash}/bin/bash
+exec "$out/bin/$helper" "\$@"
+EOF
+        chmod +x "$out/probes/$helper"
       done
-  cat > "$out/runtime-surface.json" <<'EOF'
+cat > "$out/runtime-surface.json" <<'EOF'
 ${builtins.toJSON (lib.mapAttrs
   (name: _: {
     wrapper = "bin/${name}";
-    consumers = [ (helperConsumer name) ];
-    probe = "runtime-matrix:${name}";
+    consumers = [ "probes/${name}" ];
+    sourceConsumers = [ (helperConsumer name) ];
+    probe = "probes/${name}";
   }) (lib.getAttrs compatibilityHelpers contractSource.helpers))}
 EOF
     '';

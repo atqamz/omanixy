@@ -14,6 +14,9 @@ home="$test_root/home"
 runtime_dir="$test_root/runtime"
 config_root="$test_root/config"
 mkdir -p "$home/.local/share/applications" "$test_root/bin" "$runtime_dir" "$config_root"
+system_data="$test_root/system-data"
+nix_data="$test_root/nix-store"
+mkdir -p "$system_data/applications" "$nix_data/applications"
 ln -s "$root/shell" "$test_root/qs"
 ln -s "$root/shell/Commons" "$config_root/Commons"
 ln -s "$root/shell/services" "$config_root/services"
@@ -25,8 +28,30 @@ sed -i '0,/PanelWindow {/s//Item {/' "$config_root/menu/Menu.qml"
 sed -i -e '/color: "transparent"/d' -e '/WlrLayershell\./d' \
   -e '/exclusionMode:/d' -e '/layer:/d' -e '/keyboardFocus:/d' \
   -e '/anchors { top: true; bottom: true; left: true; right: true }/d' "$config_root/menu/Menu.qml"
-printf '%s\n' '[Desktop Entry]' > "$home/.local/share/applications/org.example.User.desktop"
-printf '%s\n' '[Desktop Entry]' > "$home/.local/share/applications/org.example.Target.desktop"
+cat > "$home/.local/share/applications/org.example.User.desktop" <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=User app
+Exec=true
+EOF
+cat > "$home/.local/share/applications/org.example.Target.desktop" <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Target app
+Exec=true
+EOF
+cat > "$system_data/applications/org.example.System.desktop" <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=System app
+Exec=true
+EOF
+cat > "$nix_data/applications/org.example.Nix.desktop" <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Nix app
+Exec=true
+EOF
 ln -s "$home/.local/share/applications/org.example.Target.desktop" \
   "$home/.local/share/applications/org.example.Symlink.desktop"
 cat > "$test_root/bin/update-desktop-database" <<'EOF'
@@ -48,30 +73,35 @@ if PATH="$test_root/bin:$root/bin:$runtime_path" HOME="$home" XDG_DATA_HOME="$ho
   exit 1
 fi
 
-printf '%s\n' '[Desktop Entry]' > "$home/.local/share/applications/org.example.User.desktop"
+cat > "$home/.local/share/applications/org.example.User.desktop" <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=User app
+Exec=true
+EOF
 cat > "$config_root/shell.qml" <<'EOF'
 import QtQuick
 import Quickshell
 import Quickshell.Io
 
-Loader {
+ShellRoot {
   id: root
-  source: Quickshell.env("OMANIXY_APP_LIBRARY")
+  property var appLibrary: null
   property bool handled: false
   property int attempts: 0
 
   function runScenario(menu) {
-    if (handled || !item) return
+    if (handled || !root.appLibrary) return
     handled = true
-    menu.shell = ({appLibrary: item})
+    menu.shell = ({appLibrary: root.appLibrary})
     menu.openExistingMenu("apps")
     menu.filterText = "User"
     menu.rebuildDisplay()
     menu.selectedIndex = 0
     menu.cursorActive = true
-    if (!item.canRemove("org.example.System") || !item.canRemove("org.example.Nix")
-        || !item.canRemove("org.example.Missing") || !item.canRemove("org.example.Symlink")
-        || item.canRemove("../escape") || item.canRemove("../../escape")) {
+    if (!root.appLibrary.canRemove("org.example.User") || !root.appLibrary.canRemove("org.example.System") || !root.appLibrary.canRemove("org.example.Nix")
+        || !root.appLibrary.canRemove("org.example.Missing") || !root.appLibrary.canRemove("org.example.Symlink")
+        || root.appLibrary.canRemove("../escape") || root.appLibrary.canRemove("../../escape")) {
       Qt.quit()
       return
     }
@@ -92,7 +122,7 @@ Loader {
       return
     }
     menu.confirmDelete()
-    item.refreshUserOwnedEntries()
+    root.appLibrary.refreshUserOwnedEntries()
     result.running = true
   }
 
@@ -103,30 +133,46 @@ Loader {
   }
 
   Loader {
+    id: appLoader
+    source: Quickshell.env("OMANIXY_APP_LIBRARY")
+    onLoaded: root.appLibrary = item
+  }
+
+  Loader {
     id: menuLoader
     source: Quickshell.env("OMANIXY_MENU")
     onLoaded: {
-      if (item && root.item) root.item.loadUserOwnedEntries("org.example.User.desktop\\n")
-      if (item && root.item) root.runScenario(item)
+      if (item && root.appLibrary && root.appLibrary.canRemove("org.example.User"))
+        root.runScenario(item)
     }
   }
 
   Timer {
+    id: scanTimer
     interval: 100
     running: true
     repeat: true
     onTriggered: {
       attempts++
-      if (item && item.refreshUserOwnedEntries) item.refreshUserOwnedEntries()
-      if (menuLoader.item && item && item.userOwnedEntryIds["org.example.User"] === true)
+      if (root.appLibrary && root.appLibrary.refreshUserOwnedEntries) root.appLibrary.refreshUserOwnedEntries()
+      if (menuLoader.item && root.appLibrary && root.appLibrary.canRemove("org.example.User"))
+        root.runScenario(menuLoader.item)
+      else if (menuLoader.item && attempts >= 20)
         root.runScenario(menuLoader.item)
     }
+  }
+
+  Component.onCompleted: {
+    appLoader.active = true
+    menuLoader.active = true
+    scanTimer.start()
   }
 }
 EOF
 RESULT_LOG="$test_root/result.log" \
   PATH="$test_root/bin:$root/bin:$runtime_path" \
   HOME="$home" XDG_DATA_HOME="$home/.local/share" \
+  XDG_DATA_DIRS="$system_data:$nix_data" \
   XDG_RUNTIME_DIR="$runtime_dir" \
   QT_QPA_PLATFORM=offscreen \
   OMANIXY_APP_LIBRARY="$config_root/services/AppLibrary.qml" \
