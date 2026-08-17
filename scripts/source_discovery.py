@@ -241,13 +241,12 @@ def source_executables(path: str, text: str, pinned_text: str = "") -> list[dict
             command_line = re.sub(r"^\s*[A-Za-z_][A-Za-z0-9_]*(?:\[[^]]+\])?=", "", line)
             if re.match(r"^\s*[A-Za-z_][A-Za-z0-9_]*\s*\(\)\s*\{", line):
                 command_line = ""
-            if re.match(r"^\s*[^;&]+\)\s+", line):
-                command_line = ""
-            if re.match(r"^\s*[^;&]+\)\s*$", line):
-                command_line = ""
-            for match in SHELL_COMMAND_RE.finditer(command_line):
-                for name in shell_executables(match.group(1)):
-                    add(name, line_number, "shell-script", line)
+            else:
+                case_arm = re.match(r"^\s*[^;&]+\)\s*", line)
+                if case_arm:
+                    command_line = line[case_arm.end() :]
+            for name in shell_executables(command_line):
+                add(name, line_number, "shell-script", line)
             for match in COMMAND_SUBSHELL_RE.finditer(line):
                 for name in shell_executables(match.group(1)):
                     add(name, line_number, "shell-substitution", line)
