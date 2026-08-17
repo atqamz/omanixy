@@ -313,7 +313,8 @@ def source_executables(path: str, text: str, pinned_text: str = "") -> list[dict
                 match.group(0),
             )
             and re.search(
-            r"['\"](?:bash|dash|sh|zsh)['\"]\s*,\s*['\"][^'\"]*c[^'\"]*['\"]\s*,",
+            r"['\"](?:[^'\"]*/)?(?:bash|dash|sh|zsh)['\"]\s*,\s*"
+            r"['\"][^'\"]*c[^'\"]*['\"]\s*,\s*(?!['\"])",
             match.group(1),
             )
         ):
