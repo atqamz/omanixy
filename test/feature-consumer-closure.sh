@@ -358,6 +358,48 @@ fi
 grep -Fq 'unknown external executable: pacman' "$test_root/unknown-script-payload-error"
 printf '%s\n' 'REJECTED pacman in a script payload'
 
+unknown_exec_payload="$test_root/unknown-exec-payload-root"
+cp -R -- "$weather_root" "$unknown_exec_payload"
+chmod -R u+w "$unknown_exec_payload"
+printf '%s\n' 'Item { script: "exec pacman" }' \
+  >> "$unknown_exec_payload/shell/plugins/panels/weather/Panel.qml"
+if "${PYTHON:-python3}" "$checker" "$unknown_exec_payload" "$pinned_source" \
+  "$weather_bin/runtime-surface.json" "$weather_bin/feature-surface.json" "$test_root/unknown-exec-payload.json" \
+  >"$test_root/unknown-exec-payload-output" 2>"$test_root/unknown-exec-payload-error"; then
+  printf '%s\n' 'feature consumer closure accepted exec pacman in a script payload' >&2
+  exit 1
+fi
+grep -Fq 'unknown external executable: pacman' "$test_root/unknown-exec-payload-error"
+printf '%s\n' 'REJECTED exec pacman in a script payload'
+
+dynamic_array_payload="$test_root/dynamic-array-payload-root"
+cp -R -- "$weather_root" "$dynamic_array_payload"
+chmod -R u+w "$dynamic_array_payload"
+printf '%s\n' 'Process { command: ["bash", "-lc", dynamicShell] }' \
+  >> "$dynamic_array_payload/shell/plugins/panels/weather/Panel.qml"
+if "${PYTHON:-python3}" "$checker" "$dynamic_array_payload" "$pinned_source" \
+  "$weather_bin/runtime-surface.json" "$weather_bin/feature-surface.json" "$test_root/dynamic-array-payload.json" \
+  >"$test_root/dynamic-array-payload-output" 2>"$test_root/dynamic-array-payload-error"; then
+  printf '%s\n' 'feature consumer closure accepted a dynamic shell payload' >&2
+  exit 1
+fi
+grep -Fq 'unknown external executable: __dynamic-executable__' "$test_root/dynamic-array-payload-error"
+printf '%s\n' 'REJECTED dynamic shell payload'
+
+dynamic_command_payload="$test_root/dynamic-command-payload-root"
+cp -R -- "$weather_root" "$dynamic_command_payload"
+chmod -R u+w "$dynamic_command_payload"
+printf '%s\n' 'Process { command: dynamicCommand }' \
+  >> "$dynamic_command_payload/shell/plugins/panels/weather/Panel.qml"
+if "${PYTHON:-python3}" "$checker" "$dynamic_command_payload" "$pinned_source" \
+  "$weather_bin/runtime-surface.json" "$weather_bin/feature-surface.json" "$test_root/dynamic-command-payload.json" \
+  >"$test_root/dynamic-command-payload-output" 2>"$test_root/dynamic-command-payload-error"; then
+  printf '%s\n' 'feature consumer closure accepted a dynamic command payload' >&2
+  exit 1
+fi
+grep -Fq 'unknown external executable: __dynamic-executable__' "$test_root/dynamic-command-payload-error"
+printf '%s\n' 'REJECTED dynamic command payload'
+
 unknown_shell="$test_root/unknown-shell-root"
 cp -R -- "$launcher_root" "$unknown_shell"
 chmod -R u+w "$unknown_shell"

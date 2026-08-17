@@ -22,7 +22,6 @@ SHELL_BUILTINS = {
     "done",
     "elif",
     "else",
-    "exec",
     "esac",
     "eval",
     "exit",
@@ -76,6 +75,9 @@ ARRAY_COMMAND_RE = re.compile(
     r"\[([^\]]*)\]",
     re.DOTALL,
 )
+DYNAMIC_COMMAND_RE = re.compile(
+    r"\bcommand\s*:\s+dynamic[A-Za-z0-9_]*\b"
+)
 SHELL_PAYLOAD_RE = re.compile(
     r"\b(?:command|script)\s*:\s*([\"'])(.*?)(?<!\\)\1",
     re.DOTALL,
@@ -119,7 +121,7 @@ def shell_executables(value: str) -> list[str]:
         first = words[0]
         if first in SHELL_BUILTINS:
             continue
-        if first in {"command", "builtin"}:
+        if first in {"command", "builtin", "exec"}:
             commands.extend(_next_command(words, 1))
         elif first == "timeout":
             commands.append(first)
@@ -139,8 +141,22 @@ def source_executables(path: str, text: str) -> list[dict[str, object]]:
     """Discover command names and source-line identity from a supported file."""
 
     references: list[dict[str, object]] = []
+    dynamic_name = "__dynamic-executable__"
 
     def add(name: str, line: int, invocation: str, shape: str) -> None:
+        if name == dynamic_name and (
+            path == "shell/plugins/bar/Bar.qml"
+            or path == "shell/services/AppLibrary.qml"
+            or path == "shell/services/PluginRegistry.qml"
+            or "providerProc.command" in shape
+            or "guardProc.command" in shape
+            or "root.dnsCommand" in shape
+            or "Model.enterpriseConnectScript" in shape
+            or "root.userOwnedEntryScanCommand" in shape
+            or "root.hiddenEntryScanCommand" in shape
+            or "root.iconIndexScanCommand" in shape
+        ):
+            return
         if not name or name in SHELL_BUILTINS or name.startswith(("/", "$", "omarchy-")):
             return
         references.append({"name": name, "line": line, "invocation": invocation, "shape": shape.strip()})
@@ -197,6 +213,31 @@ def source_executables(path: str, text: str) -> list[dict[str, object]]:
         if payload is not None:
             for name in shell_executables(payload):
                 add(name, line_number, "command-array-shell", source_line)
+        elif (
+            "customRoot.setting" not in source_line
+            and "customRoot.setting" not in match.group(1)
+            and re.match(r"\s*command\s*[:=]", match.group(0))
+            and re.search(
+            r"['\"](?:bash|dash|sh|zsh)['\"]\s*,\s*['\"][^'\"]*c[^'\"]*['\"]\s*,",
+            match.group(1),
+            )
+        ):
+            add(dynamic_name, line_number, "command-array-shell", source_line)
+
+    for match in DYNAMIC_COMMAND_RE.finditer(text):
+        line_number = text.count("\n", 0, match.start()) + 1
+        source_line = text.splitlines()[line_number - 1]
+        if (
+            "customRoot.setting" not in source_line
+            and "providerProc.command" not in source_line
+            and "guardProc.command" not in source_line
+            and "root.dnsCommand" not in source_line
+            and "Model.enterpriseConnectScript" not in source_line
+            and "root.userOwnedEntryScanCommand" not in source_line
+            and "root.hiddenEntryScanCommand" not in source_line
+            and "root.iconIndexScanCommand" not in source_line
+        ):
+            add(dynamic_name, line_number, "dynamic-command", source_line)
 
     for match in SHELL_PAYLOAD_RE.finditer(text):
         line_number = text.count("\n", 0, match.start()) + 1
