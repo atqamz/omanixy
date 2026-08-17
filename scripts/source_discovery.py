@@ -115,7 +115,7 @@ def shell_executables(value: str) -> list[str]:
     commands: list[str] = []
     for match in COMMAND_SUBSHELL_RE.finditer(value):
         commands.extend(shell_executables(match.group(1)))
-    for part in re.split(r"(?:&&|\|\||[;&|])", value):
+    for part in re.split(r"(?:&&|\|\||[;&|\n])", value):
         try:
             words = shlex.split(part, comments=False, posix=True)
         except ValueError:
@@ -165,11 +165,12 @@ def shell_executables(value: str) -> list[str]:
     return list(dict.fromkeys(commands))
 
 
-def source_executables(path: str, text: str) -> list[dict[str, object]]:
+def source_executables(path: str, text: str, pinned_text: str = "") -> list[dict[str, object]]:
     """Discover command names and source-line identity from a supported file."""
 
     references: list[dict[str, object]] = []
     dynamic_name = DYNAMIC_EXECUTABLE
+    pinned_lines = pinned_text.splitlines()
 
     allowed_dynamic_shapes = {
             ("shell/plugins/panels/network/Panel.qml", 'command: ["bash", "-c", root.dnsCommand("")]'),
@@ -195,7 +196,16 @@ def source_executables(path: str, text: str) -> list[dict[str, object]]:
     def add(name: str, line: int, invocation: str, shape: str) -> None:
         normalized_shape = " ".join(shape.split())
         dynamic_key = (path, normalized_shape)
-        if name == dynamic_name and dynamic_key in allowed_dynamic_shapes and dynamic_key not in allowed_dynamic_used:
+        pinned_identity = (
+            line <= len(pinned_lines)
+            and " ".join(pinned_lines[line - 1].split()) == normalized_shape
+        )
+        if (
+            name == dynamic_name
+            and dynamic_key in allowed_dynamic_shapes
+            and dynamic_key not in allowed_dynamic_used
+            and pinned_identity
+        ):
             allowed_dynamic_used.add(dynamic_key)
             return
         if name.startswith("/"):
