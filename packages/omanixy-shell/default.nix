@@ -23,7 +23,7 @@ let
     "audio-control" = [ pipewire pulseaudio wireplumber ];
     "audio-default-output" = [ pipewire pulseaudio wireplumber ];
     "bluetooth-control" = [ bluez ];
-    "clipboard-presentation" = [ procps util-linux wl-clipboard wtype xdg-utils ];
+    "clipboard-presentation" = [ gnugrep procps util-linux wl-clipboard wtype xdg-utils ];
     "core-runtime" = [ bash coreutils findutils fontconfig gawk gnugrep gnused hyprland inotify-tools jq procps systemd util-linux ];
     launcher = [ desktop-file-utils gtk3 uwsm ];
     "monitor-control" = [ brightnessctl fontconfig glib gtk3 hyprland libnotify procps ];

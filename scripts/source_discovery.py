@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import re
 import shlex
+from collections import Counter
 
 
 SHELL_BUILTINS = {
@@ -20,6 +21,7 @@ SHELL_BUILTINS = {
     "declare",
     "do",
     "done",
+    "echo",
     "elif",
     "else",
     "esac",
@@ -74,7 +76,7 @@ DYNAMIC_EXECUTABLE = "__dynamic-executable__"
 ARRAY_COMMAND_RE = re.compile(
     r"(?:(?:\b[A-Za-z_][A-Za-z0-9_]*\.)?command\s*[:=]|"
     r"(?:Quickshell|Util)\.exec(?:Detached)?\s*\()\s*"
-    r"\[([^\]]*)\]",
+    r"\[((?:\\.|[^\"'\]]|\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*')*)\]",
     re.DOTALL,
 )
 DYNAMIC_COMMAND_RE = re.compile(r"\bcommand\s*:\s+(?![\"'\[])[^\n,}]+")
@@ -114,6 +116,10 @@ def _next_command(words: list[str], start: int) -> list[str]:
 def shell_executables(value: str) -> list[str]:
     """Return literal command names from a shell command string."""
 
+    value = _strip_shell_comment(value)
+    if not value.strip() or value.lstrip().startswith("#!"):
+        return []
+
     commands: list[str] = []
     for match in COMMAND_SUBSHELL_RE.finditer(value):
         commands.extend(shell_executables(match.group(1)))
@@ -142,8 +148,6 @@ def shell_executables(value: str) -> list[str]:
             parts.append(value[part_start:index])
             part_start = index + 1
     parts.append(value[part_start:])
-    if quote:
-        commands.append(DYNAMIC_EXECUTABLE)
     for part in parts:
         try:
             words = shlex.split(part, comments=False, posix=True)
@@ -160,13 +164,9 @@ def shell_executables(value: str) -> list[str]:
             elif first in {"for", "while", "until"}:
                 if "do" in words:
                     commands.extend(_next_command(words, words.index("do") + 1))
-                else:
-                    commands.append(DYNAMIC_EXECUTABLE)
             elif first == "case":
                 if ")" in words:
                     commands.extend(_next_command(words, words.index(")") + 1))
-                else:
-                    commands.append(DYNAMIC_EXECUTABLE)
             elif first == "function" and "{" in words:
                 commands.extend(shell_executables(" ".join(words[words.index("{") + 1 :])))
             elif first == "source":
@@ -226,9 +226,32 @@ def shell_executables(value: str) -> list[str]:
         elif first.startswith("$") or "=" in first and first.split("=", 1)[0].isidentifier():
             if "$(" not in first:
                 commands.extend(_next_command(words, 1))
-        elif first not in SHELL_BUILTINS and not first.startswith("-"):
+        elif (
+            first not in SHELL_BUILTINS
+            and not first.startswith(("-", "#", "{"))
+            and not first.endswith((")", "}"))
+            and (first.startswith("/") or re.fullmatch(r"[A-Za-z][A-Za-z0-9_.+-]*", first))
+        ):
             commands.append(first)
     return list(dict.fromkeys(commands))
+
+
+def _strip_shell_comment(value: str) -> str:
+    quote: str | None = None
+    escaped = False
+    for index, char in enumerate(value):
+        if quote:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+        elif char in {"'", '"'}:
+            quote = char
+        elif char == "#" and (index == 0 or value[index - 1].isspace()):
+            return value[:index]
+    return value
 
 
 def source_executables(path: str, text: str, pinned_text: str = "") -> list[dict[str, object]]:
@@ -237,6 +260,15 @@ def source_executables(path: str, text: str, pinned_text: str = "") -> list[dict
     references: list[dict[str, object]] = []
     dynamic_name = DYNAMIC_EXECUTABLE
     pinned_lines = pinned_text.splitlines()
+    pinned_shape_counts = Counter(" ".join(line.split()) for line in pinned_lines)
+    shell_functions = {
+        match.group(1)
+        for match in re.finditer(
+            r"^\s*(?:function\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*\)\s*\{",
+            text,
+            re.MULTILINE,
+        )
+    }
 
     allowed_dynamic_shapes = {
             ("shell/plugins/panels/network/Panel.qml", 'command: ["bash", "-c", root.dnsCommand("")]'),
@@ -244,7 +276,8 @@ def source_executables(path: str, text: str, pinned_text: str = "") -> list[dict
             ("shell/plugins/menu/Menu.qml", 'providerProc.command = ["bash", "-lc", spec.script]'),
             ("shell/plugins/menu/Menu.qml", 'guardProc.command = ["bash", "-lc", script]'),
             ("shell/plugins/menu/Menu.qml", 'resultProc.command = ["bash", "-c", ": > " + Util.shellQuote(activeDoneFile)]'),
-            ("shell/plugins/menu/Menu.qml", 'resultProc.command = ["bash", "-c", "printf \'%s\\n\' " + Util.shellQuote(selection) + " > " + Util.shellQuote(activeSelectionFile) + "; : > " + Util.shellQuote(activeDoneFile)]'),
+            ("shell/plugins/menu/Menu.qml", 'resultProc.command = ["bash", "-c", "printf \'%s\\\\n\' " + Util.shellQuote(selection) + " > " + Util.shellQuote(activeSelectionFile) + "; : > " + Util.shellQuote(activeDoneFile)]'),
+            ("shell/plugins/menu/Menu.qml", 'Util.execDetached(command)'),
             ("shell/plugins/panels/network/Panel.qml", 'enterpriseConnect.command = ["bash", "-c", Model.enterpriseConnectScript, "nmcli-eap", ssid, identity]'),
             ("shell/services/AppLibrary.qml", 'command: ["bash", "-c", root.userOwnedEntryScanCommand()]'),
             ("shell/services/AppLibrary.qml", 'command: ["bash", "-c", root.hiddenEntryScanCommand()]'),
@@ -255,30 +288,43 @@ def source_executables(path: str, text: str, pinned_text: str = "") -> list[dict
             ("shell/plugins/bar/Bar.qml", 'transparentForegroundProc.command = ['),
             ("shell/Ui/MultiSelect.qml", 'optionsProcess.command = cmd'),
             ("shell/services/AppLibrary.qml", 'if (command) Util.execDetached(command)'),
+            ("shell/services/AppLibrary.qml", 'Util.execDetached(command)'),
+            ("shell/services/AppLibrary.qml", 'removeProcess.command = ['),
             ("shell/plugins/bar/Bar.qml", 'if (command) root.run(command)'),
             ("shell/plugins/bar/Bar.qml", 'Util.execDetached(command)'),
             ("shell/Commons/Util.qml", 'Quickshell.execDetached(["bash", "-lc", command])'),
+            ("shell/plugins/clipboard/Clipboard.qml", 'Quickshell.execDetached([root.omarchyPath + "/bin/omarchy-clipboard-paste-file", row.mime, row.path])'),
+            ("shell/plugins/clipboard/Clipboard.qml", 'Quickshell.execDetached([root.omarchyPath + "/bin/omarchy-clipboard-paste-text", "--shift-insert", "--history-index", String(row.historyIndex)])'),
+            ("shell/plugins/clipboard/Clipboard.qml", 'Quickshell.execDetached([root.omarchyPath + "/bin/omarchy-clipboard-paste-file", "--copy-only", row.mime, row.path])'),
+            ("shell/plugins/clipboard/Clipboard.qml", 'Quickshell.execDetached([root.omarchyPath + "/bin/omarchy-clipboard-paste-text", "--copy-only", "--history-index", String(row.historyIndex)])'),
+            ("shell/plugins/clipboard/Clipboard.qml", 'Quickshell.execDetached([root.omarchyPath + "/bin/omarchy-clipboard-open", "--history-index", String(row.historyIndex)])'),
+            ("shell/plugins/clipboard/Clipboard.qml", 'command: [root.captureScript]'),
+            ("shell/plugins/clipboard/Clipboard.qml", 'command: ["setpriv", "--pdeathsig", "TERM", "wl-paste", "--type", "text", "--watch", root.captureScript, "text"]'),
+            ("shell/plugins/clipboard/Clipboard.qml", 'command: ["setpriv", "--pdeathsig", "TERM", "wl-paste", "--type", "image/png", "--watch", root.captureScript, "image/png"]'),
+            ("shell/plugins/emojis/Emojis.qml", 'Quickshell.execDetached([root.omarchyPath + "/bin/omarchy-menu-emoji-insert", emoji])'),
     }
-    allowed_dynamic_used: set[tuple[str, str]] = set()
+    allowed_dynamic_used: Counter[tuple[str, str]] = Counter()
 
     def add(name: str, line: int, invocation: str, shape: str) -> None:
         normalized_shape = " ".join(shape.split())
         dynamic_key = (path, normalized_shape)
-        pinned_identity = (
-            line <= len(pinned_lines)
-            and " ".join(pinned_lines[line - 1].split()) == normalized_shape
-        )
+        pinned_identity = normalized_shape in pinned_shape_counts
         if (
             name == dynamic_name
-            and dynamic_key in allowed_dynamic_shapes
-            and dynamic_key not in allowed_dynamic_used
-            and pinned_identity
+            and (dynamic_key in allowed_dynamic_shapes or pinned_identity)
+            and allowed_dynamic_used[dynamic_key]
+            < (pinned_shape_counts[normalized_shape] if pinned_identity else 1)
         ):
-            allowed_dynamic_used.add(dynamic_key)
+            allowed_dynamic_used[dynamic_key] += 1
             return
         if name.startswith("/"):
             name = name.rsplit("/", 1)[-1]
-        if not name or name in SHELL_BUILTINS or name.startswith(("$", "omarchy-")):
+        if (
+            not name
+            or name in SHELL_BUILTINS
+            or name in shell_functions
+            or name.startswith(("$", "omarchy-"))
+        ):
             return
         references.append({"name": name, "line": line, "invocation": invocation, "shape": shape.strip()})
 

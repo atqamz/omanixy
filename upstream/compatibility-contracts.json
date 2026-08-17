@@ -15,6 +15,7 @@
     "date": "core-runtime",
     "fc-match": "core-runtime",
     "find": "core-runtime",
+    "grep": "clipboard-presentation",
     "grim": "screenshot-capture",
     "gtk-launch": "launcher",
     "hyprctl": "core-runtime",
