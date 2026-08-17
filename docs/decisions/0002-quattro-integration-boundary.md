@@ -57,8 +57,8 @@ basecamp/omarchy
 
 The concrete Quattro and Quickshell runtime pair is selected and tested by
 issue #2.
-This ADR does not repin the current source baseline or claim that the current
-pin is a validated runtime pair.
+This ADR does not repin the current source baseline; the current pin and its
+validation state are recorded in `upstream/omarchy.yaml`.
 
 A narrow compatibility adapter is not a presentation fork.
 An adapter is permitted only when a supported upstream consumer needs an
