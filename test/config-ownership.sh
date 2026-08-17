@@ -7,16 +7,16 @@ home=${3:?Home Manager test home required}
 custom_home=${4:?custom Home Manager test home required}
 store_home=${5:?store-link test home required}
 store_config=${6:?store-backed source config required}
-feature_store_config=${7:?feature-derived store-backed source config required}
+explicit_store_config=${7:?explicit store-backed source config required}
 malformed_store_config=${8:?malformed store-backed source config required}
 historical_baseline=${9:?historical issue #2 baseline required}
 mkdir -p "$home"
 mkdir -p "$custom_home"
 mkdir -p "$store_home/.config/omarchy"
 malformed_store_home="${home}-malformed-store-link"
-feature_store_home="${home}-feature-store-link"
-mkdir -p "$feature_store_home/.config/omarchy"
-trap 'rm -rf "$home" "$custom_home" "$store_home" "$feature_store_home" "${home}-broken-store-link" "$malformed_store_home"' EXIT
+explicit_store_home="${home}-explicit-store-link"
+mkdir -p "$explicit_store_home/.config/omarchy"
+trap 'rm -rf "$home" "$custom_home" "$store_home" "$explicit_store_home" "${home}-broken-store-link" "$malformed_store_home"' EXIT
 
 run_activation_at() {
   activation_home=$1
@@ -57,7 +57,7 @@ test ! -L "$theme_dir"
 migration_home="${home}-migration"
 custom_migration_home="${home}-custom-migration"
 mkdir -p "$migration_home/.config/omarchy" "$custom_migration_home/.config/omarchy"
-trap 'rm -rf "$home" "$custom_home" "$store_home" "$feature_store_home" "$migration_home" "$custom_migration_home" "${home}-broken-store-link" "$malformed_store_home"' EXIT
+trap 'rm -rf "$home" "$custom_home" "$store_home" "$explicit_store_home" "$migration_home" "$custom_migration_home" "${home}-broken-store-link" "$malformed_store_home"' EXIT
 cp "$historical_baseline" "$migration_home/.config/omarchy/shell.json"
 run_activation_at "$migration_home" "$activation"
 jq -e '.version == 1 and .omanixyBaselineVersion == 2 and .bar.layout.right[-1].id == "omarchy.power"' \
@@ -114,7 +114,7 @@ done
 
 home_dry_run="${home}-dry-run"
 mkdir -p "$home_dry_run"
-trap 'rm -rf "$home" "$custom_home" "$store_home" "$feature_store_home" "$home_dry_run" "${home}-broken-store-link"' EXIT
+trap 'rm -rf "$home" "$custom_home" "$store_home" "$explicit_store_home" "$home_dry_run" "${home}-broken-store-link"' EXIT
 run_dry_activation
 test ! -e "$home_dry_run/.config/omarchy/shell.json"
 test ! -e "$home_dry_run/.local/state/omarchy/current/theme"
@@ -179,22 +179,14 @@ HOME="$store_home" USER=omanixy-test XDG_RUNTIME_DIR="$store_home/runtime" \
   bash -c 'run() { "$@"; }; source "$1"' bash "$activation"
 grep -Fqx '{"storeLinkMaterialized":true}' "$store_file"
 
-ln -s "$feature_store_config" "$feature_store_home/.config/omarchy/shell.json"
-HOME="$feature_store_home" USER=omanixy-test XDG_RUNTIME_DIR="$feature_store_home/runtime" \
+ln -s "$explicit_store_config" "$explicit_store_home/.config/omarchy/shell.json"
+HOME="$explicit_store_home" USER=omanixy-test XDG_RUNTIME_DIR="$explicit_store_home/runtime" \
   bash -c 'run() { "$@"; }; source "$1"' bash "$activation"
-feature_store_file="$feature_store_home/.config/omarchy/shell.json"
-test ! -L "$feature_store_file"
-test "$(stat -c '%a' "$feature_store_file")" = 600
-for plugin in \
-  omarchy.audio \
-  omarchy.bluetooth \
-  omarchy.clipboard \
-  omarchy.emojis \
-  omarchy.monitor \
-  omarchy.network \
-  omarchy.power \
-  omarchy.weather; do
-  jq -e --arg plugin "$plugin" '.disabledPlugins | index($plugin) == null' "$feature_store_file" >/dev/null
+explicit_store_file="$explicit_store_home/.config/omarchy/shell.json"
+test ! -L "$explicit_store_file"
+test "$(stat -c '%a' "$explicit_store_file")" = 600
+for plugin in omarchy.audio omarchy.network; do
+  jq -e --arg plugin "$plugin" '.disabledPlugins | index($plugin) != null' "$explicit_store_file" >/dev/null
 done
 
 mkdir -p "$malformed_store_home/.config/omarchy"

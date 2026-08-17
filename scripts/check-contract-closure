@@ -36,6 +36,60 @@ def names(snapshot: dict) -> set[str]:
     return values
 
 
+def scanner_noise_records(root: Path, manifest: dict) -> set[tuple[str, int, str]]:
+    entries = manifest.get("scannerNoise", [])
+    if not isinstance(entries, list):
+        die("manifest scannerNoise is not a list")
+    result: set[tuple[str, int, str]] = set()
+    identities: set[tuple[str, str]] = set()
+    for entry in entries:
+        if (
+            not isinstance(entry, dict)
+            or not isinstance(entry.get("path"), str)
+            or not isinstance(entry.get("helper"), str)
+            or not isinstance(entry.get("exactLine"), str)
+            or not isinstance(entry.get("reason"), str)
+            or not entry["reason"]
+        ):
+            die("manifest scannerNoise evidence is invalid")
+        identity = (entry["path"], entry["helper"])
+        if identity in identities:
+            die(f"duplicate scanner noise evidence: {entry['path']}: {entry['helper']}")
+        identities.add(identity)
+        source = root / entry["path"]
+        if not source.is_file():
+            die(f"scanner noise source is missing: {entry['path']}")
+        active_lines = [
+            (index, line)
+            for index, line in enumerate(source.read_text(encoding="utf-8").splitlines(), start=1)
+            if not line.lstrip().startswith("//")
+        ]
+        matching_lines = [
+            (index, line)
+            for index, line in active_lines
+            if entry["helper"] in line
+        ]
+        if [line for _, line in matching_lines] == [entry["exactLine"]]:
+            result.add((entry["path"], matching_lines[0][0], entry["helper"]))
+        else:
+            die(f"scanner noise evidence drifted: {entry['path']}: {entry['helper']}")
+    return result
+
+
+def snapshot_records(snapshot: dict) -> set[tuple[str, int, str]]:
+    records: set[tuple[str, int, str]] = set()
+    for key in ("direct_omarchy_helpers", "absolute_helper_paths"):
+        for entry in snapshot.get(key, []):
+            if (
+                isinstance(entry, dict)
+                and isinstance(entry.get("path"), str)
+                and isinstance(entry.get("line"), int)
+                and isinstance(entry.get("name"), str)
+            ):
+                records.add((entry["path"], entry["line"], entry["name"]))
+    return records
+
+
 def adapter_hash(repo: Path, manifest: dict) -> str:
     sources = manifest.get("adapterSources")
     if not isinstance(sources, list) or not sources or any(not isinstance(source, str) for source in sources):
@@ -94,7 +148,8 @@ def main() -> int:
 
     full_names = names(full_snapshot)
     declared = set(helpers) | set(native)
-    noise = set(manifest.get("scannerNoise", []))
+    noise_records = scanner_noise_records(root, manifest)
+    noise_names = {name for _, _, name in noise_records}
     missing_contracts = sorted((set(helpers) - full_names) - {"omarchy-shell"})
     if missing_contracts:
         die(f"ledger entries lack pinned-source evidence: {', '.join(missing_contracts)}")
@@ -306,11 +361,12 @@ def main() -> int:
         capture_output=True,
         text=True,
     )
-    reachable = names(json.loads(root_snapshot.stdout)) - noise
+    reachable_records = snapshot_records(json.loads(root_snapshot.stdout)) - noise_records
+    reachable = {name for _, _, name in reachable_records}
     unknown = sorted(reachable - declared)
     if unknown:
         die(f"reachable contracts lack ledger disposition: {', '.join(unknown)}")
-    omitted_reachable = sorted((full_names - declared - noise) & reachable)
+    omitted_reachable = sorted((full_names - declared - noise_names) & reachable)
     if omitted_reachable:
         die(f"omitted pinned contracts are reachable: {', '.join(omitted_reachable)}")
     for omitted in manifest.get("omittedReachability", []):
@@ -357,7 +413,7 @@ def main() -> int:
                 f"stdout={probe_result.stdout!r} stderr={probe_result.stderr!r}"
             )
 
-    print(f"contract closure passed: {len(helpers)} adapted, {len(native)} native, {len(full_names - declared - noise)} omitted")
+    print(f"contract closure passed: {len(helpers)} adapted, {len(native)} native, {len(full_names - declared - noise_names)} omitted")
     return 0
 
 

@@ -79,6 +79,19 @@
           screenshotRuntime = runtimeFor system [ "screenshot" ];
           coreRuntime = runtimeFor system [ "core" ];
           monitorRuntime = runtimeFor system [ "monitor" ];
+          featureRuntimePaths = pkgs.writeText "omanixy-feature-runtime-paths" (builtins.toJSON {
+            audio = toString audioRuntime;
+            bluetooth = toString bluetoothRuntime;
+            clipboard = toString clipboardRuntime;
+            core = toString coreRuntime;
+            launcher = toString launcherRuntime;
+            monitor = toString monitorRuntime;
+            network = toString networkRuntime;
+            notification = toString (runtimeFor system [ "notification" ]);
+            power = toString (runtimeFor system [ "power" ]);
+            screenshot = toString screenshotRuntime;
+            weather = toString weatherRuntime;
+          });
           clipboardHomeConfiguration = homeConfigurationFor system {
             programs.omanixy.features = [ "clipboard" ];
           };
@@ -99,11 +112,12 @@
           baselineConfigForTests = builtins.removeAttrs
             (builtins.fromJSON (builtins.readFile ./upstream/shell-baseline.json))
             [ "featurePlugins" "featureDependencies" "featureOrder" "migrations" ];
-          featurePluginIdsForTests = nixpkgs.lib.unique (nixpkgs.lib.concatLists (builtins.attrValues
-            (builtins.fromJSON (builtins.readFile ./upstream/shell-baseline.json)).featurePlugins));
           storeConfig = pkgs.writeText "omanixy-historical-shell-config" (builtins.readFile ./upstream/shell-baseline-v1.json);
-          featureStoreConfig = pkgs.writeText "omanixy-feature-derived-shell-config" (builtins.toJSON (baselineConfigForTests // {
-            disabledPlugins = nixpkgs.lib.unique (baselineConfigForTests.disabledPlugins ++ featurePluginIdsForTests);
+          explicitStoreConfig = pkgs.writeText "omanixy-explicit-store-shell-config" (builtins.toJSON (baselineConfigForTests // {
+            disabledPlugins = nixpkgs.lib.unique (baselineConfigForTests.disabledPlugins ++ [
+              "omarchy.audio"
+              "omarchy.network"
+            ]);
           }));
           malformedStoreConfig = pkgs.writeText "omanixy-malformed-store-shell-config" ''{"disabledPlugins":'';
           homeConfiguration = homeConfigurationFor system { };
@@ -229,6 +243,13 @@
             jq -e '.disabledPlugins | index("omarchy.network") == null and index("omarchy.audio") == null' ${clipboardRuntime.passthru.safeShellConfig} >/dev/null
             touch "$out"
           '';
+          feature-runtime-inputs = pkgs.runCommand "omanixy-feature-runtime-inputs"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnused pkgs.jq ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/feature-runtime-inputs.sh} ${./upstream/compatibility-contracts.json} ${featureRuntimePaths}
+            touch "$out"
+          '';
           feature-closure = pkgs.runCommand "omanixy-feature-closure"
             {
               nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.gnused pkgs.jq ];
@@ -280,7 +301,7 @@
               malformedStoreConfig = malformedStoreConfig;
               nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.diffutils pkgs.jq ];
             } ''
-            ${pkgs.bash}/bin/bash ${./test/config-ownership.sh} "$activation" "$customActivation" /build/omanixy-test /build/omanixy-custom-test /build/omanixy-store-link-test ${storeConfig} ${featureStoreConfig} "$malformedStoreConfig" ${./upstream/shell-baseline-v1.json}
+            ${pkgs.bash}/bin/bash ${./test/config-ownership.sh} "$activation" "$customActivation" /build/omanixy-test /build/omanixy-custom-test /build/omanixy-store-link-test ${storeConfig} ${explicitStoreConfig} "$malformedStoreConfig" ${./upstream/shell-baseline-v1.json}
             touch "$out"
           '';
           service-unit = pkgs.runCommand "omanixy-service-unit"

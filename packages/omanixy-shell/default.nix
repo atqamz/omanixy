@@ -20,24 +20,27 @@ let
   quickshellRevision = contractSource.pins.quickshell;
   baselineConfig = builtins.removeAttrs baselineSource [ "featurePlugins" "featureDependencies" "featureOrder" "migrations" ];
   featureRuntimeInputs = with pkgs; {
-    core = [ bash coreutils findutils gawk gnugrep gnused inotify-tools jq systemd util-linux ];
+    core = [ bash coreutils findutils fontconfig gawk gnugrep gnused hyprland inotify-tools jq procps systemd util-linux ];
     network = [ iproute2 iputils iw networkmanager qrencode ];
     audio = [ pipewire pulseaudio wireplumber ];
     bluetooth = [ bluez util-linux ];
     screenshot = [ fontconfig grim hyprland hyprpicker procps slurp wl-clipboard ];
-    clipboard = [ wl-clipboard wtype xdg-utils ];
+    clipboard = [ util-linux wl-clipboard wtype xdg-utils ];
     power = [ power-profiles-daemon upower ];
     monitor = [ brightnessctl fontconfig glib gtk3 hyprland libnotify procps ];
     weather = [ curl ];
     notification = [ libnotify ];
     launcher = [ desktop-file-utils gtk3 uwsm ];
   };
+  externalExecutableFeatures = contractSource.externalExecutableFeatures or { };
+  externalFeatureNames = lib.unique (builtins.attrValues externalExecutableFeatures);
   allFeatures = featureSelection.featureNames;
   requestedFeatures = if features == null then allFeatures else features;
   selectedFeatures = featureSelection.select requestedFeatures;
   featureNamesValid = lib.assertMsg
     (featureSelection.validate requestedFeatures
-      && lib.all (feature: builtins.hasAttr feature featureRuntimeInputs) selectedFeatures)
+      && lib.all (feature: builtins.hasAttr feature featureRuntimeInputs) selectedFeatures
+      && lib.all (feature: feature == "host" || builtins.hasAttr feature featureRuntimeInputs) externalFeatureNames)
     "omanixy features must be a list of known feature names";
 
   quickshell = pkgs.quickshell.overrideAttrs (old: {
@@ -337,8 +340,12 @@ let
     { prefix = "shell/plugins/panels/power/"; feature = "power"; }
     { prefix = "shell/plugins/panels/weather/"; feature = "weather"; }
     { prefix = "shell/plugins/panels/wifiqr/"; feature = "network"; }
-    { prefix = "shell/services/"; feature = "launcher"; }
-    { prefix = "default/omarchy/"; feature = "screenshot"; }
+    { prefix = "shell/services/AppLibrary.qml"; feature = "launcher"; }
+    { prefix = "shell/services/AppLibrarySupport.js"; feature = "launcher"; }
+    { prefix = "shell/services/AppSearch.js"; feature = "launcher"; }
+    { prefix = "shell/services/BarWidgetRegistry.qml"; feature = "core"; }
+    { prefix = "shell/services/PluginRegistry.qml"; feature = "core"; }
+    { prefix = "default/omarchy/omarchy-menu.jsonc"; feature = "core"; }
   ];
   featureSurface = builtins.toJSON {
     selectedFeatures = selectedFeatures;
@@ -346,6 +353,7 @@ let
     helperFeatures = helperFeatures // {
       omarchy-shell = "core";
     };
+    inherit externalExecutableFeatures;
     inherit featureRoots;
     scannerNoise = contractSource.scannerNoise or [ ];
     consumerReferenceNoise = [
@@ -358,6 +366,18 @@ let
     consumerFeatureOverrides = [
       { path = "shell/plugins/menu/Menu.qml"; helper = "omarchy-powerprofiles-list"; feature = "power"; }
       { path = "shell/plugins/menu/Menu.qml"; helper = "omarchy-powerprofiles-set"; feature = "power"; }
+      { path = "shell/plugins/menu/Menu.qml"; executable = "powerprofilesctl"; feature = "power"; }
+      { path = "shell/services/AppLibrary.qml"; helper = "omarchy-remove-launcher-entry"; feature = "launcher"; }
+      { path = "default/omarchy/omarchy-menu.jsonc"; helper = "omarchy-capture-screenshot"; feature = "screenshot"; }
+      { path = "default/omarchy/omarchy-menu.jsonc"; helper = "omarchy-shell"; feature = "clipboard"; }
+      { path = "default/omarchy/omarchy-menu.jsonc"; executable = "grim"; feature = "screenshot"; }
+      { path = "default/omarchy/omarchy-menu.jsonc"; executable = "gtk-launch"; feature = "launcher"; }
+      { path = "default/omarchy/omarchy-menu.jsonc"; executable = "hyprpicker"; feature = "screenshot"; }
+      { path = "default/omarchy/omarchy-menu.jsonc"; executable = "slurp"; feature = "screenshot"; }
+      { path = "default/omarchy/omarchy-menu.jsonc"; executable = "uwsm"; feature = "launcher"; }
+      { path = "default/omarchy/omarchy-menu.jsonc"; executable = "uwsm-app"; feature = "launcher"; }
+      { path = "default/omarchy/omarchy-menu.jsonc"; executable = "wl-copy"; feature = "clipboard"; }
+      { path = "default/omarchy/omarchy-menu.jsonc"; executable = "wtype"; feature = "clipboard"; }
     ];
   };
   compatibilityHelpers = lib.filter

@@ -14,7 +14,6 @@ let
   historicalBaseline = builtins.fromJSON (builtins.readFile ../../upstream/shell-baseline-v1.json);
   baselineConfig = builtins.removeAttrs baselineSource [ "featurePlugins" "featureDependencies" "featureOrder" "migrations" ];
   featurePlugins = baselineSource.featurePlugins;
-  featurePluginIds = lib.unique (lib.concatLists (builtins.attrValues featurePlugins));
   selectedFeatures = featureSelection.select cfg.features;
   configuredDisabledPlugins = cfg.shell.config.disabledPlugins or [ ];
   omittedFeaturePlugins = lib.concatLists (map
@@ -27,7 +26,6 @@ let
   configJson = builtins.toJSON effectiveConfig;
   configSeed = pkgs.writeText "omanixy-shell-config" configJson;
   baselineDisabledPluginsJson = builtins.toJSON baselineConfig.disabledPlugins;
-  featurePluginIdsJson = builtins.toJSON featurePluginIds;
   legacyBaselineJson = builtins.toJSON historicalBaseline;
   capabilityState = pkgs.writeText "omanixy-capability-state" (builtins.toJSON {
     schema = 1;
@@ -57,17 +55,13 @@ let
       --argjson legacy '${legacyBaselineJson}' \
       --argjson current '${builtins.toJSON baselineConfig}' \
       --argjson baselineDisabledPlugins '${baselineDisabledPluginsJson}' \
-      --argjson featurePluginIds '${featurePluginIdsJson}' \
       '
         if . == $legacy then
           $current
         elif .disabledPlugins == null then
           .disabledPlugins = $baselineDisabledPlugins
         elif (.disabledPlugins | type) == "array" then
-          .disabledPlugins = (
-            .disabledPlugins
-            | map(select(($featurePluginIds | index(.)) == null))
-          )
+          .
         else
           error("disabledPlugins must be a JSON array")
         end

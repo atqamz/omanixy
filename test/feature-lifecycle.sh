@@ -85,7 +85,7 @@ fresh_audio_config="$fresh_audio_home/.config/omarchy/shell.json"
 test -f "$fresh_audio_config"
 assert_no_feature_omissions "$fresh_audio_config"
 activate "$fresh_audio_home" "$network_activation"
-jq -e '.selectedFeatures == ["core", "network"]' \
+jq -e '.selectedFeatures == ["core", "network", "clipboard"]' \
   "$fresh_audio_home/.local/state/omanixy/capabilities.json" >/dev/null
 
 fresh_clipboard_weather_home="$test_root/fresh-clipboard-weather-home"
@@ -159,7 +159,7 @@ for helper in \
   omarchy-weather-status; do
   assert_absent "$clipboard_runtime/bin/$helper"
 done
-for backend in pactl wpctl bluetoothctl nmcli hyprctl brightnessctl curl notify-send; do
+for backend in pactl wpctl bluetoothctl nmcli brightnessctl curl notify-send; do
   if PATH="$clipboard_path" command -v "$backend" >/dev/null; then
     printf 'clipboard-only runtime unexpectedly contains %s\n' "$backend" >&2
     exit 1
@@ -246,7 +246,7 @@ run_registry_policy "$core_root" '[]' core "$test_root/full-shell.json"
 run_registry_policy "$full_root" '["omarchy.audio", "omarchy.bluetooth", "omarchy.clipboard", "omarchy.emojis", "omarchy.monitor", "omarchy.network", "omarchy.power", "omarchy.weather"]' fresh-clipboard-full "$fresh_clipboard_config"
 run_registry_policy "$full_root" '["omarchy.audio", "omarchy.bluetooth", "omarchy.clipboard", "omarchy.emojis", "omarchy.monitor", "omarchy.network", "omarchy.power", "omarchy.weather"]' fresh-core-full "$fresh_core_config"
 run_registry_policy "$audio_root" '["omarchy.audio"]' fresh-audio "$fresh_audio_config"
-run_registry_policy "$network_root" '["omarchy.network"]' fresh-audio-network "$fresh_audio_config"
+run_registry_policy "$network_root" '["omarchy.clipboard", "omarchy.emojis", "omarchy.network"]' fresh-audio-network "$fresh_audio_config"
 run_registry_policy "$weather_root" '["omarchy.weather"]' fresh-clipboard-weather "$fresh_clipboard_weather_config"
 run_registry_policy "$clipboard_root" '["omarchy.clipboard", "omarchy.emojis"]' customized-clipboard "$test_root/custom-shell.json"
 activate "$fresh_clipboard_home" "$core_activation"

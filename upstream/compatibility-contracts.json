@@ -5,6 +5,39 @@
     "quickshell": "28771c7c74b42e20afca0b1b63980cb46515537c",
     "nixpkgs": "241313f4e8e508cb9b13278c2b0fa25b9ca27163"
   },
+  "externalExecutableFeatures": {
+    "bash": "core",
+    "bluetoothctl": "bluetooth",
+    "brightnessctl": "monitor",
+    "curl": "weather",
+    "fc-match": "core",
+    "grim": "screenshot",
+    "gtk-launch": "launcher",
+    "hyprctl": "core",
+    "hyprpicker": "screenshot",
+    "inotifywait": "core",
+    "ip": "network",
+    "iw": "network",
+    "jq": "core",
+    "mkdir": "core",
+    "nmcli": "network",
+    "notify-send": "notification",
+    "pactl": "audio",
+    "pacman": "host",
+    "pkill": "clipboard",
+    "powerprofilesctl": "power",
+    "setpriv": "clipboard",
+    "slurp": "screenshot",
+    "systemctl": "core",
+    "timeout": "core",
+    "top": "core",
+    "upower": "power",
+    "uwsm": "launcher",
+    "uwsm-app": "launcher",
+    "wl-copy": "clipboard",
+    "wl-paste": "clipboard",
+    "wtype": "clipboard"
+  },
   "adapter": "packages/omanixy-shell/compat-adapter.bash",
   "adapterHash": "bca6a4515cc66f2db2e093e927c09b83ef39f2e8a1b54af50267c715a2161eb9",
   "adapterSources": [
@@ -922,16 +955,60 @@
     "reason": "Only the explicitly listed compatibility boundary is copied into the immutable root."
   },
   "scannerNoise": [
-    "omarchy-bar-text-color",
-    "omarchy-channel-current",
-    "omarchy-cmd-missing",
-    "omarchy-cmd-present",
-    "omarchy-default-agent",
-    "omarchy-default-browser",
-    "omarchy-default-editor",
-    "omarchy-default-terminal",
-    "omarchy-pkg-missing",
-    "omarchy-pkg-present"
+    {
+      "path": "shell/plugins/menu/MenuModel.js",
+      "helper": "omarchy-channel-current",
+      "exactLine": "  \"omarchy-channel-current\",",
+      "reason": "guard reader name in a static batch list, not an executed helper"
+    },
+    {
+      "path": "shell/plugins/menu/MenuModel.js",
+      "helper": "omarchy-default-agent",
+      "exactLine": "  \"omarchy-default-agent\",",
+      "reason": "guard reader name in a static batch list, not an executed helper"
+    },
+    {
+      "path": "shell/plugins/menu/MenuModel.js",
+      "helper": "omarchy-default-browser",
+      "exactLine": "  \"omarchy-default-browser\",",
+      "reason": "guard reader name in a static batch list, not an executed helper"
+    },
+    {
+      "path": "shell/plugins/menu/MenuModel.js",
+      "helper": "omarchy-default-editor",
+      "exactLine": "  \"omarchy-default-editor\",",
+      "reason": "guard reader name in a static batch list, not an executed helper"
+    },
+    {
+      "path": "shell/plugins/menu/MenuModel.js",
+      "helper": "omarchy-default-terminal",
+      "exactLine": "  \"omarchy-default-terminal\",",
+      "reason": "guard reader name in a static batch list, not an executed helper"
+    },
+    {
+      "path": "shell/plugins/menu/MenuModel.js",
+      "helper": "omarchy-pkg-present",
+      "exactLine": "    + 'omarchy-pkg-present() { local p; for p in \"$@\"; do __omarchy_pkg_has \"$p\" || return 1; done; return 0; }\\n'",
+      "reason": "shell function definition embedded in the guard prelude, not a shell-facing helper"
+    },
+    {
+      "path": "shell/plugins/menu/MenuModel.js",
+      "helper": "omarchy-pkg-missing",
+      "exactLine": "    + 'omarchy-pkg-missing() { local p; for p in \"$@\"; do __omarchy_pkg_has \"$p\" || return 0; done; return 1; }\\n'",
+      "reason": "shell function definition embedded in the guard prelude, not a shell-facing helper"
+    },
+    {
+      "path": "shell/plugins/menu/MenuModel.js",
+      "helper": "omarchy-cmd-present",
+      "exactLine": "    + 'omarchy-cmd-present() { local c; for c in \"$@\"; do command -v \"$c\" &>/dev/null || return 1; done; return 0; }\\n'",
+      "reason": "shell function definition embedded in the guard prelude, not a shell-facing helper"
+    },
+    {
+      "path": "shell/plugins/menu/MenuModel.js",
+      "helper": "omarchy-cmd-missing",
+      "exactLine": "    + 'omarchy-cmd-missing() { local c; for c in \"$@\"; do command -v \"$c\" &>/dev/null || return 0; done; return 1; }\\n'",
+      "reason": "shell function definition embedded in the guard prelude, not a shell-facing helper"
+    }
   ],
   "omittedReachability": [
     "omarchy-update",

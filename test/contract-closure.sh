@@ -79,6 +79,16 @@ expect_rejection 'a newly reachable unlisted contract' \
   'reachable contracts lack ledger disposition: omarchy-unknown-contract' \
   "$unledgered_root" "$manifest"
 
+noise_root=$test_root/noise-root
+cp -R -- "$compatibility_root" "$noise_root"
+chmod -R u+w "$noise_root"
+mkdir -p "$noise_root/shell/plugins/panels/probe"
+printf '%s\n' 'root.bar.run("omarchy-default-browser")' \
+  > "$noise_root/shell/plugins/panels/probe/Panel.qml"
+expect_rejection 'a former noise helper at a new source identity' \
+  'reachable contracts lack ledger disposition: omarchy-default-browser' \
+  "$noise_root" "$manifest"
+
 foreign_probes=$test_root/foreign-probes
 mkdir -p "$foreign_probes/bin"
 for probe in "$compatibility_probes/bin/"*; do

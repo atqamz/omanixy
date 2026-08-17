@@ -100,6 +100,11 @@ The root also supplies Omanixy's safe fallback shell configuration, audited
 menu, launcher-hides file, and helper surface.
 Runtime-writable configuration and state must be materialized outside the
 store.
+The feature audit assigns always-loaded `PluginRegistry.qml` and
+`BarWidgetRegistry.qml` to `core`, launcher library sources to `launcher`, and
+the generated safe menu to `core` with per-invocation feature attribution for
+clipboard, screenshot, launcher, and power actions.
+This prevents a broad directory label from hiding a cross-feature dependency.
 
 `OMARCHY_PATH` points at this compatibility root as an intentional source
 compatibility interface.
@@ -129,6 +134,9 @@ The audit is a static discovery guard, not proof of semantic completeness.
 The structured compatibility manifest adds referenced-helper hashes, consumer
 edges, adapter ownership, and focused-test edges, while closure checks make
 those relationships fail closed.
+Its external executable ownership map is consumed by the feature closure and
+runtime capability checks, so a known command added to a selected source also
+requires its owning feature dependency.
 Focused adapter tests provide behavioral evidence.
 Live Wayland, Hyprland, and UWSM smoke is separate integration evidence and is
 not claimed by this branch.

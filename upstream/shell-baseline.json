@@ -75,7 +75,7 @@
     "core": [],
     "launcher": [],
     "monitor": [],
-    "network": [],
+    "network": ["clipboard"],
     "notification": [],
     "power": [],
     "screenshot": ["notification"],

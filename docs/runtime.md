@@ -72,6 +72,14 @@ user choices; it does not store temporary omissions caused by `features`.
 The immutable registry adds the currently unselected feature plugins to its
 runtime block set, so a stale writable file cannot revive an absent helper or
 backend and a later feature expansion is not blocked by an old seed.
+When a store-backed shell configuration is materialized, store provenance is
+used only to identify an immutable source and to recognize the exact pinned
+issue #2 baseline.
+It does not establish semantic ownership of individual `disabledPlugins`
+entries, so custom declarative store-backed choices such as `omarchy.audio`
+remain unchanged.
+The selected runtime's capability metadata is separate from `shell.json` and
+is recomputed from the current feature selection on every activation.
 The NixOS module is valid and intentionally has no privileged declarations for
 this baseline.
 
@@ -149,6 +157,16 @@ filesystem.
 The closure contains the selected Quickshell, its Qt/QML dependencies,
 `hyprctl`, `inotifywait`, and only the feature-group utilities selected by the
 consumer.
+The canonical `externalExecutableFeatures` map in
+`upstream/compatibility-contracts.json` records which selected feature owns
+each audited external executable, including explicit `host` ownership for
+commands supplied by the session rather than by Omanixy.
+The feature-consumer closure scans every selected source file in the generated
+post-patch root, including exact always-loaded service sources and the filtered
+safe menu, and rejects an invocation whose helper or executable capability is
+outside the transitive feature closure.
+The scanner's only false-positive suppressions are exact path, helper, and
+source-line records with a reason.
 The always-selected core group provides the baseline shell support.
 The optional feature groups are `network`, `audio`, `bluetooth`, `screenshot`,
 `clipboard`, `power`, `monitor`, `weather`, `notification`, and `launcher`.
@@ -248,11 +266,11 @@ not re-enable that surface; the compatibility-root registry applies the same
 immutable floor at runtime.
 First-party plugins omitted from the immutable compatibility view remain
 unavailable even if a user removes their disabled ID.
-Store-backed shell configuration symlinks are the one migration case where
-Omanixy has immutable provenance and may remove old feature-derived disable
-entries before materializing the file.
-The baseline safety entries remain, while explicit regular-file choices are
-never guessed or removed.
+Store-backed shell configuration symlinks are materialized only after the
+same exact historical-baseline comparison used for regular files.
+Store provenance identifies an immutable source, not the semantic owner of
+individual `disabledPlugins` entries, so feature-plugin IDs are never removed
+by heuristic subtraction.
 If an older activation left a writable-state symlink into the store, the
 activation copies its contents out to ordinary user storage before continuing.
 It never writes runtime state into the store.
@@ -262,9 +280,9 @@ Quattro's user plugin directory remains discoverable.
 The new-install baseline enables the native or adapted tray, media, audio,
 network, Bluetooth, monitor, power, weather, clipboard, emoji, launcher, and
 OSD paths covered by the ledger.
-Feature selection is closed transitively: Bluetooth selects audio, and weather
-and screenshot select notification because their reachable consumers invoke
-those helper surfaces.
+Feature selection is closed transitively: Bluetooth selects audio, network
+selects clipboard for its Wi-Fi copy action, and weather and screenshot select
+notification because their reachable consumers invoke those helper surfaces.
 The updater, agents, background/theme workflow, nightlight, low-battery
 automation, and issue #4 security plugins remain disabled or absent.
 Third-party and user-local QML are trusted, unsandboxed code running in the

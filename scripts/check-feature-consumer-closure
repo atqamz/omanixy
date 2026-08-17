@@ -41,15 +41,15 @@ def feature_for(path: str, roots: list[dict]) -> str | None:
 
 
 def consumer_feature_for(
-    path: str, helper: str, default: str, overrides: list[dict]
+    path: str, kind: str, name: str, default: str, overrides: list[dict]
 ) -> str:
     matches = [
         entry["feature"]
         for entry in overrides
-        if entry.get("path") == path and entry.get("helper") == helper
+        if entry.get("path") == path and entry.get(kind) == name
     ]
     if len(matches) > 1:
-        fail(f"duplicate consumer feature override for {path}: {helper}")
+        fail(f"duplicate consumer feature override for {path}: {kind}={name}")
     return matches[0] if matches else default
 
 
@@ -73,6 +73,76 @@ def closure(feature: str, dependencies: dict[str, list[str]]) -> set[str]:
     return result
 
 
+def active_lines(text: str) -> list[str]:
+    lines: list[str] = []
+    block_comment = False
+    for line in text.splitlines():
+        if block_comment:
+            if "*/" in line:
+                block_comment = False
+            continue
+        stripped = line.lstrip()
+        if stripped.startswith("//"):
+            continue
+        if stripped.startswith("/*"):
+            block_comment = "*/" not in stripped[2:]
+            continue
+        lines.append(line)
+    return lines
+
+
+def noise_for(
+    path: str,
+    helper: str,
+    lines: list[str],
+    scanner_noise: list[dict],
+) -> bool:
+    entries = [
+        entry
+        for entry in scanner_noise
+        if entry["path"] == path and entry["helper"] == helper
+    ]
+    if not entries:
+        return False
+    if len(entries) != 1:
+        fail(f"duplicate scanner noise evidence for {path}: {helper}")
+    exact_line = entries[0]["exactLine"]
+    matching_lines = [line for line in lines if helper in line]
+    if matching_lines == [exact_line]:
+        return True
+    fail(f"scanner noise evidence drifted for {path}: {helper}")
+
+
+def external_references(
+    path: str, lines: list[str], external_features: dict[str, str]
+) -> list[str]:
+    references: list[str] = []
+    for executable in sorted(external_features):
+        direct_pattern = re.compile(
+            r"(?:^|[\"']\s*)" + re.escape(executable) + r"(?=\s|[\"')]|$)"
+        )
+        token_pattern = re.compile(
+            r"(?<![A-Za-z0-9_.+-])" + re.escape(executable) + r"(?![A-Za-z0-9_.+-])"
+        )
+        if path.endswith(".jsonc"):
+            present = any(token_pattern.search(line) for line in lines)
+        else:
+            present = any(
+                direct_pattern.search(line)
+                or (
+                    re.search(
+                        r"\b(?:run|exec|command|script|action|when|checked|provider)\b|Quickshell|Util",
+                        line,
+                    )
+                    and token_pattern.search(line)
+                )
+                for line in lines
+            )
+        if present:
+            references.append(executable)
+    return references
+
+
 def main() -> int:
     if len(sys.argv) != 6:
         print(
@@ -91,6 +161,7 @@ def main() -> int:
     overrides = feature_surface.get("consumerFeatureOverrides", [])
     scanner_noise = feature_surface.get("scannerNoise", [])
     reference_noise = feature_surface.get("consumerReferenceNoise", [])
+    external_features = feature_surface.get("externalExecutableFeatures")
     if (
         not isinstance(helper_features, dict)
         or not isinstance(selected_features, list)
@@ -101,9 +172,11 @@ def main() -> int:
         or not isinstance(overrides, list)
         or not all(isinstance(entry, dict) for entry in overrides)
         or not isinstance(scanner_noise, list)
-        or not all(isinstance(helper, str) for helper in scanner_noise)
+        or not all(isinstance(entry, dict) for entry in scanner_noise)
         or not isinstance(reference_noise, list)
         or not all(isinstance(entry, dict) for entry in reference_noise)
+        or not isinstance(external_features, dict)
+        or not all(isinstance(feature, str) for feature in external_features.values())
     ):
         fail("feature surface metadata is invalid")
     if any(
@@ -117,11 +190,23 @@ def main() -> int:
         fail("duplicate feature root identity")
     if any(
         not isinstance(entry.get("path"), str)
-        or not isinstance(entry.get("helper"), str)
         or not isinstance(entry.get("feature"), str)
+        or sum(isinstance(entry.get(kind), str) for kind in ("helper", "executable")) != 1
         for entry in overrides
     ):
         fail("consumer feature override identity is invalid")
+    if any(
+        not isinstance(entry.get("path"), str)
+        or not isinstance(entry.get("helper"), str)
+        or not isinstance(entry.get("exactLine"), str)
+        or not isinstance(entry.get("reason"), str)
+        or not entry["reason"]
+        for entry in scanner_noise
+    ):
+        fail("scanner noise evidence identity is invalid")
+    noise_keys = [(entry["path"], entry["helper"]) for entry in scanner_noise]
+    if len(noise_keys) != len(set(noise_keys)):
+        fail("duplicate scanner noise evidence identity")
     if any(
         not isinstance(entry.get("path"), str)
         or not isinstance(entry.get("helper"), str)
@@ -132,8 +217,8 @@ def main() -> int:
 
     selected = set(selected_features)
     selected_closures = {feature: closure(feature, dependencies) for feature in selected}
-    pinned_cache: dict[str, str] = {}
     evidence: list[dict[str, object]] = []
+    executable_evidence: list[dict[str, object]] = []
     declared_source_paths: set[str] = set()
     for helper, entry in runtime_surface.items():
         if not isinstance(entry, dict):
@@ -196,34 +281,33 @@ def main() -> int:
                 pinned_text = pinned.read_text(encoding="utf-8")
             except OSError as error:
                 fail(f"cannot read pinned consumer {relative}: {error}")
+        lines = active_lines(current_text)
         discovered_helpers = set(
             helper
-            for line in current_text.splitlines()
-            if not line.lstrip().startswith("//")
-            and "WlrLayershell.namespace" not in line
+            for line in lines
+            if "WlrLayershell.namespace" not in line
             for helper in HELPER_PATTERN.findall(line.replace("omarchy-menu.jsonc", ""))
         )
         for noise in reference_noise:
             if noise["path"] != relative or noise["helper"] not in discovered_helpers:
                 continue
-            matching_lines = [
-                line for line in current_text.splitlines()
-                if noise["helper"] in line
-            ]
+            matching_lines = [line for line in lines if noise["helper"] in line]
             if matching_lines and all(line == noise["line"] for line in matching_lines):
                 discovered_helpers.remove(noise["helper"])
-        unknown_helpers = sorted(discovered_helpers - set(helper_features) - set(scanner_noise))
+        for helper in sorted(discovered_helpers):
+            if noise_for(relative, helper, lines, scanner_noise):
+                discovered_helpers.remove(helper)
+        unknown_helpers = sorted(discovered_helpers - set(helper_features))
         if unknown_helpers:
             fail(
                 f"{relative} references helpers without feature identities: "
                 + ", ".join(unknown_helpers)
             )
-        discovered_helpers -= set(scanner_noise)
         for helper in sorted(discovered_helpers):
             helper_feature = helper_features[helper]
             if not isinstance(helper_feature, str):
                 fail(f"helper feature identity is invalid: {helper}")
-            invocation_feature = consumer_feature_for(relative, helper, feature, overrides)
+            invocation_feature = consumer_feature_for(relative, "helper", helper, feature, overrides)
             if invocation_feature not in selected:
                 fail(
                     f"{relative} ({invocation_feature}) references {helper}, "
@@ -246,12 +330,38 @@ def main() -> int:
                 }
             )
 
+        for executable in external_references(relative, lines, external_features):
+            executable_feature = external_features[executable]
+            invocation_feature = consumer_feature_for(
+                relative, "executable", executable, feature, overrides
+            )
+            if invocation_feature not in selected:
+                fail(
+                    f"{relative} ({invocation_feature}) references {executable}, "
+                    "but the invocation feature is not selected"
+                )
+            if executable_feature != "host" and executable_feature not in selected_closures[invocation_feature]:
+                fail(
+                    f"{relative} ({invocation_feature}) requires executable {executable} "
+                    f"({executable_feature}), but the selected feature closure does not include it"
+                )
+            executable_evidence.append(
+                {
+                    "consumer": relative,
+                    "consumerFeature": invocation_feature,
+                    "executable": executable,
+                    "executableFeature": executable_feature,
+                    "closure": sorted(selected_closures[invocation_feature]),
+                }
+            )
+
     output_path = Path(output)
     output_path.write_text(
         json.dumps(
             {
                 "selectedFeatures": sorted(selected),
                 "evidence": evidence,
+                "executableEvidence": executable_evidence,
             },
             indent=2,
             sort_keys=True,
@@ -259,7 +369,10 @@ def main() -> int:
         + "\n",
         encoding="utf-8",
     )
-    print(f"feature consumer closure passed ({len(evidence)} references)")
+    print(
+        "feature consumer closure passed "
+        f"({len(evidence)} helper references, {len(executable_evidence)} executable references)"
+    )
     return 0
 
 
