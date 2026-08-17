@@ -65,7 +65,7 @@ SHELL_BUILTINS = {
 }
 
 SHELL_COMMAND_RE = re.compile(
-    r"(?:^\s*|[;&|]|<\s*<\()([A-Za-z][A-Za-z0-9_.+-]*)"
+    r"(?:^\s*|[;&|]\s*|<\s*<\()((?:/[A-Za-z0-9_.+-]+)+|[A-Za-z][A-Za-z0-9_.+-]*)"
 )
 COMMAND_SUBSHELL_RE = re.compile(r"\$\(([^()]*)\)")
 PROCESS_SUBSHELL_RE = re.compile(r"<\s*<\(([^()]*)\)")
