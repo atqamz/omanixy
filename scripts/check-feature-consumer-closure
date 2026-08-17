@@ -126,8 +126,10 @@ def main() -> int:
 
     for relative in sorted(source_paths):
         current = root / relative
-        if not current.is_file() or current.suffix not in SOURCE_SUFFIXES:
-            continue
+        if not current.is_file():
+            fail(f"declared post-patch consumer is missing: {relative}")
+        if current.suffix not in SOURCE_SUFFIXES:
+            fail(f"declared post-patch consumer has unsupported type: {relative}")
         try:
             current_text = current.read_text(encoding="utf-8")
         except OSError as error:

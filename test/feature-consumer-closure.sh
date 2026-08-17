@@ -24,6 +24,18 @@ jq -e '.evidence | any(.[]; .consumerFeature == "weather" and .helper == "omarch
 jq -e '."omarchy-capture-screenshot".referenceSources | map(.path) == ["default/omarchy/omarchy-menu.jsonc"]' \
   "$full_bin/runtime-surface.json" >/dev/null
 
+missing_surface="$test_root/missing-runtime.json"
+jq '."omarchy-shell".consumer = "shell/missing.qml"' \
+  "$full_bin/runtime-surface.json" > "$missing_surface"
+if "${PYTHON:-python3}" "$checker" "$full_root" "$pinned_source" \
+  "$missing_surface" "$full_bin/feature-surface.json" "$test_root/missing.json" \
+  >"$test_root/missing-output" 2>"$test_root/missing-error"; then
+  printf '%s\n' 'feature consumer closure accepted a missing declared consumer' >&2
+  exit 1
+fi
+grep -Fq 'declared post-patch consumer is missing: shell/missing.qml' "$test_root/missing-error"
+printf '%s\n' 'REJECTED missing declared post-patch consumer'
+
 mutated_root="$test_root/mutated-root"
 cp -R -- "$weather_root" "$mutated_root"
 chmod -R u+w "$mutated_root"
