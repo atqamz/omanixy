@@ -18,7 +18,7 @@ output="$test_root/compat-adapters.log"
 PATH="$runtime_bin:$PATH" \
   bash "$repo/test/compat-adapters.sh" "$repo" "$compat_root" "$runtime_bin" >"$output"
 grep '^CASE' "$output" | cut -f2- | sort -u > "$test_root/actual"
-grep '^STATUS' "$output" | cut -f2- | sort -u > "$test_root/actual-status"
+grep '^STATUS' "$output" | cut -f2- > "$test_root/actual-status-raw"
 
 validate_schema() {
   local matrix=$1
@@ -26,7 +26,7 @@ validate_schema() {
     (.schema == 2)
     and (.requiredCases == ["valid", "invalidArgs", "missingBackend", "backendFailure", "stdout", "exitStatus"])
     and (.expectedExitStatus | type == "object")
-    and (.expectedExitStatus == {valid: 0, invalidArgs: 2, missingBackend: 127, backendFailure: {default: 1, "omarchy-audio-sink-availability": 4}, stdout: 0, exitStatus: 2})
+    and (.expectedExitStatus == {valid: 0, invalidArgs: 2, missingBackend: 127, backendFailure: {default: 1, "omarchy-audio-sink-availability": 4}, stdout: 0, exitStatus: 2, editor: 0})
     and (.helpers | type == "object")
     and (all(.helpers[];
       (.tests | type == "object")
@@ -63,9 +63,26 @@ jq -r '.helpers | to_entries[] | .key as $helper | .value.tests | to_entries[] |
   | while IFS=$'\t' read -r helper category _; do
       printf '%s\t%s\t%s\n' "$helper" "$category" "$(jq -r --arg category "$category" --arg helper "$helper" '.expectedExitStatus[$category] | if type == "object" then .[$helper] // .default else . end' "$manifest")"
     done | sort > "$test_root/expected-status"
-awk -F '\t' '!seen[$1 FS $2]++' "$test_root/actual-status" > "$test_root/actual-status-unique"
-if ! cmp -s "$test_root/expected-status" "$test_root/actual-status-unique"; then
-  diff -u "$test_root/expected-status" "$test_root/actual-status-unique" >&2 || true
+if ! awk -F '\t' '
+  NF != 3 || $3 !~ /^[0-9]+$/ {
+    print "invalid STATUS record: " $0 > "/dev/stderr"
+    invalid = 1
+  }
+  { counts[$1 FS $2]++ }
+  END {
+    for (key in counts) if (counts[key] != 1) {
+      print "duplicate STATUS record: " key > "/dev/stderr"
+      invalid = 1
+    }
+    exit invalid
+  }
+' "$test_root/actual-status-raw"; then
+  printf '%s\n' 'compatibility test matrix has duplicate or malformed exit-status evidence' >&2
+  exit 1
+fi
+sort "$test_root/actual-status-raw" > "$test_root/actual-status"
+if ! cmp -s "$test_root/expected-status" "$test_root/actual-status"; then
+  diff -u "$test_root/expected-status" "$test_root/actual-status" >&2 || true
   printf '%s\n' 'compatibility test matrix exit-status evidence is not exact' >&2
   exit 1
 fi
@@ -122,5 +139,17 @@ if cmp -s "$test_root/expected" "$mutated"; then
   exit 1
 fi
 printf '%s\n' 'REJECTED missing invalid-arguments CASE'
+
+mutated="$test_root/duplicate-status"
+cp "$test_root/actual-status-raw" "$mutated"
+head -n 1 "$test_root/actual-status-raw" >> "$mutated"
+if awk -F '\t' '
+  { counts[$1 FS $2]++ }
+  END { for (key in counts) if (counts[key] != 1) exit 1; exit 0 }
+' "$mutated"; then
+  printf '%s\n' 'matrix accepted duplicate STATUS evidence' >&2
+  exit 1
+fi
+printf '%s\n' 'REJECTED duplicate STATUS evidence'
 
 printf '%s\n' 'compatibility test matrix passed'

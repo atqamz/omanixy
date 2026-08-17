@@ -21,11 +21,10 @@ case_log="$test_root/cases"
 last_status=
 record_case() {
   printf 'CASE\t%s\t%s\n' "$1" "$2" >> "$case_log"
-  if [[ -n $last_status && $2 != editor ]]; then
+  if [[ -n $last_status ]]; then
     printf 'STATUS\t%s\t%s\t%s\n' "$1" "$2" "$last_status" >> "$case_log"
   fi
 }
-record_status() { printf 'STATUS\t%s\t%s\t%s\n' "$1" "$2" "$3" >> "$case_log"; }
 bash_dir=$(dirname "$(command -v bash)")
 env_bin=$(command -v env)
 
@@ -1555,7 +1554,6 @@ run_invalid_args_status() {
   test "$status" -eq 2
   record_case "$helper" invalidArgs
   record_case "$helper" exitStatus
-  record_status "$helper" exitStatus "$status"
 }
 
 run_invalid_args_status omarchy-audio-input-set-default

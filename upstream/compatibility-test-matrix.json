@@ -17,7 +17,8 @@
       "omarchy-audio-sink-availability": 4
     },
     "stdout": 0,
-    "exitStatus": 2
+    "exitStatus": 2,
+    "editor": 0
   },
   "helpers": {
     "omarchy-shell": {
