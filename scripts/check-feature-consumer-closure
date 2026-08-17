@@ -18,7 +18,8 @@ HELPER_INVOCATION_PATTERN = re.compile(
     r"(?:^\s*|[;&|]\s*|\)\s*|\{\s*|\(\s*|\$\(\s*|"
     r"\b(?:then|do|else|fi)\s*)"
     r"(?:/[A-Za-z0-9_.+-]+)*/?omarchy-[a-z0-9-]+(?:\s|$|[;&|)])|"
-    r"\b(?:if|elif|while|until|for)\b[^\n;&|]*\bomarchy-[a-z0-9-]+\b)"
+    r"\b(?:if|elif|while|until|for)\b[^\n;&|]*\bomarchy-[a-z0-9-]+\b|"
+    r"\breturn\b[^\n;&|]*\bomarchy-[a-z0-9-]+\b)"
 )
 SOURCE_SUFFIXES = {".qml", ".js", ".json", ".jsonc", ".sh", ".bash"}
 MENU_FIELDS = ("action", "when", "checked")

@@ -222,6 +222,8 @@ def source_executables(path: str, text: str, pinned_text: str = "") -> list[dict
             ("shell/plugins/panels/network/Panel.qml", 'actionProc.command = ["bash", "-c", root.dnsCommand(provider)]'),
             ("shell/plugins/menu/Menu.qml", 'providerProc.command = ["bash", "-lc", spec.script]'),
             ("shell/plugins/menu/Menu.qml", 'guardProc.command = ["bash", "-lc", script]'),
+            ("shell/plugins/menu/Menu.qml", 'resultProc.command = ["bash", "-c", ": > " + Util.shellQuote(activeDoneFile)]'),
+            ("shell/plugins/menu/Menu.qml", 'resultProc.command = ["bash", "-c", "printf \'%s\\n\' " + Util.shellQuote(selection) + " > " + Util.shellQuote(activeSelectionFile) + "; : > " + Util.shellQuote(activeDoneFile)]'),
             ("shell/plugins/panels/network/Panel.qml", 'enterpriseConnect.command = ["bash", "-c", Model.enterpriseConnectScript, "nmcli-eap", ssid, identity]'),
             ("shell/services/AppLibrary.qml", 'command: ["bash", "-c", root.userOwnedEntryScanCommand()]'),
             ("shell/services/AppLibrary.qml", 'command: ["bash", "-c", root.hiddenEntryScanCommand()]'),
