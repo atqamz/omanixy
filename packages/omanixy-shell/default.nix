@@ -157,6 +157,8 @@ let
           if (command) Util.execDetached(command)'
             chmod u+w "$out/shell/plugins/menu" "$out/shell/plugins/menu/Menu.qml"
             install -Dm644 ${./MenuDeleteSupport.js} "$out/shell/plugins/menu/MenuDeleteSupport.js"
+            ${pkgs.python3}/bin/python3 ${../../scripts/patch-menu-font-provider} \
+              "$out/shell/plugins/menu/Menu.qml"
             ${lib.optionalString (!builtins.elem "power" selectedFeatures) ''
             ${pkgs.python3}/bin/python3 ${../../scripts/patch-menu-power-provider} \
               "$out/shell/plugins/menu/Menu.qml"
@@ -339,10 +341,6 @@ let
     selectedFeatures = selectedFeatures;
     dependencies = featureSelection.dependencies;
     helperFeatures = helperFeatures // {
-      omarchy-font-current = "core";
-      omarchy-font-list = "core";
-      omarchy-font-set = "core";
-      omarchy-menu = "core";
       omarchy-shell = "core";
     };
     inherit featureRoots;

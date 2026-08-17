@@ -6,6 +6,7 @@ pinned_source=${2:?pinned source path required}
 patcher=${3:?transparent-process patcher path required}
 quickshell=${4:?selected Quickshell executable required}
 menu_patcher=${5:?menu provider patcher path required}
+font_patcher=${6:?font provider patcher path required}
 python=${PYTHON:-python3}
 test_root=$(mktemp -d)
 trap 'chmod -R u+w "$test_root" 2>/dev/null || true; rm -rf "$test_root"' EXIT
@@ -120,7 +121,10 @@ chmod u+w "$menu_fixture"
 "$python" "$menu_patcher" "$menu_fixture"
 test "$(grep -Fc 'omarchy-powerprofiles-list' "$menu_fixture")" -eq 0
 test "$(grep -Fc 'omarchy-powerprofiles-set' "$menu_fixture")" -eq 0
-test "$(grep -Fc 'omarchy-font-list' "$menu_fixture")" -eq 1
+"$python" "$font_patcher" "$menu_fixture"
+test "$(grep -Fc 'omarchy-font-current' "$menu_fixture")" -eq 0
+test "$(grep -Fc 'omarchy-font-list' "$menu_fixture")" -eq 0
+test "$(grep -Fc 'omarchy-font-set' "$menu_fixture")" -eq 0
 
 menu_drift_fixture="$test_root/Menu-drift.qml"
 cp "$pinned_source/shell/plugins/menu/Menu.qml" "$menu_drift_fixture"
@@ -131,6 +135,16 @@ if "$python" "$menu_patcher" "$menu_drift_fixture" 2>"$test_root/menu-drift-erro
   exit 1
 fi
 grep -Fq 'expected exactly one pinned power-profile provider block' "$test_root/menu-drift-error"
+
+font_drift_fixture="$test_root/Menu-font-drift.qml"
+cp "$pinned_source/shell/plugins/menu/Menu.qml" "$font_drift_fixture"
+chmod u+w "$font_drift_fixture"
+sed -i '0,/omarchy-font-current/s//omarchy-font-current-drift/' "$font_drift_fixture"
+if "$python" "$font_patcher" "$font_drift_fixture" 2>"$test_root/font-drift-error"; then
+  printf '%s\n' 'exact Menu.qml font patch accepted source-shape drift' >&2
+  exit 1
+fi
+grep -Fq 'expected exactly one pinned font provider block' "$test_root/font-drift-error"
 
 node - "$root" <<'NODE'
 const assert = require("node:assert/strict")
