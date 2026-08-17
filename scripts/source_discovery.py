@@ -123,7 +123,28 @@ def shell_executables(value: str) -> list[str]:
         commands.extend(shell_executables(match.group(1)))
     if value.count("`") % 2:
         commands.append(DYNAMIC_EXECUTABLE)
-    for part in re.split(r"(?:&&|\|\||[;&|\n])", value):
+    parts: list[str] = []
+    part_start = 0
+    quote: str | None = None
+    escaped = False
+    for index, char in enumerate(value):
+        if quote:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+            continue
+        if char in {"'", '"'}:
+            quote = char
+        elif char in ";&|\n":
+            parts.append(value[part_start:index])
+            part_start = index + 1
+    parts.append(value[part_start:])
+    if quote:
+        commands.append(DYNAMIC_EXECUTABLE)
+    for part in parts:
         try:
             words = shlex.split(part, comments=False, posix=True)
         except ValueError:

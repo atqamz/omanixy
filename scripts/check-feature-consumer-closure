@@ -60,12 +60,10 @@ def active_lines(text: str) -> list[str]:
     lines: list[str] = []
     block_comment = False
     for line in text.splitlines():
-        stripped = line.lstrip()
-        if not block_comment and stripped.startswith("//"):
-            lines.append("")
-            continue
         active = []
         index = 0
+        quote: str | None = None
+        escaped = False
         while index < len(line):
             if block_comment:
                 end = line.find("*/", index)
@@ -74,16 +72,30 @@ def active_lines(text: str) -> list[str]:
                 block_comment = False
                 index = end + 2
                 continue
-            start = line.find("/*", index)
-            if start < 0:
-                active.append(line[index:])
+            char = line[index]
+            if quote:
+                active.append(char)
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == quote:
+                    quote = None
+                index += 1
+                continue
+            if char in {"'", '"'}:
+                quote = char
+                active.append(char)
+                index += 1
+                continue
+            if line.startswith("//", index):
                 break
-            active.append(line[index:start])
-            end = line.find("*/", start + 2)
-            if end < 0:
+            if line.startswith("/*", index):
                 block_comment = True
-                break
-            index = end + 2
+                index += 2
+                continue
+            active.append(char)
+            index += 1
         lines.append("".join(active))
     return lines
 
