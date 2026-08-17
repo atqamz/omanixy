@@ -128,7 +128,7 @@ def shell_executables(value: str) -> list[str]:
             continue
         if first in {"command", "builtin", "exec"}:
             commands.extend(_next_command(words, 1))
-        elif first in {"bash", "dash", "sh", "zsh"}:
+        elif first.rsplit("/", 1)[-1] in {"bash", "dash", "sh", "zsh"}:
             commands.append(first)
             for index, word in enumerate(words[1:], 1):
                 if word.startswith("-") and "c" in word:
@@ -160,32 +160,23 @@ def source_executables(path: str, text: str) -> list[dict[str, object]]:
 
     def add(name: str, line: int, invocation: str, shape: str) -> None:
         allowed_dynamic_shapes = {
-            'command: ["bash", "-c", root.dnsCommand("")]',
-            'actionProc.command = ["bash", "-c", root.dnsCommand(provider)]',
-            'providerProc.command = ["bash", "-lc", spec.script]',
-            'guardProc.command = ["bash", "-lc", script]',
-            'enterpriseConnect.command = ["bash", "-c", Model.enterpriseConnectScript, "nmcli-eap", ssid, identity]',
-            'command: ["bash", "-c", root.userOwnedEntryScanCommand()]',
-            'command: ["bash", "-c", root.hiddenEntryScanCommand()]',
-            'command: ["bash", "-c", root.iconIndexScanCommand()]',
-            'scanProcess.command = ["bash", "-c", script, registry.firstPartyDir, registry.pluginsDir]',
-            'command: ["bash", "-lc", String(customRoot.setting("exec", ""))]',
-            'customProc.command: ["bash", "-lc", String(customRoot.setting("exec", ""))]',
-            'optionsProcess.command = cmd',
-            'Util.execDetached(command)',
-            'root.run(command)',
-            'if (command) root.run(command)',
+            ("shell/plugins/panels/network/Panel.qml", 'command: ["bash", "-c", root.dnsCommand("")]'),
+            ("shell/plugins/panels/network/Panel.qml", 'actionProc.command = ["bash", "-c", root.dnsCommand(provider)]'),
+            ("shell/plugins/menu/Menu.qml", 'providerProc.command = ["bash", "-lc", spec.script]'),
+            ("shell/plugins/menu/Menu.qml", 'guardProc.command = ["bash", "-lc", script]'),
+            ("shell/plugins/panels/network/Panel.qml", 'enterpriseConnect.command = ["bash", "-c", Model.enterpriseConnectScript, "nmcli-eap", ssid, identity]'),
+            ("shell/services/AppLibrary.qml", 'command: ["bash", "-c", root.userOwnedEntryScanCommand()]'),
+            ("shell/services/AppLibrary.qml", 'command: ["bash", "-c", root.hiddenEntryScanCommand()]'),
+            ("shell/services/AppLibrary.qml", 'command: ["bash", "-c", root.iconIndexScanCommand()]'),
+            ("shell/services/PluginRegistry.qml", 'scanProcess.command = ["bash", "-c", script, registry.firstPartyDir, registry.pluginsDir]'),
+            ("shell/plugins/bar/Bar.qml", 'command: ["bash", "-lc", String(customRoot.setting("exec", ""))]'),
+            ("shell/plugins/bar/Bar.qml", 'customProc.command = ["bash", "-lc", String(customRoot.setting("exec", ""))]'),
+            ("shell/Ui/MultiSelect.qml", 'optionsProcess.command = cmd'),
+            ("shell/services/AppLibrary.qml", 'if (command) Util.execDetached(command)'),
+            ("shell/plugins/bar/Bar.qml", 'if (command) root.run(command)'),
         }
         normalized_shape = " ".join(shape.split())
-        known_custom_command = re.fullmatch(
-            r'command: \["bash", "-lc", String\(customRoot\.setting\("exec", ""\)\)\]',
-            normalized_shape,
-        )
-        if name == dynamic_name and (
-            shape.strip() in allowed_dynamic_shapes
-            or known_custom_command
-            or shape.strip() == 'command: ["bash", "-lc", String(customRoot.setting("exec", ""))]'
-        ):
+        if name == dynamic_name and (path, normalized_shape) in allowed_dynamic_shapes:
             return
         if not name or name in SHELL_BUILTINS or name.startswith(("/", "$", "omarchy-")):
             return
@@ -237,6 +228,8 @@ def source_executables(path: str, text: str) -> list[dict[str, object]]:
         source_line = text.splitlines()[line_number - 1]
         values = literal_array_values(match.group(1))
         if not values:
+            if match.group(1).strip():
+                add(dynamic_name, line_number, "command-array", source_line)
             continue
         add(values[0], line_number, "command-array", source_line)
         payload = literal_shell_payload(match.group(1))

@@ -400,6 +400,34 @@ fi
 grep -Fq 'unknown external executable: __dynamic-executable__' "$test_root/dynamic-invocation-payload-error"
 printf '%s\n' 'REJECTED dynamic executable invocation shapes'
 
+dynamic_array_only="$test_root/dynamic-array-only-root"
+cp -R -- "$weather_root" "$dynamic_array_only"
+chmod -R u+w "$dynamic_array_only"
+printf '%s\n' 'Process { command: [runtimeCommand] }' \
+  >> "$dynamic_array_only/shell/plugins/panels/weather/Panel.qml"
+if "${PYTHON:-python3}" "$checker" "$dynamic_array_only" "$pinned_source" \
+  "$weather_bin/runtime-surface.json" "$weather_bin/feature-surface.json" "$test_root/dynamic-array-only.json" \
+  >"$test_root/dynamic-array-only-output" 2>"$test_root/dynamic-array-only-error"; then
+  printf '%s\n' 'feature consumer closure accepted a dynamic-only executable array' >&2
+  exit 1
+fi
+grep -Fq 'unknown external executable: __dynamic-executable__' "$test_root/dynamic-array-only-error"
+printf '%s\n' 'REJECTED dynamic-only executable array'
+
+absolute_shell_payload="$test_root/absolute-shell-payload-root"
+cp -R -- "$weather_root" "$absolute_shell_payload"
+chmod -R u+w "$absolute_shell_payload"
+printf '%s\n' 'Item { script: "/bin/bash -lc pacman" }' \
+  >> "$absolute_shell_payload/shell/plugins/panels/weather/Panel.qml"
+if "${PYTHON:-python3}" "$checker" "$absolute_shell_payload" "$pinned_source" \
+  "$weather_bin/runtime-surface.json" "$weather_bin/feature-surface.json" "$test_root/absolute-shell-payload.json" \
+  >"$test_root/absolute-shell-payload-output" 2>"$test_root/absolute-shell-payload-error"; then
+  printf '%s\n' 'feature consumer closure accepted pacman in an absolute shell payload' >&2
+  exit 1
+fi
+grep -Fq 'unknown external executable: pacman' "$test_root/absolute-shell-payload-error"
+printf '%s\n' 'REJECTED pacman in an absolute shell payload'
+
 unknown_exec_payload="$test_root/unknown-exec-payload-root"
 cp -R -- "$weather_root" "$unknown_exec_payload"
 chmod -R u+w "$unknown_exec_payload"
