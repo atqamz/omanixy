@@ -15,7 +15,7 @@ HELPER_PATTERN = re.compile(r"\bomarchy-[a-z0-9-]+\b")
 HELPER_INVOCATION_PATTERN = re.compile(
     r"(?:\.run\s*\(|\.exec(?:Detached)?\s*\(|\bcommand\s*[:=]|\.command\s*=|"
     r"\b(?:action|script)\s*[:=]|shellQuote\s*\(|\bexec\s+|\bsource\s+|"
-    r"(?:^|[;&|]\s*|\)\s*)omarchy-[a-z0-9-]+(?:\s|$)|"
+    r"(?:^|[;&|]\s*|\)\s*|\{\s*)omarchy-[a-z0-9-]+(?:\s|$)|"
     r"\b(?:if|elif|while|until|for)\b[^\n;&|]*\bomarchy-[a-z0-9-]+\b)"
 )
 SOURCE_SUFFIXES = {".qml", ".js", ".json", ".jsonc", ".sh", ".bash"}

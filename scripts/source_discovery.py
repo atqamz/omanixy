@@ -138,6 +138,8 @@ def shell_executables(value: str) -> list[str]:
                     commands.extend(_next_command(words, words.index(")") + 1))
                 else:
                     commands.append(DYNAMIC_EXECUTABLE)
+            elif first == "function" and "{" in words:
+                commands.extend(shell_executables(" ".join(words[words.index("{") + 1 :])))
             continue
         if first in {"command", "builtin", "exec"}:
             commands.extend(_next_command(words, 1))
@@ -165,6 +167,17 @@ def shell_executables(value: str) -> list[str]:
         elif first == "timeout":
             commands.append(first)
             commands.extend(_next_command(words, 2))
+            for index, word in enumerate(words[2:], 2):
+                if word.rsplit("/", 1)[-1] in {"bash", "dash", "sh", "zsh"}:
+                    for option_index, option in enumerate(words[index + 1 :], index + 1):
+                        if option.startswith("-") and "c" in option:
+                            payload = " ".join(words[option_index + 1 :])
+                            if payload.startswith("$"):
+                                commands.append(DYNAMIC_EXECUTABLE)
+                            else:
+                                commands.extend(shell_executables(payload))
+                            break
+                    break
         elif first == "env":
             commands.append(first)
             commands.extend(_next_command(words, 1))
