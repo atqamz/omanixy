@@ -15,7 +15,8 @@ HELPER_PATTERN = re.compile(r"\bomarchy-[a-z0-9-]+\b")
 HELPER_INVOCATION_PATTERN = re.compile(
     r"(?:\.run\s*\(|\.exec(?:Detached)?\s*\(|\bcommand\s*[:=]|\.command\s*=|"
     r"\b(?:action|script)\s*[:=]|shellQuote\s*\(|\bexec\s+|\bsource\s+|"
-    r"(?:^\s*|[;&|]\s*|\)\s*|\{\s*)omarchy-[a-z0-9-]+(?:\s|$)|"
+    r"(?:^\s*|[;&|]\s*|\)\s*|\{\s*|\(\s*)"
+    r"(?:/[A-Za-z0-9_.+-]+)*/?omarchy-[a-z0-9-]+(?:\s|$|[;&|)])|"
     r"\b(?:if|elif|while|until|for)\b[^\n;&|]*\bomarchy-[a-z0-9-]+\b)"
 )
 SOURCE_SUFFIXES = {".qml", ".js", ".json", ".jsonc", ".sh", ".bash"}
@@ -59,6 +60,7 @@ def active_lines(text: str) -> list[str]:
     for line in text.splitlines():
         stripped = line.lstrip()
         if stripped.startswith("//"):
+            lines.append("")
             continue
         active = []
         index = 0
@@ -80,8 +82,7 @@ def active_lines(text: str) -> list[str]:
                 block_comment = True
                 break
             index = end + 2
-        if active:
-            lines.append("".join(active))
+        lines.append("".join(active))
     return lines
 
 
