@@ -357,6 +357,7 @@ def main() -> int:
             "path": consumer,
             "sha256": hashlib.sha256(source).hexdigest(),
         }]
+        reference_sources = []
         if helper == "omarchy-capture-screenshot":
             menu_config_path = root / "default/omarchy/omarchy-menu.jsonc"
             if not menu_config_path.is_file():
@@ -364,7 +365,7 @@ def main() -> int:
             menu_config = menu_config_path.read_bytes()
             if helper.encode() not in menu_config:
                 fail("omarchy-capture-screenshot pinned menu action drifted")
-            consumer_sources.append({
+            reference_sources.append({
                 "path": str(menu_config_path.relative_to(root)),
                 "sha256": hashlib.sha256(menu_config).hexdigest(),
             })
@@ -378,6 +379,7 @@ def main() -> int:
                 "consumer": consumer,
                 "consumerSourceSha256": hashlib.sha256(source).hexdigest(),
                 "consumerSources": consumer_sources,
+                "referenceSources": reference_sources,
                 "helperTarget": str(helper_path.resolve()),
                 "helperTargetSha256": hashlib.sha256(helper_path.resolve().read_bytes()).hexdigest(),
                 "dispatcherTarget": str(dispatcher_path.resolve()),
@@ -646,6 +648,7 @@ def main() -> int:
             "consumer": consumer,
             "consumerSourceSha256": hashlib.sha256(source).hexdigest(),
             "consumerSources": consumer_sources,
+            "referenceSources": reference_sources,
             "helperTarget": str(helper_path.resolve()),
             "helperTargetSha256": hashlib.sha256(helper_path.resolve().read_bytes()).hexdigest(),
             "dispatcherTarget": str(dispatcher_path.resolve()),

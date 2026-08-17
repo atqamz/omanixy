@@ -21,6 +21,8 @@ output="$test_root/evidence.json"
 jq -e '.selectedFeatures | index("weather") != null' "$output" >/dev/null
 jq -e '.evidence | any(.[]; .consumerFeature == "weather" and .helper == "omarchy-notification-send")' \
   "$output" >/dev/null
+jq -e '."omarchy-capture-screenshot".referenceSources | map(.path) == ["default/omarchy/omarchy-menu.jsonc"]' \
+  "$full_bin/runtime-surface.json" >/dev/null
 
 mutated_root="$test_root/mutated-root"
 cp -R -- "$weather_root" "$mutated_root"
