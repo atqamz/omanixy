@@ -18,7 +18,13 @@ export XDG_DATA_HOME="$home/.local/share"
 export PATH="$bin:$PATH"
 export OMANIXY_ADAPTER_DIR="$repo/packages/omanixy-shell"
 case_log="$test_root/cases"
-record_case() { printf 'CASE\t%s\t%s\n' "$1" "$2" >> "$case_log"; }
+last_status=
+record_case() {
+  printf 'CASE\t%s\t%s\n' "$1" "$2" >> "$case_log"
+  if [[ -n $last_status && $2 != editor ]]; then
+    printf 'STATUS\t%s\t%s\t%s\n' "$1" "$2" "$last_status" >> "$case_log"
+  fi
+}
 record_status() { printf 'STATUS\t%s\t%s\t%s\n' "$1" "$2" "$3" >> "$case_log"; }
 bash_dir=$(dirname "$(command -v bash)")
 env_bin=$(command -v env)
@@ -26,7 +32,7 @@ env_bin=$(command -v env)
 run_adapter() {
   local command=$1
   shift
-  "$env_bin" \
+  if "$env_bin" \
     HOME="$HOME" \
     PATH="$PATH" \
     XDG_STATE_HOME="${XDG_STATE_HOME:-}" \
@@ -96,7 +102,12 @@ run_adapter() {
     TEST_PACTL_DSP="${TEST_PACTL_DSP:-}" \
     TEST_PACTL_LOG="${TEST_PACTL_LOG:-}" \
     COMPAT_ADAPTER_NAME="$command" \
-  bash "$bin/$command" "$@"
+  bash "$bin/$command" "$@"; then
+    last_status=0
+  else
+    last_status=$?
+  fi
+  return "$last_status"
 }
 
 link_adapter() { [[ -e "$bin/$1" ]] || ln -s "$adapter" "$bin/$1"; }
@@ -908,6 +919,7 @@ grep -Fqx auto "$test_root/nmcli-state"
 grep -q 'profile was not changed' "$test_root/error"
 TEST_NMCLI_STATE="$test_root/nmcli-state" HOME="$home" PATH="$bin:$PATH" \
   run_adapter omarchy-dns > "$test_root/dns"
+last_status=0
 network_status_failure_status=0
 if TEST_IP_FAIL=1 HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-network-status 2>"$test_root/error"; then
   printf '%s\n' 'network status backend failure unexpectedly succeeded' >&2

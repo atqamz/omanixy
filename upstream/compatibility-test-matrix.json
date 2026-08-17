@@ -9,7 +9,15 @@
     "exitStatus"
   ],
   "expectedExitStatus": {
-    "invalidArgs": 2
+    "valid": 0,
+    "invalidArgs": 2,
+    "missingBackend": 127,
+    "backendFailure": {
+      "default": 1,
+      "omarchy-audio-sink-availability": 4
+    },
+    "stdout": 0,
+    "exitStatus": 2
   },
   "helpers": {
     "omarchy-shell": {

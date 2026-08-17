@@ -25,7 +25,8 @@ validate_schema() {
   jq -e '
     (.schema == 2)
     and (.requiredCases == ["valid", "invalidArgs", "missingBackend", "backendFailure", "stdout", "exitStatus"])
-    and (.expectedExitStatus.invalidArgs == 2)
+    and (.expectedExitStatus | type == "object")
+    and (.expectedExitStatus == {valid: 0, invalidArgs: 2, missingBackend: 127, backendFailure: {default: 1, "omarchy-audio-sink-availability": 4}, stdout: 0, exitStatus: 2})
     and (.helpers | type == "object")
     and (all(.helpers[];
       (.tests | type == "object")
@@ -58,10 +59,13 @@ if ! cmp -s "$test_root/expected" "$test_root/actual"; then
   exit 1
 fi
 
-expected_exit_status=$(jq -r '.expectedExitStatus.invalidArgs' "$manifest")
-jq -r --arg expected "$expected_exit_status" '.helpers | to_entries[] | .key as $helper | .value.tests.exitStatus | select(.status == "required") | "\($helper)\texitStatus\t\($expected)"' "$manifest" | sort > "$test_root/expected-status"
-if ! cmp -s "$test_root/expected-status" "$test_root/actual-status"; then
-  diff -u "$test_root/expected-status" "$test_root/actual-status" >&2 || true
+jq -r '.helpers | to_entries[] | .key as $helper | .value.tests | to_entries[] | select(.value.status == "required") | "\($helper)\t\(.key)\t\(.key)"' "$manifest" \
+  | while IFS=$'\t' read -r helper category _; do
+      printf '%s\t%s\t%s\n' "$helper" "$category" "$(jq -r --arg category "$category" --arg helper "$helper" '.expectedExitStatus[$category] | if type == "object" then .[$helper] // .default else . end' "$manifest")"
+    done | sort > "$test_root/expected-status"
+awk -F '\t' '!seen[$1 FS $2]++' "$test_root/actual-status" > "$test_root/actual-status-unique"
+if ! cmp -s "$test_root/expected-status" "$test_root/actual-status-unique"; then
+  diff -u "$test_root/expected-status" "$test_root/actual-status-unique" >&2 || true
   printf '%s\n' 'compatibility test matrix exit-status evidence is not exact' >&2
   exit 1
 fi

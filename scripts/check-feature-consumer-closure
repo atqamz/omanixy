@@ -144,7 +144,14 @@ def main() -> int:
                 pinned_text = pinned.read_text(encoding="utf-8")
             except OSError as error:
                 fail(f"cannot read pinned consumer {relative}: {error}")
-        for helper in sorted(set(HELPER_PATTERN.findall(current_text)) & set(helper_features)):
+        discovered_helpers = set(HELPER_PATTERN.findall(current_text))
+        unknown_helpers = sorted(discovered_helpers - set(helper_features))
+        if unknown_helpers:
+            fail(
+                f"{relative} references helpers without feature identities: "
+                + ", ".join(unknown_helpers)
+            )
+        for helper in sorted(discovered_helpers):
             helper_feature = helper_features[helper]
             if not isinstance(helper_feature, str):
                 fail(f"helper feature identity is invalid: {helper}")

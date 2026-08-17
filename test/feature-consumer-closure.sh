@@ -36,6 +36,20 @@ fi
 grep -Fq 'requires omarchy-audio-output-sink (audio)' "$test_root/mutated-error"
 printf '%s\n' 'REJECTED known cross-feature helper without dependency edge'
 
+unknown_fixture="$test_root/unknown-helper-root"
+cp -R -- "$weather_root" "$unknown_fixture"
+chmod -R u+w "$unknown_fixture"
+printf '%s\n' 'root.bar.run("omarchy-undeclared-helper")' \
+  >> "$unknown_fixture/shell/plugins/panels/weather/BarWidget.qml"
+if "${PYTHON:-python3}" "$checker" "$unknown_fixture" "$pinned_source" \
+  "$weather_bin/runtime-surface.json" "$weather_bin/feature-surface.json" "$test_root/unknown.json" \
+  >"$test_root/unknown-output" 2>"$test_root/unknown-error"; then
+  printf '%s\n' 'feature consumer closure accepted an unknown helper' >&2
+  exit 1
+fi
+grep -Fq 'references helpers without feature identities: omarchy-undeclared-helper' "$test_root/unknown-error"
+printf '%s\n' 'REJECTED unknown helper without feature identity'
+
 if ! "${PYTHON:-python3}" "$checker" "$clipboard_root" "$pinned_source" \
   "$clipboard_bin/runtime-surface.json" "$clipboard_bin/feature-surface.json" "$test_root/clipboard.json" \
   2>"$test_root/clipboard-error"; then
