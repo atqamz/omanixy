@@ -316,8 +316,11 @@ def source_executables(path: str, text: str, pinned_text: str = "") -> list[dict
             add(dynamic_name, line_number, "command-array", source_line)
             continue
         add(values[0], line_number, "command-array", source_line)
-        for name in shell_executables(" ".join(values)):
-            add(name, line_number, "command-array-shell", source_line)
+        executable = values[0].rsplit("/", 1)[-1]
+        if executable in {"bash", "dash", "sh", "zsh", "command", "builtin", "exec", "env", "timeout"}:
+            array_command = " ".join(shlex.quote(value) for value in values)
+            for name in shell_executables(array_command):
+                add(name, line_number, "command-array-shell", source_line)
         payload = literal_shell_payload(match.group(1))
         if payload is not None:
             for name in shell_executables(payload):
