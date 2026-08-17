@@ -69,6 +69,7 @@ SHELL_COMMAND_RE = re.compile(
 )
 COMMAND_SUBSHELL_RE = re.compile(r"\$\(([^()]*)\)")
 PROCESS_SUBSHELL_RE = re.compile(r"<\s*<\(([^()]*)\)")
+BACKTICK_SUBSHELL_RE = re.compile(r"`([^`]*)`")
 DYNAMIC_EXECUTABLE = "__dynamic-executable__"
 ARRAY_COMMAND_RE = re.compile(
     r"(?:(?:\b[A-Za-z_][A-Za-z0-9_]*\.)?command\s*[:=]|"
@@ -116,6 +117,12 @@ def shell_executables(value: str) -> list[str]:
     commands: list[str] = []
     for match in COMMAND_SUBSHELL_RE.finditer(value):
         commands.extend(shell_executables(match.group(1)))
+    for match in PROCESS_SUBSHELL_RE.finditer(value):
+        commands.extend(shell_executables(match.group(1)))
+    for match in BACKTICK_SUBSHELL_RE.finditer(value):
+        commands.extend(shell_executables(match.group(1)))
+    if value.count("`") % 2:
+        commands.append(DYNAMIC_EXECUTABLE)
     for part in re.split(r"(?:&&|\|\||[;&|\n])", value):
         try:
             words = shlex.split(part, comments=False, posix=True)
@@ -309,6 +316,8 @@ def source_executables(path: str, text: str, pinned_text: str = "") -> list[dict
             add(dynamic_name, line_number, "command-array", source_line)
             continue
         add(values[0], line_number, "command-array", source_line)
+        for name in shell_executables(" ".join(values)):
+            add(name, line_number, "command-array-shell", source_line)
         payload = literal_shell_payload(match.group(1))
         if payload is not None:
             for name in shell_executables(payload):
