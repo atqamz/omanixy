@@ -5,6 +5,7 @@ root=${1:?compatibility root path required}
 pinned_source=${2:?pinned source path required}
 patcher=${3:?transparent-process patcher path required}
 quickshell=${4:?selected Quickshell executable required}
+menu_patcher=${5:?menu provider patcher path required}
 python=${PYTHON:-python3}
 test_root=$(mktemp -d)
 trap 'chmod -R u+w "$test_root" 2>/dev/null || true; rm -rf "$test_root"' EXIT
@@ -14,6 +15,13 @@ bar_fixture="$test_root/Bar.qml"
 cp "$pinned_source/shell/plugins/bar/Bar.qml" "$bar_fixture"
 chmod u+w "$bar_fixture"
 "$python" "$patcher" "$bar_fixture"
+test "$(grep -Fc 'id: transparentForegroundProc' "$bar_fixture")" -eq 0
+test "$(grep -Fc 'omarchy-bar-text-color' "$bar_fixture")" -eq 0
+test "$(grep -Fc 'id: barHiddenProbe' "$bar_fixture")" -eq 1
+grep -Fq 'bar-off' "$bar_fixture"
+pinned_processes=$(grep -Ec '^[[:space:]]*Process \{' "$pinned_source/shell/plugins/bar/Bar.qml")
+patched_processes=$(grep -Ec '^[[:space:]]*Process \{' "$bar_fixture")
+test "$patched_processes" -eq "$((pinned_processes - 1))"
 sed -i 's/required property /property /g' "$bar_fixture"
 "$python" - "$bar_fixture" <<'PY'
 from pathlib import Path
@@ -94,6 +102,24 @@ if "$python" "$patcher" "$drift_fixture" 2>"$test_root/drift-error"; then
   exit 1
 fi
 grep -Fq 'expected exactly one transparent foreground Process block' "$test_root/drift-error"
+
+menu_fixture="$test_root/Menu.qml"
+cp "$pinned_source/shell/plugins/menu/Menu.qml" "$menu_fixture"
+chmod u+w "$menu_fixture"
+"$python" "$menu_patcher" "$menu_fixture"
+test "$(grep -Fc 'omarchy-powerprofiles-list' "$menu_fixture")" -eq 0
+test "$(grep -Fc 'omarchy-powerprofiles-set' "$menu_fixture")" -eq 0
+test "$(grep -Fc 'omarchy-font-list' "$menu_fixture")" -eq 1
+
+menu_drift_fixture="$test_root/Menu-drift.qml"
+cp "$pinned_source/shell/plugins/menu/Menu.qml" "$menu_drift_fixture"
+chmod u+w "$menu_drift_fixture"
+sed -i '0,/powerprofilesctl get/s//powerprofilesctl get-drift/' "$menu_drift_fixture"
+if "$python" "$menu_patcher" "$menu_drift_fixture" 2>"$test_root/menu-drift-error"; then
+  printf '%s\n' 'exact Menu.qml patch accepted source-shape drift' >&2
+  exit 1
+fi
+grep -Fq 'expected exactly one pinned power-profile provider block' "$test_root/menu-drift-error"
 
 node - "$root" <<'NODE'
 const assert = require("node:assert/strict")

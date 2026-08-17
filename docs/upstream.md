@@ -56,7 +56,7 @@ immutable compatibility root derived from the source-only flake input.
 The root contains the pinned runtime entrypoint, shared QML libraries, service
 objects, and the selected plugin files required by the supported baseline and
 its reachable panels.
-It applies eight narrow compatibility patch sites:
+It applies nine narrow compatibility patch sites:
 
 - `shell/services/PluginRegistry.qml` applies the disabled-plugin floor to bar
   widgets so blocked first-party widgets cannot be re-enabled through layout
@@ -74,6 +74,9 @@ It applies eight narrow compatibility patch sites:
   supported clock panel instead of the unavailable timezone command.
 - `shell/plugins/bar/Bar.qml` replaces the Omarchy helper-backed transparent
   foreground path with the native theme color and removes its helper process.
+- `shell/plugins/menu/Menu.qml` removes the pinned power-profile provider when
+  the selected feature closure omits power, so persisted menu state cannot
+  invoke an absent helper or backend.
 - `shell/plugins/menu/Menu.qml` routes launcher deletion through a
   user-owned-entry predicate rather than presenting a false system deletion
   affordance.

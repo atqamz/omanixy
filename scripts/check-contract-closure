@@ -59,6 +59,19 @@ def main() -> int:
     if compatibility_probes == compatibility_bin:
         die("consumer probe scaffolding must live outside the runtime helper path")
     manifest = read_json(manifest_path)
+    matrix_reference = manifest.get("testMatrix")
+    if not isinstance(matrix_reference, str):
+        die("manifest test-matrix identity is invalid")
+    matrix = read_json(Path(matrix_reference) if Path(matrix_reference).is_absolute() else repo / matrix_reference)
+    required_cases = matrix.get("requiredCases")
+    matrix_helpers = matrix.get("helpers")
+    if (
+        matrix.get("schema") != 2
+        or not isinstance(required_cases, list)
+        or required_cases != ["valid", "invalidArgs", "missingBackend", "backendFailure", "stdout", "exitStatus"]
+        or not isinstance(matrix_helpers, dict)
+    ):
+        die("manifest test-matrix schema is invalid")
     full_snapshot = read_json(snapshot_path)
     helpers = manifest.get("helpers")
     native = manifest.get("native")
@@ -208,9 +221,22 @@ def main() -> int:
         required_fields = {"args", "stdout", "stderr", "sideEffects", "failureSemantics", "exitStatus", "missingBackend", "timeout", "idempotence"}
         if not required_fields.issubset(compatibility):
             die(f"helper {helper} has an incomplete compatibility deviation model")
-        tests = contract.get("tests")
-        if not isinstance(tests, dict) or tests.get("valid") is not True and helper != "omarchy-shell":
-            die(f"helper {helper} has no named valid test-matrix case")
+        matrix_entry = matrix_helpers.get(helper)
+        if not isinstance(matrix_entry, dict) or not isinstance(matrix_entry.get("tests"), dict):
+            die(f"helper {helper} has no test-matrix entry")
+        tests = matrix_entry["tests"]
+        for case in required_cases:
+            case_entry = tests.get(case)
+            if not isinstance(case_entry, dict):
+                die(f"helper {helper} has no declared {case} test-matrix case")
+            status = case_entry.get("status")
+            if status == "not-applicable":
+                if not isinstance(case_entry.get("reason"), str) or not case_entry["reason"].strip():
+                    die(f"helper {helper} has an unjustified not-applicable {case} test-matrix case")
+            elif status != "required":
+                die(f"helper {helper} has an invalid {case} test-matrix status")
+        if set(matrix_helpers) != set(helpers):
+            die("test-matrix helper set does not equal the compatibility ledger")
         if helper != "omarchy-shell" and not isinstance(contract.get("pinnedBehavior"), str):
             die(f"helper {helper} does not state its pinned observable behavior")
         if helper != "omarchy-shell" and not isinstance(contract.get("intentionalDeviation"), str):

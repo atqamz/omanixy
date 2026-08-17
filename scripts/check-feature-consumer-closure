@@ -1,0 +1,189 @@
+#!/usr/bin/env python3
+"""Check feature closure against post-patch consumer source evidence."""
+
+from __future__ import annotations
+
+import json
+import re
+import sys
+from pathlib import Path
+
+
+HELPER_PATTERN = re.compile(r"\bomarchy-[a-z0-9-]+\b")
+SOURCE_SUFFIXES = {".qml", ".js", ".json", ".jsonc"}
+
+
+def fail(message: str) -> None:
+    print(f"feature consumer closure: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def read_json(path: Path) -> dict:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        fail(f"cannot read {path}: {error}")
+    if not isinstance(value, dict):
+        fail(f"{path} is not an object")
+    return value
+
+
+def feature_for(path: str, roots: list[dict]) -> str | None:
+    matches = [entry["feature"] for entry in roots if path.startswith(entry["prefix"])]
+    if len(matches) != 1:
+        return None
+    return matches[0]
+
+
+def consumer_feature_for(
+    path: str, helper: str, default: str, overrides: list[dict]
+) -> str:
+    matches = [
+        entry["feature"]
+        for entry in overrides
+        if entry.get("path") == path and entry.get("helper") == helper
+    ]
+    if len(matches) > 1:
+        fail(f"duplicate consumer feature override for {path}: {helper}")
+    return matches[0] if matches else default
+
+
+def closure(feature: str, dependencies: dict[str, list[str]]) -> set[str]:
+    result: set[str] = set()
+    active: set[str] = set()
+
+    def visit(name: str) -> None:
+        if name in result:
+            return
+        if name in active:
+            fail(f"cyclic feature dependency at {name}")
+        active.add(name)
+        result.add(name)
+        for dependency in dependencies.get(name, []):
+            visit(dependency)
+        active.remove(name)
+
+    visit("core")
+    visit(feature)
+    return result
+
+
+def main() -> int:
+    if len(sys.argv) != 6:
+        print(
+            f"usage: {sys.argv[0]} COMPAT_ROOT PINNED_SOURCE RUNTIME_SURFACE FEATURE_SURFACE OUTPUT",
+            file=sys.stderr,
+        )
+        return 2
+
+    root, pinned_source, runtime_surface_path, feature_surface_path, output = map(Path, sys.argv[1:])
+    runtime_surface = read_json(runtime_surface_path)
+    feature_surface = read_json(feature_surface_path)
+    helper_features = feature_surface.get("helperFeatures")
+    selected_features = feature_surface.get("selectedFeatures")
+    dependencies = feature_surface.get("dependencies")
+    roots = feature_surface.get("featureRoots")
+    overrides = feature_surface.get("consumerFeatureOverrides", [])
+    if (
+        not isinstance(helper_features, dict)
+        or not isinstance(selected_features, list)
+        or not all(isinstance(feature, str) for feature in selected_features)
+        or not isinstance(dependencies, dict)
+        or not isinstance(roots, list)
+        or not all(isinstance(entry, dict) for entry in roots)
+        or not isinstance(overrides, list)
+        or not all(isinstance(entry, dict) for entry in overrides)
+    ):
+        fail("feature surface metadata is invalid")
+    if any(
+        not isinstance(entry.get("prefix"), str)
+        or not isinstance(entry.get("feature"), str)
+        for entry in roots
+    ):
+        fail("feature root identity is invalid")
+    if any(
+        not isinstance(entry.get("path"), str)
+        or not isinstance(entry.get("helper"), str)
+        or not isinstance(entry.get("feature"), str)
+        for entry in overrides
+    ):
+        fail("consumer feature override identity is invalid")
+
+    selected = set(selected_features)
+    selected_closures = {feature: closure(feature, dependencies) for feature in selected}
+    pinned_cache: dict[str, str] = {}
+    evidence: list[dict[str, object]] = []
+    source_paths: set[str] = set()
+    for helper, entry in runtime_surface.items():
+        if not isinstance(entry, dict):
+            fail(f"runtime surface entry for {helper} is invalid")
+        for source in entry.get("consumerSources", []):
+            if isinstance(source, dict) and isinstance(source.get("path"), str):
+                source_paths.add(source["path"])
+        consumer = entry.get("consumer")
+        if isinstance(consumer, str):
+            source_paths.add(consumer)
+
+    for relative in sorted(source_paths):
+        current = root / relative
+        if not current.is_file() or current.suffix not in SOURCE_SUFFIXES:
+            continue
+        try:
+            current_text = current.read_text(encoding="utf-8")
+        except OSError as error:
+            fail(f"cannot read post-patch consumer {relative}: {error}")
+        feature = feature_for(relative, roots)
+        if feature is None:
+            fail(f"post-patch consumer has no feature identity: {relative}")
+        if feature not in selected:
+            continue
+        pinned = pinned_source / relative
+        pinned_text = ""
+        if pinned.is_file():
+            try:
+                pinned_text = pinned.read_text(encoding="utf-8")
+            except OSError as error:
+                fail(f"cannot read pinned consumer {relative}: {error}")
+        for helper in sorted(set(HELPER_PATTERN.findall(current_text)) & set(helper_features)):
+            helper_feature = helper_features[helper]
+            if not isinstance(helper_feature, str):
+                fail(f"helper feature identity is invalid: {helper}")
+            invocation_feature = consumer_feature_for(relative, helper, feature, overrides)
+            if invocation_feature not in selected_closures:
+                selected_closures[invocation_feature] = closure(invocation_feature, dependencies)
+            present_in_pinned = helper in pinned_text
+            if helper_feature not in selected_closures[invocation_feature]:
+                fail(
+                    f"{relative} ({invocation_feature}) requires {helper} ({helper_feature}), "
+                    "but the selected feature closure does not include it"
+                )
+            evidence.append(
+                {
+                    "consumer": relative,
+                    "consumerFeature": invocation_feature,
+                    "helper": helper,
+                    "helperFeature": helper_feature,
+                    "closure": sorted(selected_closures[invocation_feature]),
+                    "status": "pinned-reference" if present_in_pinned else "post-patch-reference",
+                }
+            )
+
+    output_path = Path(output)
+    output_path.write_text(
+        json.dumps(
+            {
+                "selectedFeatures": sorted(selected),
+                "evidence": evidence,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    print(f"feature consumer closure passed ({len(evidence)} references)")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

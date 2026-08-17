@@ -1,0 +1,36 @@
+#!/usr/bin/env python3
+"""Remove the pinned power-profile provider when the power feature is absent."""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+
+POWER_PROVIDER = '''    "power-profiles": {
+      script: "current=$(powerprofilesctl get 2>/dev/null); omarchy-powerprofiles-list 2>/dev/null | while read -r p; do [[ -z $p ]] && continue; printf '%s\\\\t%s\\\\t%s\\\\n' \\"$p\\" \\"$p\\" \\"$current\\"; done",
+      icon: "\\udb81\\udc0b",
+      actionFor: function(value) { return "omarchy-powerprofiles-set autodetect " + Util.shellQuote(value) }
+    }
+'''
+
+
+def main() -> int:
+    if len(sys.argv) != 2:
+        print(f"usage: {sys.argv[0]} MENU_QML", file=sys.stderr)
+        return 2
+
+    path = Path(sys.argv[1])
+    text = path.read_text(encoding="utf-8")
+    count = text.count(POWER_PROVIDER)
+    if count != 1:
+        print(
+            f"expected exactly one pinned power-profile provider block, found {count}",
+            file=sys.stderr,
+        )
+        return 1
+    path.write_text(text.replace(POWER_PROVIDER, "", 1), encoding="utf-8")
+    return 0
+
+
+raise SystemExit(main())

@@ -47,9 +47,6 @@
         "idempotence": "tested"
       },
       "pinnedObservable": "reference-hash-plus-pinned-consumer",
-      "tests": {
-        "valid": "reference-only"
-      },
       "pinnedBehavior": "Accepts [-q] <target> <method> [args...], injects {} for shell summon/toggle, forwards stdout IPC output, and returns status 1 for unavailable, timeout, or IPC target errors; -q makes failures best-effort.",
       "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
     },
@@ -80,10 +77,6 @@
         "idempotence": "tested"
       },
       "pinnedObservable": "reference-hash-plus-pinned-consumer",
-      "tests": {
-        "valid": true,
-        "missingBackend": true
-      },
       "pinnedBehavior": "Accepts <node-id> <source-name>, performs best-effort wpctl and pactl default changes and source-stream moves, emits no success stdout, and returns status 1 for missing arguments.",
       "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
     },
@@ -117,10 +110,6 @@
         "idempotence": "tested"
       },
       "pinnedObservable": "reference-hash-plus-pinned-consumer",
-      "tests": {
-        "valid": true,
-        "missingBackend": true
-      },
       "pinnedBehavior": "wpctl, pactl, and stream movement failures are best-effort; invalid arguments exit 1",
       "intentionalDeviation": "Omanixy validates exact node metadata, hard-fails backend errors, and rolls back default and stream changes; exit status 2 for invalid arguments."
     },
@@ -151,10 +140,6 @@
         "idempotence": "tested"
       },
       "pinnedObservable": "reference-hash-plus-pinned-consumer",
-      "tests": {
-        "valid": true,
-        "missingBackend": true
-      },
       "pinnedBehavior": "Accepts optional [sink-name], resolves a DSP or EasyEffects sink to its physical downstream sink when possible, prints one sink name with a trailing newline, and falls back to the requested or default sink.",
       "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
     },
@@ -185,10 +170,6 @@
         "idempotence": "tested"
       },
       "pinnedObservable": "reference-hash-plus-pinned-consumer",
-      "tests": {
-        "valid": true,
-        "missingBackend": true
-      },
       "pinnedBehavior": "Accepts no arguments, prints one tab-separated sink-name and availability flag per sink, and treats fronted DSP sinks as unavailable.",
       "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
     },
@@ -219,10 +200,6 @@
         "idempotence": "tested"
       },
       "pinnedObservable": "reference-hash-plus-pinned-consumer",
-      "tests": {
-        "valid": true,
-        "missingBackend": true
-      },
       "pinnedBehavior": "Accepts no arguments or --shell, prints formatted battery telemetry for the panel, prints no battery result when no battery is found, and returns status 2 for other arguments.",
       "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
     },
@@ -253,10 +230,6 @@
         "idempotence": "tested"
       },
       "pinnedObservable": "reference-hash-plus-pinned-consumer",
-      "tests": {
-        "valid": true,
-        "missingBackend": true
-      },
       "pinnedBehavior": "Accepts pair, connect, disconnect, or forget plus a MAC address, performs bounded bluetoothctl actions with best-effort backend failures, emits no success stdout, and returns status 1 for invalid arguments.",
       "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
     },
@@ -287,10 +260,6 @@
         "idempotence": "tested"
       },
       "pinnedObservable": "reference-hash-plus-pinned-consumer",
-      "tests": {
-        "valid": true,
-        "missingBackend": true
-      },
       "pinnedBehavior": "Accepts on, off, toggle, or is-on, uses persistent rfkill state with bounded BlueZ waits, emits no success stdout, and returns status 1 for invalid arguments or a failed power-on.",
       "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
     },
@@ -321,10 +290,6 @@
         "idempotence": "tested"
       },
       "pinnedObservable": "reference-hash-plus-pinned-consumer",
-      "tests": {
-        "valid": true,
-        "missingBackend": true
-      },
       "pinnedBehavior": "Accepts --no-osd, --monitor name, and a brightness step, percentage, off, or on action, prints brightness where the selected backend reports it, and returns status 1 for invalid or unavailable display actions.",
       "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
     },
@@ -358,10 +323,6 @@
         "idempotence": "tested"
       },
       "pinnedObservable": "reference-hash-plus-pinned-consumer",
-      "tests": {
-        "valid": true,
-        "missingBackend": true
-      },
       "pinnedBehavior": "The pinned default menu reaches the no-argument smart-selection form; the upstream helper also accepts mode, processing, and --editor=<name> in any position, but those additional forms are not reached by the supported Quattro baseline.",
       "intentionalDeviation": "Omanixy implements and directly tests the editor form, while the supported shell-facing contract remains the pinned no-argument action and uses a bounded picker and cursor-freeze implementation."
     },
@@ -392,10 +353,6 @@
         "idempotence": "tested"
       },
       "pinnedObservable": "reference-hash-plus-pinned-consumer",
-      "tests": {
-        "valid": true,
-        "missingBackend": true
-      },
       "pinnedBehavior": "Accepts --history-index <index>, opens the selected user clipboard-history entry with xdg-open, emits no success stdout, and returns the backend failure status.",
       "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
     },
@@ -426,10 +383,6 @@
         "idempotence": "tested"
       },
       "pinnedObservable": "reference-hash-plus-pinned-consumer",
-      "tests": {
-        "valid": true,
-        "missingBackend": true
-      },
       "pinnedBehavior": "Accepts optional --copy-only followed by <mime-type> <path>, copies the file to the Wayland clipboard, and types or pastes it unless copy-only is selected.",
       "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
     },
@@ -460,10 +413,6 @@
         "idempotence": "tested"
       },
       "pinnedObservable": "reference-hash-plus-pinned-consumer",
-      "tests": {
-        "valid": true,
-        "missingBackend": true
-      },
       "pinnedBehavior": "Accepts optional --shift-insert, --copy-only, and --history-index <index> or text, copies text to the Wayland clipboard, and types or pastes it unless copy-only is selected.",
       "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
     },
@@ -494,10 +443,6 @@
         "idempotence": "tested"
       },
       "pinnedObservable": "reference-hash-plus-pinned-consumer",
-      "tests": {
-        "valid": true,
-        "missingBackend": true
-      },
       "pinnedBehavior": "gsettings mutations and terminal updates are best-effort; invalid arguments exit 1",
       "intentionalDeviation": "Omanixy validates files and GTK state, rolls back on mutation failure, and hard-fails failures; exit status 2 for invalid arguments."
     },
@@ -528,10 +473,6 @@
         "idempotence": "tested"
       },
       "pinnedObservable": "reference-hash-plus-pinned-consumer",
-      "tests": {
-        "valid": true,
-        "missingBackend": true
-      },
       "pinnedBehavior": "Accepts optional Cloudflare, Google, DHCP, or Custom, prints the current provider when queried, and mutates the active NetworkManager connection for supported providers.",
       "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
     },
@@ -562,10 +503,6 @@
         "idempotence": "tested"
       },
       "pinnedObservable": "reference-hash-plus-pinned-consumer",
-      "tests": {
-        "valid": true,
-        "missingBackend": true
-      },
       "pinnedBehavior": "Accepts no argument, up, down, or a numeric scale, prints monitor state when queried, and applies the requested Hyprland monitor scaling.",
       "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
     },
@@ -596,10 +533,6 @@
         "idempotence": "tested"
       },
       "pinnedObservable": "reference-hash-plus-pinned-consumer",
-      "tests": {
-        "valid": true,
-        "missingBackend": true
-      },
       "pinnedBehavior": "Accepts an emoji string, copies it to the Wayland clipboard, and best-effort synthesizes the supported paste action without requiring success stdout.",
       "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
     },
@@ -630,10 +563,6 @@
         "idempotence": "tested"
       },
       "pinnedObservable": "reference-hash-plus-pinned-consumer",
-      "tests": {
-        "valid": true,
-        "missingBackend": true
-      },
       "pinnedBehavior": "Accepts no arguments and prints the monitor panel state as the shell-consumed structured text contract.",
       "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
     },
@@ -664,10 +593,6 @@
         "idempotence": "tested"
       },
       "pinnedObservable": "reference-hash-plus-pinned-consumer",
-      "tests": {
-        "valid": true,
-        "missingBackend": true
-      },
       "pinnedBehavior": "Accepts optional auto, 2.4, 5, or 6, prints the active band when queried, and mutates the active NetworkManager connection when pinning a band.",
       "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
     },
@@ -698,10 +623,6 @@
         "idempotence": "tested"
       },
       "pinnedObservable": "reference-hash-plus-pinned-consumer",
-      "tests": {
-        "valid": true,
-        "missingBackend": true
-      },
       "pinnedBehavior": "Accepts <interface>, prints exactly the active non-enterprise Wi-Fi password on stdout with a trailing newline, and rejects missing or enterprise credentials.",
       "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
     },
@@ -732,10 +653,6 @@
         "idempotence": "tested"
       },
       "pinnedObservable": "reference-hash-plus-pinned-consumer",
-      "tests": {
-        "valid": true,
-        "missingBackend": true
-      },
       "pinnedBehavior": "Accepts optional --meta and interface, prints optional metadata followed by the Wi-Fi QR matrix, and rejects enterprise or unavailable connections.",
       "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
     },
@@ -766,10 +683,6 @@
         "idempotence": "tested"
       },
       "pinnedObservable": "reference-hash-plus-pinned-consumer",
-      "tests": {
-        "valid": true,
-        "missingBackend": true
-      },
       "pinnedBehavior": "Accepts no arguments or --verbose, prints tab-separated disconnected, ethernet, or Wi-Fi status and optional ping samples, and returns status 2 for other arguments.",
       "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
     },
@@ -800,10 +713,6 @@
         "idempotence": "tested"
       },
       "pinnedObservable": "reference-hash-plus-pinned-consumer",
-      "tests": {
-        "valid": true,
-        "missingBackend": true
-      },
       "pinnedBehavior": "Accepts notification options, a headline, optional description, and notify-send options, forwards them to notify-send, and optionally prints its replacement ID for -p.",
       "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
     },
@@ -837,10 +746,6 @@
         "idempotence": "tested"
       },
       "pinnedObservable": "reference-hash-plus-pinned-consumer",
-      "tests": {
-        "valid": true,
-        "missingBackend": true
-      },
       "pinnedBehavior": "Accepts no arguments or --active-state and prints available profile names, optionally with tab-separated active flags; other arguments return status 1.",
       "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
     },
@@ -874,10 +779,6 @@
         "idempotence": "tested"
       },
       "pinnedObservable": "reference-hash-plus-pinned-consumer",
-      "tests": {
-        "valid": true,
-        "missingBackend": true
-      },
       "pinnedBehavior": "Accepts optional autodetect, ac, or battery plus an optional profile, selects an available profile through powerprofilesctl, and persists explicit choices under XDG state.",
       "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
     },
@@ -908,10 +809,6 @@
         "idempotence": "tested"
       },
       "pinnedObservable": "reference-hash-plus-pinned-consumer",
-      "tests": {
-        "valid": true,
-        "missingBackend": true
-      },
       "pinnedBehavior": "Pinned helper supports package-backed removal paths; user desktop-entry removal is the supported shell-facing subset.",
       "intentionalDeviation": "Omanixy refuses system, Nix/store, symlink, malformed, and traversal targets and only removes regular user XDG desktop entries."
     },
@@ -942,10 +839,6 @@
         "idempotence": "tested"
       },
       "pinnedObservable": "reference-hash-plus-pinned-consumer",
-      "tests": {
-        "valid": true,
-        "missingBackend": true
-      },
       "pinnedBehavior": "Accepts no arguments or --bar-widget, prints tab-separated CPU and memory statistics, and prints the bar-widget telemetry form for --bar-widget; other arguments return status 1.",
       "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
     },
@@ -976,10 +869,6 @@
         "idempotence": "tested"
       },
       "pinnedObservable": "reference-hash-plus-pinned-consumer",
-      "tests": {
-        "valid": true,
-        "missingBackend": true
-      },
       "pinnedBehavior": "Accepts no arguments, --set <name> [lat,lon], or --clear, prints the stored or detected location when queried, and persists or removes the JSON weather state.",
       "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
     },
@@ -1010,10 +899,6 @@
         "idempotence": "tested"
       },
       "pinnedObservable": "reference-hash-plus-pinned-consumer",
-      "tests": {
-        "valid": true,
-        "missingBackend": true
-      },
       "pinnedBehavior": "Accepts no arguments, reads the weather location, queries wttr.in, and prints <Place> · Temp <temperature> · Wind <wind> with a trailing newline; unavailable or empty service output returns status 1.",
       "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
     }

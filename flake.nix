@@ -56,7 +56,16 @@
       packages = forEachSystem (system: {
         omanixy-shell = runtimeFor system null;
       });
-      formatter = forEachSystem (system: nixpkgs.legacyPackages.${system}.nixpkgs-fmt);
+      formatter = forEachSystem (system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+        in
+        pkgs.writeShellApplication {
+          name = "omanixy-nix-fmt";
+          runtimeInputs = [ pkgs.findutils pkgs.nixpkgs-fmt ];
+          text = builtins.readFile ./scripts/nix-fmt;
+        }
+      );
       checks = forEachSystem (system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
@@ -69,6 +78,12 @@
           screenshotRuntime = runtimeFor system [ "screenshot" ];
           coreRuntime = runtimeFor system [ "core" ];
           monitorRuntime = runtimeFor system [ "monitor" ];
+          clipboardHomeConfiguration = homeConfigurationFor system {
+            programs.omanixy.features = [ "clipboard" ];
+          };
+          coreHomeConfiguration = homeConfigurationFor system {
+            programs.omanixy.features = [ "core" ];
+          };
           runtimeClosureInfo = pkgs.closureInfo { rootPaths = [ runtime ]; };
           compatibilityRoot = runtime.passthru.omarchyCompatibilityRoot;
           storeConfig = pkgs.writeText "omanixy-historical-shell-config" (builtins.readFile ./upstream/shell-baseline-v1.json);
@@ -124,6 +139,8 @@
           };
           service = homeConfiguration.config.systemd.user.services.omanixy-shell;
           activationScript = pkgs.writeShellScript "omanixy-shell-state-activation" homeConfiguration.config.home.activation.omanixyShellState.data;
+          clipboardActivationScript = pkgs.writeShellScript "omanixy-shell-clipboard-state-activation" clipboardHomeConfiguration.config.home.activation.omanixyShellState.data;
+          coreActivationScript = pkgs.writeShellScript "omanixy-shell-core-state-activation" coreHomeConfiguration.config.home.activation.omanixyShellState.data;
           customActivationScript = pkgs.writeShellScript "omanixy-shell-custom-state-activation" customHomeConfiguration.config.home.activation.omanixyShellState.data;
           serviceUnit = pkgs.writeText "omanixy-shell.service" ''
             [Unit]
@@ -197,6 +214,36 @@
             ${pkgs.bash}/bin/bash ${./test/feature-closure.sh} \
               ${weatherRuntime} ${bluetoothRuntime} ${audioRuntime} ${launcherRuntime} \
               ${screenshotRuntime} ${coreRuntime} ${monitorRuntime}
+            touch "$out"
+          '';
+          feature-consumer-closure = pkgs.runCommand "omanixy-feature-consumer-closure"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.jq pkgs.python3 ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/feature-consumer-closure.sh} \
+              ${./.} ${runtime.passthru.omarchySource} \
+              ${runtime.passthru.omarchyCompatibilityRoot} \
+              ${runtime.passthru.compatibilityBin} \
+              ${weatherRuntime.passthru.omarchyCompatibilityRoot} \
+              ${weatherRuntime.passthru.compatibilityBin} \
+              ${clipboardRuntime.passthru.omarchyCompatibilityRoot} \
+              ${clipboardRuntime.passthru.compatibilityBin} \
+              ${coreRuntime.passthru.omarchyCompatibilityRoot} \
+              ${coreRuntime.passthru.compatibilityBin} \
+              ${./scripts/check-feature-consumer-closure}
+            touch "$out"
+          '';
+          feature-lifecycle = pkgs.runCommand "omanixy-feature-lifecycle"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.gnused pkgs.diffutils pkgs.findutils pkgs.jq ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/feature-lifecycle.sh} \
+              ${activationScript} ${clipboardActivationScript} ${coreActivationScript} \
+              ${runtime} ${clipboardRuntime} ${coreRuntime} \
+              ${runtime.passthru.omarchyCompatibilityRoot} \
+              ${clipboardRuntime.passthru.omarchyCompatibilityRoot} \
+              ${coreRuntime.passthru.omarchyCompatibilityRoot} \
+              ${runtime.passthru.quickshell}/bin/quickshell
             touch "$out"
           '';
           config-ownership = pkgs.runCommand "omanixy-config-ownership"
@@ -314,7 +361,7 @@
             {
               nativeBuildInputs = [ pkgs.bash pkgs.nodejs pkgs.python3 pkgs.coreutils pkgs.gnugrep pkgs.gnused ];
             } ''
-            PYTHON=${pkgs.python3}/bin/python3 ${pkgs.bash}/bin/bash ${./test/qml-patch-behavior.sh} ${compatibilityRoot} ${runtime.passthru.omarchySource} ${./scripts/patch-transparent-foreground-process} ${runtime}/bin/quickshell
+            PYTHON=${pkgs.python3}/bin/python3 ${pkgs.bash}/bin/bash ${./test/qml-patch-behavior.sh} ${compatibilityRoot} ${runtime.passthru.omarchySource} ${./scripts/patch-transparent-foreground-process} ${runtime}/bin/quickshell ${./scripts/patch-menu-power-provider}
             touch "$out"
           '';
           launcher-delete-contract = pkgs.runCommand "omanixy-launcher-delete-contract"

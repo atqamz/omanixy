@@ -60,11 +60,14 @@ jq '.native["uwsm-app"].hash = "0"' "$manifest" > "$native_drift_manifest"
 expect_rejection 'referenced native evidence drift' \
   'native reference drifted' "$compatibility_root" "$native_drift_manifest"
 
+missing_matrix_source=$test_root/missing-matrix-cases.json
+jq 'del(.helpers["omarchy-display-text-size"].tests.valid)' \
+  "$repo/upstream/compatibility-test-matrix.json" > "$missing_matrix_source"
 missing_matrix=$test_root/missing-matrix.json
-jq '.helpers["omarchy-display-text-size"].tests.valid = false' \
+jq --arg path "$missing_matrix_source" '.testMatrix = $path' \
   "$manifest" > "$missing_matrix"
 expect_rejection 'missing per-helper matrix coverage' \
-  'has no named valid test-matrix case' "$compatibility_root" "$missing_matrix"
+  'has no declared valid test-matrix case' "$compatibility_root" "$missing_matrix"
 
 unledgered_root=$test_root/unledgered-root
 cp -R -- "$compatibility_root" "$unledgered_root"

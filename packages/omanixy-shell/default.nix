@@ -19,7 +19,6 @@ let
   omarchyRevision = contractSource.pins.omarchy;
   quickshellRevision = contractSource.pins.quickshell;
   baselineConfig = builtins.removeAttrs baselineSource [ "featurePlugins" "featureDependencies" "featureOrder" "migrations" ];
-  blockedPluginIds = builtins.toJSON baselineConfig.disabledPlugins;
   featureRuntimeInputs = with pkgs; {
     core = [ bash coreutils findutils gawk gnugrep gnused inotify-tools jq systemd util-linux ];
     network = [ iproute2 iputils iw networkmanager qrencode ];
@@ -98,6 +97,7 @@ let
   selectedBaselineConfig = baselineConfig // {
     disabledPlugins = lib.unique (baselineConfig.disabledPlugins ++ omittedFeaturePlugins);
   };
+  blockedPluginIds = builtins.toJSON selectedBaselineConfig.disabledPlugins;
   safeMenuSource = builtins.fromJSON (builtins.readFile ./safe-menu.jsonc);
   safeMenuFeature = {
     apps = "launcher";
@@ -150,15 +150,17 @@ let
             install -Dm644 ${./AppLibrarySupport.js} "$out/shell/services/AppLibrarySupport.js"
             ${pkgs.python3}/bin/python3 ${../../scripts/patch-app-library} \
               "$out/shell/services/AppLibrary.qml"
+            test "$(grep -Fc 'import "AppLibrarySupport.js" as AppLibrarySupport' "$out/shell/services/AppLibrary.qml")" -eq 1
             substituteInPlace "$out/shell/services/AppLibrary.qml" \
-              --replace-fail 'import "AppSearch.js" as AppSearch' \
-                'import "AppSearch.js" as AppSearch
-      import "AppLibrarySupport.js" as AppSupport' \
               --replace-fail 'Util.execDetached("uwsm-app -- gtk-launch " + Util.shellQuote(id + ".desktop"))' \
-                'var command = AppSupport.launchCommand(id)
+                'var command = AppLibrarySupport.launchCommand(id)
           if (command) Util.execDetached(command)'
             chmod u+w "$out/shell/plugins/menu" "$out/shell/plugins/menu/Menu.qml"
             install -Dm644 ${./MenuDeleteSupport.js} "$out/shell/plugins/menu/MenuDeleteSupport.js"
+            ${lib.optionalString (!builtins.elem "power" selectedFeatures) ''
+            ${pkgs.python3}/bin/python3 ${../../scripts/patch-menu-power-provider} \
+              "$out/shell/plugins/menu/Menu.qml"
+            ''}
             substituteInPlace "$out/shell/plugins/menu/Menu.qml" \
               --replace-fail 'import "MenuModel.js" as MenuModel' \
                 'import "MenuModel.js" as MenuModel
@@ -318,6 +320,31 @@ let
     omarchy-weather-location = "weather";
     omarchy-weather-status = "weather";
   };
+  featureRoots = [
+    { prefix = "shell/shell.qml"; feature = "core"; }
+    { prefix = "shell/plugins/panels/audio/"; feature = "audio"; }
+    { prefix = "shell/plugins/panels/bluetooth/"; feature = "bluetooth"; }
+    { prefix = "shell/plugins/clipboard/"; feature = "clipboard"; }
+    { prefix = "shell/plugins/emojis/"; feature = "clipboard"; }
+    { prefix = "shell/plugins/menu/"; feature = "core"; }
+    { prefix = "shell/plugins/panels/monitor/"; feature = "monitor"; }
+    { prefix = "shell/plugins/panels/network/"; feature = "network"; }
+    { prefix = "shell/plugins/panels/power/"; feature = "power"; }
+    { prefix = "shell/plugins/panels/weather/"; feature = "weather"; }
+    { prefix = "shell/plugins/panels/wifiqr/"; feature = "network"; }
+    { prefix = "shell/services/"; feature = "launcher"; }
+    { prefix = "default/omarchy/"; feature = "screenshot"; }
+  ];
+  featureSurface = builtins.toJSON {
+    selectedFeatures = selectedFeatures;
+    dependencies = featureSelection.dependencies;
+    helperFeatures = helperFeatures // { omarchy-shell = "core"; };
+    inherit featureRoots;
+    consumerFeatureOverrides = [
+      { path = "shell/plugins/menu/Menu.qml"; helper = "omarchy-powerprofiles-list"; feature = "power"; }
+      { path = "shell/plugins/menu/Menu.qml"; helper = "omarchy-powerprofiles-set"; feature = "power"; }
+    ];
+  };
   compatibilityHelpers = lib.filter
     (helper: builtins.elem (helperFeatures.${helper} or "core") selectedFeatures)
     allCompatibilityHelpers;
@@ -377,7 +404,7 @@ let
         ln -s ${compatAdapter}/bin/omanixy-compat-adapter "$out/bin/$helper"
       done
       ${pkgs.python3}/bin/python3 ${../../scripts/generate-postpatch-runtime-surface} \
-        ${omarchyCompatibilityRoot} "$out" "$probes" ${quickshell}/bin/quickshell ${fontconfigFile} ${pkgs.bash}/bin/bash ${lib.escapeShellArg (builtins.toJSON helperConsumers)}
+        ${omarchyCompatibilityRoot} "$out" "$probes" ${quickshell}/bin/quickshell ${fontconfigFile} ${pkgs.bash}/bin/bash ${lib.escapeShellArg (builtins.toJSON helperConsumers)} ${lib.escapeShellArg featureSurface}
     '';
   };
   compatibilityProbes = compatibilityBin.probes;
@@ -416,7 +443,7 @@ pkgs.symlinkJoin {
     ln -s ${theme} "$out/share/omarchy-theme"
   '';
   passthru = {
-    inherit omarchyRevision quickshellRevision nixpkgsRevision omarchySource omarchyCompatibilityRoot compatibilityBin compatibilityProbes quickshell theme supportedSystems safeMenu safeShellConfig selectedFeatures compatibilityHelpers adapterSources adapterSourceHash;
+    inherit omarchyRevision quickshellRevision nixpkgsRevision omarchySource omarchyCompatibilityRoot compatibilityBin compatibilityProbes quickshell theme supportedSystems safeMenu safeShellConfig selectedFeatures compatibilityHelpers adapterSources adapterSourceHash featureSurface;
     buildProvenance = {
       inherit omarchyRevision quickshellRevision nixpkgsRevision;
     };

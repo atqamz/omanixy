@@ -26,12 +26,13 @@ definition.
 Its complete `bin/` surface is not copied into the root.
 The root contains only dispatch wrappers for the audited helper names required
 by reachable Quattro consumers.
-The compatibility view carries eight documented persistent source patch sites:
+The compatibility view carries nine documented persistent source patch sites:
 the registry safety floor for bar widgets, enterprise Wi-Fi filtering through
 the network panel's model, removal of the Custom DNS provider/action/pill,
 hiding the unsupported speed-test action, clock middle-click routing, the
-native bar transparency fallback, a selective user-owned launcher-delete action,
-and the app-library ownership scan and validated launch path behind it.
+native bar transparency fallback, the selected-feature power-provider gate, a
+selective user-owned launcher-delete action, and the app-library ownership scan
+and validated launch path behind it.
 Each patch is pinned to a source path and covered by a focused closure or
 behavioral check because native Quickshell APIs and a helper adapter cannot
 remove an unreachable presentation affordance.
@@ -53,7 +54,7 @@ User-owned extension menus remain outside the baseline support claim.
 
 ### Persistent source patch inventory
 
-The compatibility view carries exactly these eight pinned-source patch sites.
+The compatibility view carries exactly these nine pinned-source patch sites.
 Each patch is a presentation reachability guard or a native portability fix,
 not a replacement for an adapter that could provide the same contract.
 
@@ -65,11 +66,12 @@ not a replacement for an adapter that could provide the same contract.
 | `shell/plugins/panels/network/Panel.qml`, `canRunSpeedTest` and speed header/action properties | Hides the speed-test action. | The benchmark helper cannot provide honest generic measurements without its Omarchy-specific endpoint and transfer stack. | Omanixy omits the feature; `test/qml-patch-behavior.sh` and `test/runtime-closure.sh` prove the action is disabled and its panel is absent. |
 | `shell/plugins/panels/clock/BarWidget.qml`, middle-button handler | Opens the supported clock panel instead of invoking `omarchy-menu-timezone`. | The timezone command is outside the generic boundary and the panel route is a presentation event, not an external helper contract. | Omanixy owns the portability patch; `test/qml-patch-behavior.sh` proves the route and absence of the old command. |
 | `shell/plugins/bar/Bar.qml`, `refreshTransparentForeground()` and its helper `Process` | Uses the native Quickshell theme foreground for transparent bars and removes the unavailable helper process. | A helper could not reproduce the bar's live theme binding without retaining a downstream presentation process, while the pinned Quickshell property already supplies the required value. | Omarchy remains presentation owner and Quickshell remains runtime owner; `test/qml-patch-behavior.sh` and the runtime-root inspection prove the native path is present and the helper process is absent. |
+| `shell/plugins/menu/Menu.qml`, pinned power-profile provider block | Removes the power-profile provider and its helper actions when the selected runtime does not include the power feature, while preserving unrelated menu providers. | The immutable feature boundary must not leave a persisted user menu able to invoke helpers or backends absent from the selected runtime. | Omanixy owns the fail-closed feature gate; `scripts/patch-menu-power-provider` performs an exact source-shape replacement and `test/qml-patch-behavior.sh` proves both removal and drift failure. |
 | `shell/plugins/menu/Menu.qml`, Delete-key handler | Routes Delete through `AppLibrary.canRemove()` and does not invoke removal for system, Nix-store, missing, malformed, symlink, or traversal entries. | Omanixy can safely remove only a user-owned desktop entry, while AppLibrary displays system and Nix-managed entries too. | Omanixy owns the removability guard and the adapter retains a separately tested user-entry contract; `test/qml-patch-behavior.sh`, `test/launcher-delete-contract.sh`, and `test/compat-adapters.sh` cover both sides. |
 | `shell/services/AppLibrary.qml`, user-owned entry scan, `canRemove()`, and the launch dispatch, applied by `scripts/patch-app-library` and two pinned-text substitutions | Adds the `userOwnedEntryIds` scan and the `canRemove()` predicate that back the Menu delete guard, and routes launching through `AppLibrarySupport.launchCommand()`. A desktop ID that fails `^[A-Za-z0-9][A-Za-z0-9_.@+-]*$` yields no command, so the entry does not launch and no shell command is composed from it. | The delete guard needs the ownership of every displayed entry, which only the library that enumerates them can compute; and the launch path interpolates a desktop ID into a shell string, so a helper invoked after interpolation could not undo an unsafe ID. | Omanixy owns the ownership scan and the ID validation; `test/launcher-delete-contract.sh` executes `userOwnedEntryIds` and `canRemove()` in the patched library, and `test/uwsm-integration.sh` executes `AppLibrarySupport.launchCommand()` for the accepted and the rejected desktop ID. The rejected-ID case is silent by design: the library composes no command and shows no error, and the live launch smoke is unclaimed unless `OMANIXY_LIVE_UWSM=1`. |
 
 The network model and panel edits are one behavioral patch site family, so the
-inventory has eight sites while documenting every persistent file and symbol.
+inventory has nine sites while documenting every persistent file and symbol.
 Each source edit uses an exact pinned-text substitution or a fail-closed
 structured transformer and therefore fails the build if the pinned source
 shape changes.

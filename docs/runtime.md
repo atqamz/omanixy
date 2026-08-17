@@ -108,12 +108,12 @@ Quattro is consumed from a deterministic immutable compatibility root through
 The root contains the pinned source view used by the supported runtime graph,
 including shared QML libraries, shell services, the baseline bar widgets, and
 the copied panel and overlay sources needed by the registry.
-It applies eight narrow patch sites: the disabled-plugin floor on bar widgets,
+It applies nine narrow patch sites: the disabled-plugin floor on bar widgets,
 enterprise Wi-Fi filtering through the network panel's model, removal of the
 Custom DNS provider/action/pill, hiding the unsupported speed-test action,
-clock middle-click routing, the native bar transparency fallback, a
-user-owned launcher-delete guard, and the validated app-library launch and
-removability path.
+clock middle-click routing, the native bar transparency fallback, the
+selected-feature power-provider gate, a user-owned launcher-delete guard, and
+the validated app-library launch and removability path.
 Some unsupported first-party plugin directories are omitted from the view,
 while copied baseline modules remain unreachable when disabled by the
 immutable registry floor.
@@ -150,6 +150,8 @@ uses the audio default-device contract when connecting a device.
 The default enables all groups needed by the safe baseline.
 When a group is omitted, its helpers and menu actions are omitted and its
 baseline bar widgets are added to the immutable disabled-plugin floor.
+The runtime also removes the pinned core-menu provider for power profiles when
+power is omitted, because that provider is a cross-feature consumer.
 The clipboard group also floors the clipboard and emoji plugin IDs so a custom
 configuration cannot re-enable those panels without selecting their runtime
 dependencies.

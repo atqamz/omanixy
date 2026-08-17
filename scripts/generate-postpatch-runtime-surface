@@ -303,8 +303,8 @@ HEADLESS_TEXT_PATCHES = {
 
 
 def main() -> int:
-    if len(sys.argv) != 8:
-        print(f"usage: {sys.argv[0]} ROOT COMPATIBILITY_BIN PROBE_OUT QUICKSHELL FONTCONFIG_FILE PROBE_SHELL MAPPING_JSON", file=sys.stderr)
+    if len(sys.argv) != 9:
+        print(f"usage: {sys.argv[0]} ROOT COMPATIBILITY_BIN PROBE_OUT QUICKSHELL FONTCONFIG_FILE PROBE_SHELL MAPPING_JSON FEATURE_SURFACE_JSON", file=sys.stderr)
         return 2
 
     root = Path(sys.argv[1])
@@ -314,8 +314,11 @@ def main() -> int:
     fontconfig_file = Path(sys.argv[5])
     probe_shell = Path(sys.argv[6])
     mapping = json.loads(sys.argv[7])
+    feature_surface = json.loads(sys.argv[8])
     if not isinstance(mapping, dict):
         fail("consumer mapping is not an object")
+    if not isinstance(feature_surface, dict):
+        fail("feature surface is not an object")
     if probe_out == compatibility_bin:
         fail("probe scaffolding must not be packaged into the runtime helper path")
 
@@ -656,6 +659,9 @@ def main() -> int:
         }
     (compatibility_bin / "runtime-surface.json").write_text(
         json.dumps(surface, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    (compatibility_bin / "feature-surface.json").write_text(
+        json.dumps(feature_surface, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
     (probe_out / "probe-surface.json").write_text(
         json.dumps(
