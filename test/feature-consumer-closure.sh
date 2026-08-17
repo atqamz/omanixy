@@ -372,6 +372,20 @@ fi
 grep -Fq 'unknown external executable: pacman' "$test_root/unknown-exec-payload-error"
 printf '%s\n' 'REJECTED exec pacman in a script payload'
 
+unknown_eval_payload="$test_root/unknown-eval-payload-root"
+cp -R -- "$weather_root" "$unknown_eval_payload"
+chmod -R u+w "$unknown_eval_payload"
+printf '%s\n' 'Item { script: "eval pacman" }' \
+  >> "$unknown_eval_payload/shell/plugins/panels/weather/Panel.qml"
+if "${PYTHON:-python3}" "$checker" "$unknown_eval_payload" "$pinned_source" \
+  "$weather_bin/runtime-surface.json" "$weather_bin/feature-surface.json" "$test_root/unknown-eval-payload.json" \
+  >"$test_root/unknown-eval-payload-output" 2>"$test_root/unknown-eval-payload-error"; then
+  printf '%s\n' 'feature consumer closure accepted eval pacman in a script payload' >&2
+  exit 1
+fi
+grep -Fq 'unknown external executable: eval' "$test_root/unknown-eval-payload-error"
+printf '%s\n' 'REJECTED eval pacman in a script payload'
+
 dynamic_array_payload="$test_root/dynamic-array-payload-root"
 cp -R -- "$weather_root" "$dynamic_array_payload"
 chmod -R u+w "$dynamic_array_payload"

@@ -23,7 +23,6 @@ SHELL_BUILTINS = {
     "elif",
     "else",
     "esac",
-    "eval",
     "exit",
     "export",
     "false",
@@ -144,18 +143,18 @@ def source_executables(path: str, text: str) -> list[dict[str, object]]:
     dynamic_name = "__dynamic-executable__"
 
     def add(name: str, line: int, invocation: str, shape: str) -> None:
-        if name == dynamic_name and (
-            path == "shell/plugins/bar/Bar.qml"
-            or path == "shell/services/AppLibrary.qml"
-            or path == "shell/services/PluginRegistry.qml"
-            or "providerProc.command" in shape
-            or "guardProc.command" in shape
-            or "root.dnsCommand" in shape
-            or "Model.enterpriseConnectScript" in shape
-            or "root.userOwnedEntryScanCommand" in shape
-            or "root.hiddenEntryScanCommand" in shape
-            or "root.iconIndexScanCommand" in shape
-        ):
+        allowed_dynamic_shapes = (
+            "customRoot.setting",
+            "providerProc.command",
+            "guardProc.command",
+            "root.dnsCommand",
+            "Model.enterpriseConnectScript",
+            "root.userOwnedEntryScanCommand",
+            "root.hiddenEntryScanCommand",
+            "root.iconIndexScanCommand",
+            "scanProcess.command",
+        )
+        if name == dynamic_name and any(marker in shape for marker in allowed_dynamic_shapes):
             return
         if not name or name in SHELL_BUILTINS or name.startswith(("/", "$", "omarchy-")):
             return
@@ -227,17 +226,7 @@ def source_executables(path: str, text: str) -> list[dict[str, object]]:
     for match in DYNAMIC_COMMAND_RE.finditer(text):
         line_number = text.count("\n", 0, match.start()) + 1
         source_line = text.splitlines()[line_number - 1]
-        if (
-            "customRoot.setting" not in source_line
-            and "providerProc.command" not in source_line
-            and "guardProc.command" not in source_line
-            and "root.dnsCommand" not in source_line
-            and "Model.enterpriseConnectScript" not in source_line
-            and "root.userOwnedEntryScanCommand" not in source_line
-            and "root.hiddenEntryScanCommand" not in source_line
-            and "root.iconIndexScanCommand" not in source_line
-        ):
-            add(dynamic_name, line_number, "dynamic-command", source_line)
+        add(dynamic_name, line_number, "dynamic-command", source_line)
 
     for match in SHELL_PAYLOAD_RE.finditer(text):
         line_number = text.count("\n", 0, match.start()) + 1
