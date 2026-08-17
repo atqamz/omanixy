@@ -76,6 +76,9 @@ ARRAY_COMMAND_RE = re.compile(
     re.DOTALL,
 )
 DYNAMIC_COMMAND_RE = re.compile(r"\bcommand\s*:\s+(?![\"'\[])[^\n,}]+")
+DYNAMIC_SCRIPT_RE = re.compile(
+    r"\bscript\s*:\s+(?![\"'\[])([A-Za-z_][A-Za-z0-9_]*)\b"
+)
 DYNAMIC_ASSIGNMENT_RE = re.compile(
     r"\b[A-Za-z_][A-Za-z0-9_]*\.command\s*=\s+(?![\"'\[])[^\n;]+"
 )
@@ -88,7 +91,7 @@ SHELL_PAYLOAD_RE = re.compile(
     re.DOTALL,
 )
 SHELL_STRING_RE = re.compile(
-    r"(?:\bbar\.run|(?:Quickshell|Util)\.exec(?:Detached)?)\(\s*"
+    r"(?:\b[A-Za-z_][A-Za-z0-9_]*\.run|(?:Quickshell|Util)\.exec(?:Detached)?)\(\s*"
     r"([\"'])(.*?)(?<!\\)\1",
     re.DOTALL,
 )
@@ -125,8 +128,18 @@ def shell_executables(value: str) -> list[str]:
             continue
         first = words[0]
         if first in SHELL_BUILTINS:
-            if first in {"!", "time"}:
+            if first in {"!", "time", "do", "then", "else"}:
                 commands.extend(_next_command(words, 1))
+            elif first in {"for", "while", "until"}:
+                if "do" in words:
+                    commands.extend(_next_command(words, words.index("do") + 1))
+                else:
+                    commands.append(DYNAMIC_EXECUTABLE)
+            elif first == "case":
+                if ")" in words:
+                    commands.extend(_next_command(words, words.index(")") + 1))
+                else:
+                    commands.append(DYNAMIC_EXECUTABLE)
             continue
         if first in {"command", "builtin", "exec"}:
             commands.extend(_next_command(words, 1))
@@ -172,9 +185,12 @@ def source_executables(path: str, text: str) -> list[dict[str, object]]:
             ("shell/services/PluginRegistry.qml", 'scanProcess.command = ["bash", "-c", script, registry.firstPartyDir, registry.pluginsDir]'),
             ("shell/plugins/bar/Bar.qml", 'command: ["bash", "-lc", String(customRoot.setting("exec", ""))]'),
             ("shell/plugins/bar/Bar.qml", 'customProc.command = ["bash", "-lc", String(customRoot.setting("exec", ""))]'),
+            ("shell/plugins/bar/Bar.qml", 'transparentForegroundProc.command = ['),
             ("shell/Ui/MultiSelect.qml", 'optionsProcess.command = cmd'),
             ("shell/services/AppLibrary.qml", 'if (command) Util.execDetached(command)'),
             ("shell/plugins/bar/Bar.qml", 'if (command) root.run(command)'),
+            ("shell/plugins/bar/Bar.qml", 'Util.execDetached(command)'),
+            ("shell/Commons/Util.qml", 'Quickshell.execDetached(["bash", "-lc", command])'),
     }
     allowed_dynamic_used: set[tuple[str, str]] = set()
 
@@ -253,10 +269,11 @@ def source_executables(path: str, text: str) -> list[dict[str, object]]:
         ):
             add(dynamic_name, line_number, "command-array-shell", source_line)
 
-    for match in DYNAMIC_COMMAND_RE.finditer(text):
-        line_number = text.count("\n", 0, match.start()) + 1
-        source_line = text.splitlines()[line_number - 1]
-        add(dynamic_name, line_number, "dynamic-command", source_line)
+    for pattern in (DYNAMIC_COMMAND_RE, DYNAMIC_SCRIPT_RE):
+        for match in pattern.finditer(text):
+            line_number = text.count("\n", 0, match.start()) + 1
+            source_line = text.splitlines()[line_number - 1]
+            add(dynamic_name, line_number, "dynamic-command", source_line)
 
     for pattern in (DYNAMIC_ASSIGNMENT_RE, DYNAMIC_CALL_RE, DYNAMIC_RUN_RE):
         for match in pattern.finditer(text):
