@@ -261,6 +261,10 @@ def source_executables(path: str, text: str, pinned_text: str = "") -> list[dict
                 continue
         return values
 
+    def array_has_dynamic_elements(value: str) -> bool:
+        remainder = re.sub(r"(['\"])(.*?)(?<!\\)\1", "", value, flags=re.DOTALL)
+        return any(part.strip() for part in remainder.split(","))
+
     def literal_shell_payload(value: str) -> str | None:
         match = re.match(
             r"\s*['\"]([^'\"]+)['\"]\s*,\s*['\"]([^'\"]*)['\"]\s*,\s*"
@@ -300,6 +304,9 @@ def source_executables(path: str, text: str, pinned_text: str = "") -> list[dict
         if not values:
             if match.group(1).strip():
                 add(dynamic_name, line_number, "command-array", source_line)
+            continue
+        if array_has_dynamic_elements(match.group(1)):
+            add(dynamic_name, line_number, "command-array", source_line)
             continue
         add(values[0], line_number, "command-array", source_line)
         payload = literal_shell_payload(match.group(1))
