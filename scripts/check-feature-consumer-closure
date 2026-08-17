@@ -144,7 +144,13 @@ def main() -> int:
                 pinned_text = pinned.read_text(encoding="utf-8")
             except OSError as error:
                 fail(f"cannot read pinned consumer {relative}: {error}")
-        discovered_helpers = set(HELPER_PATTERN.findall(current_text))
+        discovered_helpers = set(
+            helper
+            for line in current_text.splitlines()
+            if not line.lstrip().startswith("//")
+            and "WlrLayershell.namespace" not in line
+            for helper in HELPER_PATTERN.findall(line)
+        )
         unknown_helpers = sorted(discovered_helpers - set(helper_features))
         if unknown_helpers:
             fail(

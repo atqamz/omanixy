@@ -338,7 +338,13 @@ let
   featureSurface = builtins.toJSON {
     selectedFeatures = selectedFeatures;
     dependencies = featureSelection.dependencies;
-    helperFeatures = helperFeatures // { omarchy-shell = "core"; };
+    helperFeatures = helperFeatures // {
+      omarchy-font-current = "core";
+      omarchy-font-list = "core";
+      omarchy-font-set = "core";
+      omarchy-menu = "core";
+      omarchy-shell = "core";
+    };
     inherit featureRoots;
     consumerFeatureOverrides = [
       { path = "shell/plugins/menu/Menu.qml"; helper = "omarchy-powerprofiles-list"; feature = "power"; }

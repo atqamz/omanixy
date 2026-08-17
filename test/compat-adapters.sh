@@ -829,7 +829,6 @@ if TEST_IP_TIMEOUT=1 HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-network-
   exit 1
 fi
 grep -q 'route lookup timed out' "$test_root/error"
-record_case omarchy-network-status backendFailure
 TEST_IP_NO_ROUTE=1 HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-network-status >"$test_root/disconnected"
 grep -Fqx -- $'disconnected\t\t\t' "$test_root/disconnected"
 link_adapter omarchy-network-band

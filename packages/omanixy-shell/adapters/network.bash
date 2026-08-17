@@ -247,9 +247,9 @@ network_band() {
   [[ -n $profile ]] || fail "$name: no active Wi-Fi profile"
   if (($# == 0)); then
     need iw
-    ssid=$(network_iw dev "$device" link | awk '/SSID:/ { sub(/.*SSID: /, ""); print; exit }') ||
+    ssid=$(network_iw dev "$device" link | awk '/SSID:/ && !found { sub(/.*SSID: /, ""); value=$0; found=1 } END { if (found) print value; else exit 1 }') ||
       fail "$name: wireless SSID lookup failed"
-    freq=$(network_iw dev "$device" link | awk '/freq:/ { print $2; exit }') ||
+    freq=$(network_iw dev "$device" link | awk '/freq:/ && !found { value=$2; found=1 } END { if (found) print value; else exit 1 }') ||
       fail "$name: wireless frequency lookup failed"
     target=$(awk -v frequency="$freq" 'BEGIN { if (frequency >= 2400 && frequency < 2500) print "2.4"; else if (frequency >= 4900 && frequency < 5925) print "5"; else if (frequency >= 5925 && frequency < 7125) print "6" }')
     available=$(network_available_bands "$device" "$ssid" "$target") ||
@@ -275,9 +275,9 @@ network_band() {
   desired=$target
   if [[ -n $desired ]]; then
     need iw
-    ssid=$(network_iw dev "$device" link | awk '/SSID:/ { sub(/.*SSID: /, ""); print; exit }') ||
+    ssid=$(network_iw dev "$device" link | awk '/SSID:/ && !found { sub(/.*SSID: /, ""); value=$0; found=1 } END { if (found) print value; else exit 1 }') ||
       fail "$name: wireless SSID lookup failed"
-    freq=$(network_iw dev "$device" link | awk '/freq:/ { print $2; exit }') ||
+    freq=$(network_iw dev "$device" link | awk '/freq:/ && !found { value=$2; found=1 } END { if (found) print value; else exit 1 }') ||
       fail "$name: wireless frequency lookup failed"
     current_band=$(network_band_from_frequency "$freq")
     available=$(network_available_bands "$device" "$ssid" "$current_band") ||
@@ -318,7 +318,7 @@ network_band() {
     fail "$name: NetworkManager reported an unexpected band after activation; rollback failed and the profile may still be changed"
   fi
   if [[ -n $desired ]]; then
-    freq=$(network_iw dev "$device" link | awk '/freq:/ { print $2; exit }') || {
+    freq=$(network_iw dev "$device" link | awk '/freq:/ && !found { value=$2; found=1 } END { if (found) print value; else exit 1 }') || {
       if restore_band; then
         fail "$name: Wi-Fi band activation could not be verified; the previous band was restored"
       fi
