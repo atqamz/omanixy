@@ -125,6 +125,8 @@ def shell_executables(value: str) -> list[str]:
             continue
         first = words[0]
         if first in SHELL_BUILTINS:
+            if first in {"!", "time"}:
+                commands.extend(_next_command(words, 1))
             continue
         if first in {"command", "builtin", "exec"}:
             commands.extend(_next_command(words, 1))
@@ -158,8 +160,7 @@ def source_executables(path: str, text: str) -> list[dict[str, object]]:
     references: list[dict[str, object]] = []
     dynamic_name = DYNAMIC_EXECUTABLE
 
-    def add(name: str, line: int, invocation: str, shape: str) -> None:
-        allowed_dynamic_shapes = {
+    allowed_dynamic_shapes = {
             ("shell/plugins/panels/network/Panel.qml", 'command: ["bash", "-c", root.dnsCommand("")]'),
             ("shell/plugins/panels/network/Panel.qml", 'actionProc.command = ["bash", "-c", root.dnsCommand(provider)]'),
             ("shell/plugins/menu/Menu.qml", 'providerProc.command = ["bash", "-lc", spec.script]'),
@@ -174,11 +175,18 @@ def source_executables(path: str, text: str) -> list[dict[str, object]]:
             ("shell/Ui/MultiSelect.qml", 'optionsProcess.command = cmd'),
             ("shell/services/AppLibrary.qml", 'if (command) Util.execDetached(command)'),
             ("shell/plugins/bar/Bar.qml", 'if (command) root.run(command)'),
-        }
+    }
+    allowed_dynamic_used: set[tuple[str, str]] = set()
+
+    def add(name: str, line: int, invocation: str, shape: str) -> None:
         normalized_shape = " ".join(shape.split())
-        if name == dynamic_name and (path, normalized_shape) in allowed_dynamic_shapes:
+        dynamic_key = (path, normalized_shape)
+        if name == dynamic_name and dynamic_key in allowed_dynamic_shapes and dynamic_key not in allowed_dynamic_used:
+            allowed_dynamic_used.add(dynamic_key)
             return
-        if not name or name in SHELL_BUILTINS or name.startswith(("/", "$", "omarchy-")):
+        if name.startswith("/"):
+            name = name.rsplit("/", 1)[-1]
+        if not name or name in SHELL_BUILTINS or name.startswith(("$", "omarchy-")):
             return
         references.append({"name": name, "line": line, "invocation": invocation, "shape": shape.strip()})
 
@@ -237,7 +245,7 @@ def source_executables(path: str, text: str) -> list[dict[str, object]]:
             for name in shell_executables(payload):
                 add(name, line_number, "command-array-shell", source_line)
         elif (
-            re.match(r"\s*command\s*[:=]", match.group(0))
+            re.match(r"\s*(?:command\s*[:=]|(?:Quickshell|Util)\.exec(?:Detached)?\s*\()", match.group(0))
             and re.search(
             r"['\"](?:bash|dash|sh|zsh)['\"]\s*,\s*['\"][^'\"]*c[^'\"]*['\"]\s*,",
             match.group(1),
@@ -268,13 +276,14 @@ def source_executables(path: str, text: str) -> list[dict[str, object]]:
         for name in shell_executables(match.group(2)):
             add(name, line_number, "shell-string", source_line)
 
-    function_names = {
-        match.group(1)
-        for match in re.finditer(
-            r"^\s*(?:function\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*(?:\(\s*\))?\s*\{", text, re.MULTILINE
-        )
-    }
-    references = [reference for reference in references if reference["name"] not in function_names]
+    if path.endswith((".sh", ".bash")):
+        function_names = {
+            match.group(1)
+            for match in re.finditer(
+                r"^\s*(?:function\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*(?:\(\s*\))?\s*\{", text, re.MULTILINE
+            )
+        }
+        references = [reference for reference in references if reference["name"] not in function_names]
     unique: dict[tuple[str, int, str], dict[str, object]] = {}
     for reference in references:
         key = (str(reference["name"]), int(reference["line"]), str(reference["invocation"]))
