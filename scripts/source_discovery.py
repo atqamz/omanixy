@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import ast
 import re
 import shlex
 
 
 SHELL_BUILTINS = {
     "!",
+    ":",
     "[",
     "[[",
     "]",
@@ -20,6 +22,7 @@ SHELL_BUILTINS = {
     "done",
     "elif",
     "else",
+    "exec",
     "esac",
     "eval",
     "exit",
@@ -70,7 +73,11 @@ COMMAND_SUBSHELL_RE = re.compile(r"\$\(([^()]*)\)")
 PROCESS_SUBSHELL_RE = re.compile(r"<\s*<\(([^()]*)\)")
 ARRAY_COMMAND_RE = re.compile(
     r"(?:\bcommand\s*[:=]|(?:Quickshell|Util)\.exec(?:Detached)?\s*\()\s*"
-    r"\[\s*[\"']([^\"']+)",
+    r"\[([^\]]*)\]",
+    re.DOTALL,
+)
+SHELL_PAYLOAD_RE = re.compile(
+    r"\b(?:command|script)\s*:\s*([\"'])(.*?)(?<!\\)\1",
     re.DOTALL,
 )
 SHELL_STRING_RE = re.compile(
@@ -98,16 +105,20 @@ def shell_executables(value: str) -> list[str]:
     """Return literal command names from a shell command string."""
 
     commands: list[str] = []
+    for match in COMMAND_SUBSHELL_RE.finditer(value):
+        commands.extend(shell_executables(match.group(1)))
     for part in re.split(r"(?:&&|\|\||[;&|])", value):
         try:
             words = shlex.split(part, comments=False, posix=True)
         except ValueError:
             words = re.findall(r"[A-Za-z][A-Za-z0-9_.+-]*", part)
-        while words and (words[0] in SHELL_BUILTINS or words[0] in {"if", "then", "else"}):
+        while words and words[0] in {"if", "then", "else"}:
             words.pop(0)
         if not words:
             continue
         first = words[0]
+        if first in SHELL_BUILTINS:
+            continue
         if first in {"command", "builtin"}:
             commands.extend(_next_command(words, 1))
         elif first == "timeout":
@@ -117,7 +128,8 @@ def shell_executables(value: str) -> list[str]:
             commands.append(first)
             commands.extend(_next_command(words, 1))
         elif first.startswith("$") or "=" in first and first.split("=", 1)[0].isidentifier():
-            commands.extend(_next_command(words, 1))
+            if "$(" not in first:
+                commands.extend(_next_command(words, 1))
         elif first not in SHELL_BUILTINS and not first.startswith(("/", "-")):
             commands.append(first)
     return list(dict.fromkeys(commands))
@@ -129,9 +141,31 @@ def source_executables(path: str, text: str) -> list[dict[str, object]]:
     references: list[dict[str, object]] = []
 
     def add(name: str, line: int, invocation: str, shape: str) -> None:
-        if not name or name.startswith(("/", "$", "omarchy-")):
+        if not name or name in SHELL_BUILTINS or name.startswith(("/", "$", "omarchy-")):
             return
         references.append({"name": name, "line": line, "invocation": invocation, "shape": shape.strip()})
+
+    def literal_array_values(value: str) -> list[str]:
+        values = []
+        for match in re.finditer(r"(['\"])(.*?)(?<!\\)\1", value, re.DOTALL):
+            try:
+                values.append(ast.literal_eval(match.group(0)))
+            except (SyntaxError, ValueError):
+                continue
+        return values
+
+    def literal_shell_payload(value: str) -> str | None:
+        match = re.match(
+            r"\s*['\"]([^'\"]+)['\"]\s*,\s*['\"]([^'\"]*)['\"]\s*,\s*"
+            r"(['\"])((?:\\.|(?!\3).)*?)\3",
+            value,
+            re.DOTALL,
+        )
+        if not match or not match.group(1).rsplit("/", 1)[-1] in {"bash", "dash", "sh", "zsh"}:
+            return None
+        if not match.group(2).startswith("-") or "c" not in match.group(2):
+            return None
+        return match.group(4)
 
     for line_number, line in enumerate(text.splitlines(), 1):
         if path.endswith((".sh", ".bash")):
@@ -155,7 +189,20 @@ def source_executables(path: str, text: str) -> list[dict[str, object]]:
     for match in ARRAY_COMMAND_RE.finditer(text):
         line_number = text.count("\n", 0, match.start()) + 1
         source_line = text.splitlines()[line_number - 1]
-        add(match.group(1), line_number, "command-array", source_line)
+        values = literal_array_values(match.group(1))
+        if not values:
+            continue
+        add(values[0], line_number, "command-array", source_line)
+        payload = literal_shell_payload(match.group(1))
+        if payload is not None:
+            for name in shell_executables(payload):
+                add(name, line_number, "command-array-shell", source_line)
+
+    for match in SHELL_PAYLOAD_RE.finditer(text):
+        line_number = text.count("\n", 0, match.start()) + 1
+        source_line = text.splitlines()[line_number - 1]
+        for name in shell_executables(match.group(2)):
+            add(name, line_number, "shell-payload", source_line)
 
     for match in SHELL_STRING_RE.finditer(text):
         line_number = text.count("\n", 0, match.start()) + 1

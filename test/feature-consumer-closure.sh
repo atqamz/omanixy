@@ -330,6 +330,34 @@ fi
 grep -Fq 'unknown external executable: wget' "$test_root/unknown-process-error"
 printf '%s\n' 'REJECTED unknown Process executable'
 
+unknown_shell_payload="$test_root/unknown-shell-payload-root"
+cp -R -- "$weather_root" "$unknown_shell_payload"
+chmod -R u+w "$unknown_shell_payload"
+printf '%s\n' 'Process { command: ["bash", "-lc", "pacman"] }' \
+  >> "$unknown_shell_payload/shell/plugins/panels/weather/Panel.qml"
+if "${PYTHON:-python3}" "$checker" "$unknown_shell_payload" "$pinned_source" \
+  "$weather_bin/runtime-surface.json" "$weather_bin/feature-surface.json" "$test_root/unknown-shell-payload.json" \
+  >"$test_root/unknown-shell-payload-output" 2>"$test_root/unknown-shell-payload-error"; then
+  printf '%s\n' 'feature consumer closure accepted pacman in a literal shell payload' >&2
+  exit 1
+fi
+grep -Fq 'unknown external executable: pacman' "$test_root/unknown-shell-payload-error"
+printf '%s\n' 'REJECTED pacman in a literal shell payload'
+
+unknown_script_payload="$test_root/unknown-script-payload-root"
+cp -R -- "$weather_root" "$unknown_script_payload"
+chmod -R u+w "$unknown_script_payload"
+printf '%s\n' 'Item { script: "pacman" }' \
+  >> "$unknown_script_payload/shell/plugins/panels/weather/Panel.qml"
+if "${PYTHON:-python3}" "$checker" "$unknown_script_payload" "$pinned_source" \
+  "$weather_bin/runtime-surface.json" "$weather_bin/feature-surface.json" "$test_root/unknown-script-payload.json" \
+  >"$test_root/unknown-script-payload-output" 2>"$test_root/unknown-script-payload-error"; then
+  printf '%s\n' 'feature consumer closure accepted pacman in a script payload' >&2
+  exit 1
+fi
+grep -Fq 'unknown external executable: pacman' "$test_root/unknown-script-payload-error"
+printf '%s\n' 'REJECTED pacman in a script payload'
+
 unknown_shell="$test_root/unknown-shell-root"
 cp -R -- "$launcher_root" "$unknown_shell"
 chmod -R u+w "$unknown_shell"
