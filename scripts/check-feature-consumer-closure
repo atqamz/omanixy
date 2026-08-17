@@ -10,7 +10,7 @@ from pathlib import Path
 
 
 HELPER_PATTERN = re.compile(r"\bomarchy-[a-z0-9-]+\b")
-SOURCE_SUFFIXES = {".qml", ".js", ".json", ".jsonc"}
+SOURCE_SUFFIXES = {".qml", ".js", ".json", ".jsonc", ".sh", ".bash"}
 
 
 def fail(message: str) -> None:

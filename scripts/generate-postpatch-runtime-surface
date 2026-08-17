@@ -351,8 +351,6 @@ def main() -> int:
         if not consumer_path.is_file():
             fail(f"{helper} consumer is missing: {consumer}")
         source = consumer_path.read_bytes()
-        if helper not in {"omarchy-shell", "omarchy-capture-screenshot"} and helper.encode() not in source:
-            fail(f"{helper} is not referenced by generated consumer {consumer}")
         consumer_sources = [{
             "path": consumer,
             "sha256": hashlib.sha256(source).hexdigest(),

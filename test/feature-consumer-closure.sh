@@ -209,6 +209,20 @@ fi
 grep -Fq 'Clipboard.qml (clipboard) requires executable brightnessctl (monitor)' "$test_root/clipboard-external-error"
 printf '%s\n' 'REJECTED clipboard external executable without dependency'
 
+clipboard_script_external="$test_root/clipboard-script-external-root"
+cp -R -- "$clipboard_root" "$clipboard_script_external"
+chmod -R u+w "$clipboard_script_external"
+printf '%s\n' 'brightnessctl' >> "$clipboard_script_external/shell/plugins/clipboard/capture.sh"
+if "${PYTHON:-python3}" "$checker" "$clipboard_script_external" "$pinned_source" \
+  "$clipboard_bin/runtime-surface.json" "$clipboard_bin/feature-surface.json" "$test_root/clipboard-script-external.json" \
+  >"$test_root/clipboard-script-external-output" 2>"$test_root/clipboard-script-external-error"; then
+  printf '%s\n' 'feature consumer closure accepted executable drift in a shell source' >&2
+  exit 1
+fi
+grep -Fq 'capture.sh (clipboard) requires executable brightnessctl (monitor)' \
+  "$test_root/clipboard-script-external-error"
+printf '%s\n' 'REJECTED shell-source external executable without dependency'
+
 core_external="$test_root/core-external-root"
 cp -R -- "$core_root" "$core_external"
 chmod -R u+w "$core_external"
