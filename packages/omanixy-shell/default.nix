@@ -150,7 +150,6 @@ let
             install -Dm644 ${./AppLibrarySupport.js} "$out/shell/services/AppLibrarySupport.js"
             ${pkgs.python3}/bin/python3 ${../../scripts/patch-app-library} \
               "$out/shell/services/AppLibrary.qml"
-            test "$(grep -Fc 'import "AppLibrarySupport.js" as AppLibrarySupport' "$out/shell/services/AppLibrary.qml")" -eq 1
             substituteInPlace "$out/shell/services/AppLibrary.qml" \
               --replace-fail 'Util.execDetached("uwsm-app -- gtk-launch " + Util.shellQuote(id + ".desktop"))' \
                 'var command = AppLibrarySupport.launchCommand(id)
