@@ -174,7 +174,7 @@ post-patch root, including exact always-loaded service sources and the filtered
 safe menu, and rejects an invocation whose helper or executable capability is
 outside the selected runtime capability closure.
 The scanner's only false-positive suppressions are exact path, helper, and
-source-line records with a reason.
+source-shape records with a reason.
 The always-selected core group provides the baseline shell support.
 The optional presentation feature groups are `network`, `audio`, `bluetooth`,
 `screenshot`, `clipboard`, `power`, `monitor`, `weather`, `notification`, and
