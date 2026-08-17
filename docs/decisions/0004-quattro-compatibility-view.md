@@ -26,7 +26,7 @@ definition.
 Its complete `bin/` surface is not copied into the root.
 The root contains only dispatch wrappers for the audited helper names required
 by reachable Quattro consumers.
-The compatibility view carries nine documented persistent source patch sites:
+The compatibility view carries ten documented persistent source patch sites:
 the registry safety floor for bar widgets, enterprise Wi-Fi filtering through
 the network panel's model, removal of the Custom DNS provider/action/pill,
 hiding the unsupported speed-test action, clock middle-click routing, the

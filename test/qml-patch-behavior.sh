@@ -119,12 +119,58 @@ menu_fixture="$test_root/Menu.qml"
 cp "$pinned_source/shell/plugins/menu/Menu.qml" "$menu_fixture"
 chmod u+w "$menu_fixture"
 "$python" "$menu_patcher" "$menu_fixture"
-test "$(grep -Fc 'omarchy-powerprofiles-list' "$menu_fixture")" -eq 0
-test "$(grep -Fc 'omarchy-powerprofiles-set' "$menu_fixture")" -eq 0
 "$python" "$font_patcher" "$menu_fixture"
-test "$(grep -Fc 'omarchy-font-current' "$menu_fixture")" -eq 0
-test "$(grep -Fc 'omarchy-font-list' "$menu_fixture")" -eq 0
-test "$(grep -Fc 'omarchy-font-set' "$menu_fixture")" -eq 0
+
+menu_root="$test_root/menu"
+mkdir -p "$menu_root"
+cp "$menu_fixture" "$menu_root/Menu.qml"
+cp "$pinned_source/shell/plugins/menu/MenuModel.js" "$menu_root/MenuModel.js"
+rm "$menu_fixture"
+sed -i -e '0,/PanelWindow {/s//Item {/' -e '/color: "transparent"/d' \
+  -e '/WlrLayershell\./d' -e '/exclusionMode:/d' \
+  -e '/anchors { top: true; bottom: true; left: true; right: true }/d' "$menu_root/Menu.qml"
+cat > "$test_root/shell.qml" <<'EOF'
+import QtQuick
+import Quickshell
+
+ShellRoot {
+  Loader {
+    id: menuLoader
+    source: Qt.resolvedUrl("menu/Menu.qml")
+  }
+
+  Timer {
+    interval: 100
+    repeat: true
+    running: true
+    property int attempts: 0
+    onTriggered: {
+      attempts++
+      if (!menuLoader.item) {
+        if (attempts >= 50) {
+          console.log("MENU_PATCH_FAIL", "menu did not load")
+          Qt.quit()
+        }
+        return
+      }
+      var providers = menuLoader.item.providers || {}
+      if (Object.prototype.hasOwnProperty.call(providers, "fonts") || Object.prototype.hasOwnProperty.call(providers, "power-profiles")) {
+        console.log("MENU_PATCH_FAIL", Object.keys(providers).join(","))
+      } else {
+        console.log("MENU_PATCH_PASS")
+      }
+      Qt.quit()
+    }
+  }
+}
+EOF
+HOME="$test_root/home" XDG_RUNTIME_DIR="$test_root/runtime" QT_QPA_PLATFORM=offscreen \
+  QML2_IMPORT_PATH="$test_root" OMARCHY_PATH="$root" timeout 10s "$quickshell" -n -p "$test_root" \
+  >"$test_root/menu-quickshell.log" 2>&1 || true
+grep -Fq 'MENU_PATCH_PASS' "$test_root/menu-quickshell.log" || {
+  cat "$test_root/menu-quickshell.log" >&2
+  exit 1
+}
 
 menu_drift_fixture="$test_root/Menu-drift.qml"
 cp "$pinned_source/shell/plugins/menu/Menu.qml" "$menu_drift_fixture"

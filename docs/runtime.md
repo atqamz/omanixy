@@ -108,7 +108,7 @@ Quattro is consumed from a deterministic immutable compatibility root through
 The root contains the pinned source view used by the supported runtime graph,
 including shared QML libraries, shell services, the baseline bar widgets, and
 the copied panel and overlay sources needed by the registry.
-It applies nine narrow patch sites: the disabled-plugin floor on bar widgets,
+It applies ten narrow patch sites: the disabled-plugin floor on bar widgets,
 enterprise Wi-Fi filtering through the network panel's model, removal of the
 Custom DNS provider/action/pill, hiding the unsupported speed-test action,
 clock middle-click routing, the native bar transparency fallback, the

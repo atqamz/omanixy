@@ -149,8 +149,7 @@ def main() -> int:
             for line in current_text.splitlines()
             if not line.lstrip().startswith("//")
             and "WlrLayershell.namespace" not in line
-            and "omarchy-menu.jsonc" not in line
-            for helper in HELPER_PATTERN.findall(line)
+            for helper in HELPER_PATTERN.findall(line.replace("omarchy-menu.jsonc", ""))
         )
         unknown_helpers = sorted(discovered_helpers - set(helper_features))
         if unknown_helpers:
