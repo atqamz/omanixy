@@ -141,6 +141,8 @@ def shell_executables(value: str) -> list[str]:
                     commands.append(DYNAMIC_EXECUTABLE)
             elif first == "function" and "{" in words:
                 commands.extend(shell_executables(" ".join(words[words.index("{") + 1 :])))
+            elif first == "source":
+                commands.append(DYNAMIC_EXECUTABLE)
             continue
         if first in {"command", "builtin", "exec"}:
             commands.extend(_next_command(words, 1))
