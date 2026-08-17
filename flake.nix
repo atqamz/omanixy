@@ -74,6 +74,7 @@
           bluetoothRuntime = runtimeFor system [ "bluetooth" ];
           weatherRuntime = runtimeFor system [ "weather" ];
           audioRuntime = runtimeFor system [ "audio" ];
+          networkRuntime = runtimeFor system [ "network" ];
           launcherRuntime = runtimeFor system [ "launcher" ];
           screenshotRuntime = runtimeFor system [ "screenshot" ];
           coreRuntime = runtimeFor system [ "core" ];
@@ -84,15 +85,33 @@
           coreHomeConfiguration = homeConfigurationFor system {
             programs.omanixy.features = [ "core" ];
           };
+          audioHomeConfiguration = homeConfigurationFor system {
+            programs.omanixy.features = [ "audio" ];
+          };
+          weatherHomeConfiguration = homeConfigurationFor system {
+            programs.omanixy.features = [ "weather" ];
+          };
+          networkHomeConfiguration = homeConfigurationFor system {
+            programs.omanixy.features = [ "network" ];
+          };
           runtimeClosureInfo = pkgs.closureInfo { rootPaths = [ runtime ]; };
           compatibilityRoot = runtime.passthru.omarchyCompatibilityRoot;
+          baselineConfigForTests = builtins.removeAttrs
+            (builtins.fromJSON (builtins.readFile ./upstream/shell-baseline.json))
+            [ "featurePlugins" "featureDependencies" "featureOrder" "migrations" ];
+          featurePluginIdsForTests = nixpkgs.lib.unique (nixpkgs.lib.concatLists (builtins.attrValues
+            (builtins.fromJSON (builtins.readFile ./upstream/shell-baseline.json)).featurePlugins));
           storeConfig = pkgs.writeText "omanixy-historical-shell-config" (builtins.readFile ./upstream/shell-baseline-v1.json);
+          featureStoreConfig = pkgs.writeText "omanixy-feature-derived-shell-config" (builtins.toJSON (baselineConfigForTests // {
+            disabledPlugins = nixpkgs.lib.unique (baselineConfigForTests.disabledPlugins ++ featurePluginIdsForTests);
+          }));
           malformedStoreConfig = pkgs.writeText "omanixy-malformed-store-shell-config" ''{"disabledPlugins":'';
           homeConfiguration = homeConfigurationFor system { };
           customHomeConfiguration = homeConfigurationFor system {
             programs.omanixy.shell.config = {
               version = 1;
               custom = true;
+              disabledPlugins = [ "omarchy.audio" ];
             };
           };
           invalidHomeConfiguration = builtins.tryEval (
@@ -141,6 +160,9 @@
           activationScript = pkgs.writeShellScript "omanixy-shell-state-activation" homeConfiguration.config.home.activation.omanixyShellState.data;
           clipboardActivationScript = pkgs.writeShellScript "omanixy-shell-clipboard-state-activation" clipboardHomeConfiguration.config.home.activation.omanixyShellState.data;
           coreActivationScript = pkgs.writeShellScript "omanixy-shell-core-state-activation" coreHomeConfiguration.config.home.activation.omanixyShellState.data;
+          audioActivationScript = pkgs.writeShellScript "omanixy-shell-audio-state-activation" audioHomeConfiguration.config.home.activation.omanixyShellState.data;
+          weatherActivationScript = pkgs.writeShellScript "omanixy-shell-weather-state-activation" weatherHomeConfiguration.config.home.activation.omanixyShellState.data;
+          networkActivationScript = pkgs.writeShellScript "omanixy-shell-network-state-activation" networkHomeConfiguration.config.home.activation.omanixyShellState.data;
           customActivationScript = pkgs.writeShellScript "omanixy-shell-custom-state-activation" customHomeConfiguration.config.home.activation.omanixyShellState.data;
           serviceUnit = pkgs.writeText "omanixy-shell.service" ''
             [Unit]
@@ -204,7 +226,7 @@
               and (has("trigger.screenshot") | not)
               and (has("system.logout") | not)
             ' ${clipboardRuntime.passthru.safeMenu} >/dev/null
-            jq -e '.disabledPlugins | index("omarchy.network") != null and index("omarchy.audio") != null' ${clipboardRuntime.passthru.safeShellConfig} >/dev/null
+            jq -e '.disabledPlugins | index("omarchy.network") == null and index("omarchy.audio") == null' ${clipboardRuntime.passthru.safeShellConfig} >/dev/null
             touch "$out"
           '';
           feature-closure = pkgs.runCommand "omanixy-feature-closure"
@@ -240,10 +262,15 @@
             ${pkgs.bash}/bin/bash ${./test/feature-lifecycle.sh} \
               ${activationScript} ${clipboardActivationScript} ${coreActivationScript} \
               ${runtime} ${clipboardRuntime} ${coreRuntime} \
-              ${runtime.passthru.omarchyCompatibilityRoot} \
+            ${runtime.passthru.omarchyCompatibilityRoot} \
               ${clipboardRuntime.passthru.omarchyCompatibilityRoot} \
               ${coreRuntime.passthru.omarchyCompatibilityRoot} \
-              ${runtime.passthru.quickshell}/bin/quickshell
+              ${runtime.passthru.quickshell}/bin/quickshell \
+              ${audioActivationScript} ${weatherActivationScript} ${networkActivationScript} \
+              ${audioRuntime} ${weatherRuntime} ${networkRuntime} \
+              ${audioRuntime.passthru.omarchyCompatibilityRoot} \
+              ${weatherRuntime.passthru.omarchyCompatibilityRoot} \
+              ${networkRuntime.passthru.omarchyCompatibilityRoot}
             touch "$out"
           '';
           config-ownership = pkgs.runCommand "omanixy-config-ownership"
@@ -253,7 +280,7 @@
               malformedStoreConfig = malformedStoreConfig;
               nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.diffutils pkgs.jq ];
             } ''
-            ${pkgs.bash}/bin/bash ${./test/config-ownership.sh} "$activation" "$customActivation" /build/omanixy-test /build/omanixy-custom-test /build/omanixy-store-link-test ${storeConfig} "$malformedStoreConfig" ${./upstream/shell-baseline-v1.json}
+            ${pkgs.bash}/bin/bash ${./test/config-ownership.sh} "$activation" "$customActivation" /build/omanixy-test /build/omanixy-custom-test /build/omanixy-store-link-test ${storeConfig} ${featureStoreConfig} "$malformedStoreConfig" ${./upstream/shell-baseline-v1.json}
             touch "$out"
           '';
           service-unit = pkgs.runCommand "omanixy-service-unit"
@@ -345,9 +372,9 @@
           '';
           compatibility-test-matrix = pkgs.runCommand "omanixy-compatibility-test-matrix"
             {
-              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gawk pkgs.gnugrep pkgs.gnused pkgs.jq pkgs.procps pkgs.util-linux ];
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gawk pkgs.gnugrep pkgs.gnused pkgs.jq pkgs.procps pkgs.python3 pkgs.util-linux ];
             } ''
-            ${pkgs.bash}/bin/bash ${./test/compatibility-test-matrix.sh} ${./.} ${compatibilityRoot} ${./upstream/compatibility-test-matrix.json} ${runtime}/bin
+            PYTHON=${pkgs.python3}/bin/python3 ${pkgs.bash}/bin/bash ${./test/compatibility-test-matrix.sh} ${./.} ${compatibilityRoot} ${./upstream/compatibility-test-matrix.json} ${runtime}/bin
             touch "$out"
           '';
           safe-menu-contract = pkgs.runCommand "omanixy-safe-menu-contract"

@@ -11,6 +11,22 @@ full_root=${7:?full compatibility root required}
 clipboard_root=${8:?clipboard compatibility root required}
 core_root=${9:?core compatibility root required}
 quickshell=${10:?Quickshell executable required}
+audio_activation=${11:?audio activation script required}
+weather_activation=${12:?weather activation script required}
+network_activation=${13:?network activation script required}
+audio_runtime=${14:?audio runtime required}
+weather_runtime=${15:?weather runtime required}
+network_runtime=${16:?network runtime required}
+audio_root=${17:?audio compatibility root required}
+weather_root=${18:?weather compatibility root required}
+network_root=${19:?network compatibility root required}
+
+activate() {
+  local home=$1
+  local activation=$2
+  HOME="$home" USER=omanixy-test XDG_RUNTIME_DIR="$home/runtime" \
+    bash -c 'run() { "$@"; }; source "$1"' bash "$activation"
+}
 
 runtime_path() {
   sed -n 's/^export PATH="\(.*\)"$/\1/p' "$1/bin/omanixy-shell-runtime"
@@ -24,48 +40,97 @@ assert_absent() {
 test_root=$(mktemp -d)
 trap 'chmod -R u+w "$test_root" 2>/dev/null || true; rm -rf "$test_root"' EXIT
 
+feature_plugin_ids=(
+  omarchy.audio
+  omarchy.bluetooth
+  omarchy.monitor
+  omarchy.network
+  omarchy.power
+  omarchy.weather
+)
+
+assert_no_feature_omissions() {
+  local config=$1
+  for plugin in "${feature_plugin_ids[@]}"; do
+    jq -e --arg plugin "$plugin" '(.disabledPlugins | index($plugin)) == null' "$config" >/dev/null
+  done
+}
+
+fresh_clipboard_home="$test_root/fresh-clipboard-home"
+mkdir -p "$fresh_clipboard_home"
+activate "$fresh_clipboard_home" "$clipboard_activation"
+fresh_clipboard_config="$fresh_clipboard_home/.config/omarchy/shell.json"
+test -f "$fresh_clipboard_config"
+assert_no_feature_omissions "$fresh_clipboard_config"
+jq -e '.selectedFeatures == ["core", "clipboard"] and (.runtimeBlockedPlugins | index("omarchy.audio") != null)' \
+  "$fresh_clipboard_home/.local/state/omanixy/capabilities.json" >/dev/null
+activate "$fresh_clipboard_home" "$full_activation"
+jq -e '.selectedFeatures | index("weather") != null and index("audio") != null' \
+  "$fresh_clipboard_home/.local/state/omanixy/capabilities.json" >/dev/null
+
+fresh_core_home="$test_root/fresh-core-home"
+mkdir -p "$fresh_core_home"
+activate "$fresh_core_home" "$core_activation"
+fresh_core_config="$fresh_core_home/.config/omarchy/shell.json"
+test -f "$fresh_core_config"
+assert_no_feature_omissions "$fresh_core_config"
+jq -e '.selectedFeatures == ["core"]' \
+  "$fresh_core_home/.local/state/omanixy/capabilities.json" >/dev/null
+activate "$fresh_core_home" "$full_activation"
+
+fresh_audio_home="$test_root/fresh-audio-home"
+mkdir -p "$fresh_audio_home"
+activate "$fresh_audio_home" "$audio_activation"
+fresh_audio_config="$fresh_audio_home/.config/omarchy/shell.json"
+test -f "$fresh_audio_config"
+assert_no_feature_omissions "$fresh_audio_config"
+activate "$fresh_audio_home" "$network_activation"
+jq -e '.selectedFeatures == ["core", "network"]' \
+  "$fresh_audio_home/.local/state/omanixy/capabilities.json" >/dev/null
+
+fresh_clipboard_weather_home="$test_root/fresh-clipboard-weather-home"
+mkdir -p "$fresh_clipboard_weather_home"
+activate "$fresh_clipboard_weather_home" "$clipboard_activation"
+fresh_clipboard_weather_config="$fresh_clipboard_weather_home/.config/omarchy/shell.json"
+activate "$fresh_clipboard_weather_home" "$weather_activation"
+jq -e '.selectedFeatures == ["core", "weather", "notification"]' \
+  "$fresh_clipboard_weather_home/.local/state/omanixy/capabilities.json" >/dev/null
+
 full_home="$test_root/full-home"
 mkdir -p "$full_home"
-HOME="$full_home" USER=omanixy-test XDG_RUNTIME_DIR="$full_home/runtime" \
-  bash -c 'run() { "$@"; }; source "$1"' bash "$full_activation"
+activate "$full_home" "$full_activation"
 test -f "$full_home/.config/omarchy/shell.json"
 cp "$full_home/.config/omarchy/shell.json" "$test_root/full-shell.json"
-HOME="$full_home" USER=omanixy-test XDG_RUNTIME_DIR="$full_home/runtime" \
-  bash -c 'run() { "$@"; }; source "$1"' bash "$full_activation"
+activate "$full_home" "$full_activation"
 cmp "$test_root/full-shell.json" "$full_home/.config/omarchy/shell.json"
-HOME="$full_home" USER=omanixy-test XDG_RUNTIME_DIR="$full_home/runtime" \
-  bash -c 'run() { "$@"; }; source "$1"' bash "$clipboard_activation"
+activate "$full_home" "$clipboard_activation"
 cmp "$test_root/full-shell.json" "$full_home/.config/omarchy/shell.json"
 jq '.bar.layout.center += [{"id": "omarchy.weather", "format": "custom"}]' \
   "$test_root/full-shell.json" > "$test_root/custom-shell.json"
 cp "$test_root/custom-shell.json" "$full_home/.config/omarchy/shell.json"
-HOME="$full_home" USER=omanixy-test XDG_RUNTIME_DIR="$full_home/runtime" \
-  bash -c 'run() { "$@"; }; source "$1"' bash "$clipboard_activation"
+activate "$full_home" "$clipboard_activation"
 cmp "$test_root/custom-shell.json" "$full_home/.config/omarchy/shell.json"
-HOME="$full_home" USER=omanixy-test XDG_RUNTIME_DIR="$full_home/runtime" \
-  bash -c 'run() { "$@"; }; source "$1"' bash "$full_activation"
+activate "$full_home" "$full_activation"
 cmp "$test_root/custom-shell.json" "$full_home/.config/omarchy/shell.json"
-HOME="$full_home" USER=omanixy-test XDG_RUNTIME_DIR="$full_home/runtime" \
-  bash -c 'run() { "$@"; }; source "$1"' bash "$core_activation"
+activate "$full_home" "$core_activation"
 cmp "$test_root/custom-shell.json" "$full_home/.config/omarchy/shell.json"
-HOME="$full_home" USER=omanixy-test XDG_RUNTIME_DIR="$full_home/runtime" \
-  bash -c 'run() { "$@"; }; source "$1"' bash "$clipboard_activation"
+activate "$full_home" "$clipboard_activation"
 cmp "$test_root/custom-shell.json" "$full_home/.config/omarchy/shell.json"
 
 core_home="$test_root/core-home"
 mkdir -p "$core_home"
-HOME="$core_home" USER=omanixy-test XDG_RUNTIME_DIR="$core_home/runtime" \
-  bash -c 'run() { "$@"; }; source "$1"' bash "$full_activation"
+activate "$core_home" "$full_activation"
 cp "$core_home/.config/omarchy/shell.json" "$test_root/core-full-shell.json"
-HOME="$core_home" USER=omanixy-test XDG_RUNTIME_DIR="$core_home/runtime" \
-  bash -c 'run() { "$@"; }; source "$1"' bash "$core_activation"
+activate "$core_home" "$core_activation"
 cmp "$test_root/core-full-shell.json" "$core_home/.config/omarchy/shell.json"
-HOME="$core_home" USER=omanixy-test XDG_RUNTIME_DIR="$core_home/runtime" \
-  bash -c 'run() { "$@"; }; source "$1"' bash "$core_activation"
+activate "$core_home" "$core_activation"
 cmp "$test_root/core-full-shell.json" "$core_home/.config/omarchy/shell.json"
 
 clipboard_path=$(runtime_path "$clipboard_runtime")
 full_path=$(runtime_path "$full_runtime")
+audio_path=$(runtime_path "$audio_runtime")
+weather_path=$(runtime_path "$weather_runtime")
+network_path=$(runtime_path "$network_runtime")
 
 test -x "$full_runtime/bin/omarchy-audio-output-set-default"
 test -x "$full_runtime/bin/omarchy-weather-status"
@@ -76,6 +141,12 @@ test -x "$full_runtime/bin/omarchy-bluetooth-device"
 PATH="$full_path" command -v pactl >/dev/null
 PATH="$full_path" command -v curl >/dev/null
 PATH="$full_path" command -v nmcli >/dev/null
+PATH="$audio_path" command -v pactl >/dev/null
+PATH="$weather_path" command -v curl >/dev/null
+PATH="$network_path" command -v nmcli >/dev/null
+test -x "$audio_runtime/bin/omarchy-audio-output-set-default"
+test -x "$weather_runtime/bin/omarchy-weather-status"
+test -x "$network_runtime/bin/omarchy-network-status"
 
 test -x "$clipboard_runtime/bin/omarchy-clipboard-paste-text"
 test -x "$clipboard_runtime/bin/omarchy-menu-emoji-insert"
@@ -110,9 +181,13 @@ for helper in \
 done
 
 run_registry_policy() {
-  local root=$1 expected=$2 name=$3
+  local root=$1 expected=$2 name=$3 config_file=${4:-}
   local harness="$test_root/$name.qml"
   local qml_root="$test_root/$name"
+  local config_json='{"disabledPlugins":[],"bar":{"layout":{"left":[],"center":[],"right":[]}}}'
+  if [[ -n $config_file ]]; then
+    config_json=$(jq -c '{disabledPlugins: (.disabledPlugins // []), bar: (.bar // {layout: {left: [], center: [], right: []}})}' "$config_file")
+  fi
   mkdir -p "$qml_root"
   ln -s "$root/shell" "$qml_root/qs"
   cat > "$harness" <<EOF
@@ -136,7 +211,7 @@ ShellRoot {
         "omarchy.weather": { kinds: ["panel"], __isFirstParty: true }
       })
       registry.shellConfigProvider = function() {
-        return { disabledPlugins: [], bar: { layout: { left: [], center: [], right: [] } } }
+        return ${config_json}
       }
       var expected = ${expected}
       var ids = [
@@ -165,8 +240,16 @@ EOF
   }
 }
 
-run_registry_policy "$full_root" '["omarchy.audio", "omarchy.bluetooth", "omarchy.clipboard", "omarchy.emojis", "omarchy.monitor", "omarchy.network", "omarchy.power", "omarchy.weather"]' full
-run_registry_policy "$clipboard_root" '["omarchy.clipboard", "omarchy.emojis"]' clipboard
-run_registry_policy "$core_root" '[]' core
+run_registry_policy "$full_root" '["omarchy.audio", "omarchy.bluetooth", "omarchy.clipboard", "omarchy.emojis", "omarchy.monitor", "omarchy.network", "omarchy.power", "omarchy.weather"]' full "$test_root/full-shell.json"
+run_registry_policy "$clipboard_root" '["omarchy.clipboard", "omarchy.emojis"]' clipboard "$test_root/full-shell.json"
+run_registry_policy "$core_root" '[]' core "$test_root/full-shell.json"
+run_registry_policy "$full_root" '["omarchy.audio", "omarchy.bluetooth", "omarchy.clipboard", "omarchy.emojis", "omarchy.monitor", "omarchy.network", "omarchy.power", "omarchy.weather"]' fresh-clipboard-full "$fresh_clipboard_config"
+run_registry_policy "$full_root" '["omarchy.audio", "omarchy.bluetooth", "omarchy.clipboard", "omarchy.emojis", "omarchy.monitor", "omarchy.network", "omarchy.power", "omarchy.weather"]' fresh-core-full "$fresh_core_config"
+run_registry_policy "$audio_root" '["omarchy.audio"]' fresh-audio "$fresh_audio_config"
+run_registry_policy "$network_root" '["omarchy.network"]' fresh-audio-network "$fresh_audio_config"
+run_registry_policy "$weather_root" '["omarchy.weather"]' fresh-clipboard-weather "$fresh_clipboard_weather_config"
+run_registry_policy "$clipboard_root" '["omarchy.clipboard", "omarchy.emojis"]' customized-clipboard "$test_root/custom-shell.json"
+activate "$fresh_clipboard_home" "$core_activation"
+run_registry_policy "$core_root" '[]' fresh-clipboard-full-core "$fresh_clipboard_config"
 
 printf '%s\n' 'feature lifecycle checks passed'

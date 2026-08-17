@@ -50,6 +50,27 @@ fi
 grep -Fq 'requires omarchy-audio-output-sink (audio)' "$test_root/mutated-error"
 printf '%s\n' 'REJECTED known cross-feature helper without dependency edge'
 
+unregistered_source="$test_root/unregistered-source-root"
+cp -R -- "$weather_root" "$unregistered_source"
+chmod -R u+w "$unregistered_source"
+test -f "$unregistered_source/shell/plugins/panels/weather/Model.js"
+if jq -e --arg path 'shell/plugins/panels/weather/Model.js' \
+  'any(.[]; any(.consumerSources[]?; .path == $path) or .consumer == $path)' \
+  "$weather_bin/runtime-surface.json" >/dev/null; then
+  printf '%s\n' 'weather Panel.qml unexpectedly has existing runtime-surface consumer evidence' >&2
+  exit 1
+fi
+printf '%s\n' 'root.bar.run("omarchy-audio-output-sink")' \
+  >> "$unregistered_source/shell/plugins/panels/weather/Model.js"
+if "${PYTHON:-python3}" "$checker" "$unregistered_source" "$pinned_source" \
+  "$weather_bin/runtime-surface.json" "$weather_bin/feature-surface.json" "$test_root/unregistered.json" \
+  >"$test_root/unregistered-output" 2>"$test_root/unregistered-error"; then
+  printf '%s\n' 'feature consumer closure accepted a known helper in an unregistered source' >&2
+  exit 1
+fi
+grep -Fq 'requires omarchy-audio-output-sink (audio)' "$test_root/unregistered-error"
+printf '%s\n' 'REJECTED known cross-feature helper in previously unregistered selected source'
+
 unknown_fixture="$test_root/unknown-helper-root"
 cp -R -- "$weather_root" "$unknown_fixture"
 chmod -R u+w "$unknown_fixture"
@@ -63,6 +84,34 @@ if "${PYTHON:-python3}" "$checker" "$unknown_fixture" "$pinned_source" \
 fi
 grep -Fq 'references helpers without feature identities: omarchy-undeclared-helper' "$test_root/unknown-error"
 printf '%s\n' 'REJECTED unknown helper without feature identity'
+
+unknown_unregistered="$test_root/unknown-unregistered-root"
+cp -R -- "$weather_root" "$unknown_unregistered"
+chmod -R u+w "$unknown_unregistered"
+printf '%s\n' 'root.bar.run("omarchy-undeclared-helper")' \
+  >> "$unknown_unregistered/shell/plugins/panels/weather/Model.js"
+if "${PYTHON:-python3}" "$checker" "$unknown_unregistered" "$pinned_source" \
+  "$weather_bin/runtime-surface.json" "$weather_bin/feature-surface.json" "$test_root/unknown-unregistered.json" \
+  >"$test_root/unknown-unregistered-output" 2>"$test_root/unknown-unregistered-error"; then
+  printf '%s\n' 'feature consumer closure accepted an unknown helper in an unregistered source' >&2
+  exit 1
+fi
+grep -Fq 'references helpers without feature identities: omarchy-undeclared-helper' \
+  "$test_root/unknown-unregistered-error"
+printf '%s\n' 'REJECTED unknown helper in previously unregistered selected source'
+
+unselected_fixture="$test_root/unselected-source-root"
+cp -R -- "$weather_root" "$unselected_fixture"
+chmod -R u+w "$unselected_fixture"
+printf '%s\n' 'root.bar.run("omarchy-audio-output-sink")' \
+  >> "$unselected_fixture/shell/plugins/panels/network/Panel.qml"
+if ! "${PYTHON:-python3}" "$checker" "$unselected_fixture" "$pinned_source" \
+  "$weather_bin/runtime-surface.json" "$weather_bin/feature-surface.json" "$test_root/unselected.json" \
+  >"$test_root/unselected-output" 2>"$test_root/unselected-error"; then
+  cat "$test_root/unselected-error" >&2
+  exit 1
+fi
+printf '%s\n' 'IGNORED helper references in unselected feature source'
 
 if ! "${PYTHON:-python3}" "$checker" "$clipboard_root" "$pinned_source" \
   "$clipboard_bin/runtime-surface.json" "$clipboard_bin/feature-surface.json" "$test_root/clipboard.json" \

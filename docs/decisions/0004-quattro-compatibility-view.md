@@ -38,6 +38,20 @@ behavioral check because native Quickshell APIs and a helper adapter cannot
 remove an unreachable presentation affordance.
 The runtime package exposes only explicitly audited helper names, each linked
 to a narrow shared adapter or a native executable.
+The public `bin/omanixy-shell` path belongs to the dedicated IPC package and
+is not linked through the generic compatibility-helper loop.
+The internal compatibility-bin copy retains an `omarchy-shell` route only for
+dispatcher and source-closure evidence.
+
+Feature selection is capability policy, not persisted shell preference.
+The writable `shell.json` contains the baseline permanent disabled-plugin set
+and explicit user choices.
+The compatibility root computes a separate immutable block set from that
+baseline plus every plugin belonging to an unselected feature.
+Omanixy-owned capability metadata records the selected set outside
+`shell.json`, while the registry remains the enforcement boundary.
+Consequently a fresh narrow activation can expand later, and a stale broad
+file cannot revive an unselected runtime.
 
 `passthru.omarchySource` remains the exact unmodified source identity.
 `passthru.omarchyCompatibilityRoot` identifies the separate compatibility

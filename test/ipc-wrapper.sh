@@ -4,6 +4,10 @@ set -euo pipefail
 repo=${1:?repository path required}
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
+record_case() {
+  printf 'CASE\t%s\t%s\n' "$1" "$2"
+  printf 'STATUS\t%s\t%s\t%s\n' "$1" "$2" "$3"
+}
 
 mkdir -p "$tmp/bin" "$tmp/omarchy/shell" "$tmp/runtime"
 mkdir -p "$tmp/runtime/nested"
@@ -86,6 +90,16 @@ grep -Fqx 'ping' "$tmp/ipc.log"
 grep -Fqx '{"value":"a b"}' "$tmp/ipc.log"
 grep -Fqx 'wayland-1' "$tmp/ipc-env.log"
 grep -Fqx "$tmp/runtime" "$tmp/ipc-env.log"
+record_case omarchy-shell valid 0
+
+run_wrapper shell ping >"$tmp/stdout"
+printf '%s\n' '{"ok":true}' >"$tmp/expected-stdout"
+cmp "$tmp/expected-stdout" "$tmp/stdout"
+record_case omarchy-shell stdout 0
+
+run_wrapper -q shell ping >"$tmp/quiet-success-stdout" 2>"$tmp/quiet-success-stderr"
+test ! -s "$tmp/quiet-success-stdout"
+test ! -s "$tmp/quiet-success-stderr"
 
 output=$(IPC_LOG="$tmp/ipc.log" IPC_ENV_LOG="$tmp/ipc-env.log" QS_CALL_LOG="$tmp/qs-called" \
   PATH="$tmp/bin:$PATH" WAYLAND_DISPLAY=nested/wayland-3 XDG_RUNTIME_DIR="$tmp/runtime" \
@@ -113,6 +127,26 @@ assert_failure 'omanixy-shell is not running' env IPC_MODE=unavailable IPC_LOG="
 assert_failure 'omanixy-shell is not ready' env IPC_MODE=not-ready IPC_LOG="$tmp/ipc.log" PATH="$tmp/bin:$PATH" WAYLAND_DISPLAY=wayland-1 XDG_RUNTIME_DIR="$tmp/runtime" "$tmp/omanixy-shell" shell ping
 assert_failure 'omanixy-shell is not responding' env IPC_MODE=timeout IPC_LOG="$tmp/ipc.log" PATH="$tmp/bin:$PATH" WAYLAND_DISPLAY=wayland-1 XDG_RUNTIME_DIR="$tmp/runtime" "$tmp/omanixy-shell" shell ping
 assert_failure 'Target not found.' env IPC_MODE=target-error IPC_LOG="$tmp/ipc.log" PATH="$tmp/bin:$PATH" WAYLAND_DISPLAY=wayland-1 XDG_RUNTIME_DIR="$tmp/runtime" "$tmp/omanixy-shell" shell ping
+record_case omarchy-shell backendFailure 1
+
+mkdir -p "$tmp/missing-backend-bin"
+ln -s "$tmp/bin/timeout" "$tmp/missing-backend-bin/timeout"
+assert_failure 'omanixy-shell is not running' env PATH="$tmp/missing-backend-bin" WAYLAND_DISPLAY=wayland-1 XDG_RUNTIME_DIR="$tmp/runtime" "$tmp/omanixy-shell" shell ping
+record_case omarchy-shell missingBackend 1
+
+quiet_stderr="$tmp/quiet-stderr"
+quiet_stdout="$tmp/quiet-stdout"
+quiet_status=0
+if env IPC_MODE=unavailable IPC_LOG="$tmp/ipc.log" PATH="$tmp/bin:$PATH" WAYLAND_DISPLAY=wayland-1 XDG_RUNTIME_DIR="$tmp/runtime" \
+  "$tmp/omanixy-shell" -q shell ping >"$quiet_stdout" 2>"$quiet_stderr"; then
+  quiet_status=0
+else
+  quiet_status=$?
+fi
+test "$quiet_status" -eq 0
+test ! -s "$quiet_stdout"
+test ! -s "$quiet_stderr"
+record_case omarchy-shell exitStatus 0
 
 rm -f "$tmp/qs-called"
 assert_failure 'omanixy-shell requires WAYLAND_DISPLAY from the graphical session' env -u WAYLAND_DISPLAY IPC_LOG="$tmp/ipc.log" IPC_ENV_LOG="$tmp/ipc-env.log" QS_CALL_LOG="$tmp/qs-called" PATH="$tmp/bin:$PATH" XDG_RUNTIME_DIR="$tmp/runtime" "$tmp/omanixy-shell" shell ping
@@ -127,5 +161,6 @@ assert_failure "omanixy-shell Wayland socket is unavailable: $tmp/runtime/stale-
 test ! -e "$tmp/qs-called"
 
 assert_failure 'Usage: omanixy-shell <target> <method> [args...]' "$tmp/omanixy-shell" shell
+record_case omarchy-shell invalidArgs 1
 
 printf 'ipc wrapper checks passed\n'

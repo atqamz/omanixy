@@ -29,7 +29,12 @@ def read_json(path: Path) -> dict:
 
 
 def feature_for(path: str, roots: list[dict]) -> str | None:
-    matches = [entry["feature"] for entry in roots if path.startswith(entry["prefix"])]
+    matches = [
+        entry["feature"]
+        for entry in roots
+        if path == entry["prefix"].rstrip("/")
+        or path.startswith(entry["prefix"])
+    ]
     if len(matches) != 1:
         return None
     return matches[0]
@@ -84,6 +89,8 @@ def main() -> int:
     dependencies = feature_surface.get("dependencies")
     roots = feature_surface.get("featureRoots")
     overrides = feature_surface.get("consumerFeatureOverrides", [])
+    scanner_noise = feature_surface.get("scannerNoise", [])
+    reference_noise = feature_surface.get("consumerReferenceNoise", [])
     if (
         not isinstance(helper_features, dict)
         or not isinstance(selected_features, list)
@@ -93,6 +100,10 @@ def main() -> int:
         or not all(isinstance(entry, dict) for entry in roots)
         or not isinstance(overrides, list)
         or not all(isinstance(entry, dict) for entry in overrides)
+        or not isinstance(scanner_noise, list)
+        or not all(isinstance(helper, str) for helper in scanner_noise)
+        or not isinstance(reference_noise, list)
+        or not all(isinstance(entry, dict) for entry in reference_noise)
     ):
         fail("feature surface metadata is invalid")
     if any(
@@ -101,6 +112,9 @@ def main() -> int:
         for entry in roots
     ):
         fail("feature root identity is invalid")
+    prefixes = [entry["prefix"] for entry in roots]
+    if len(prefixes) != len(set(prefixes)):
+        fail("duplicate feature root identity")
     if any(
         not isinstance(entry.get("path"), str)
         or not isinstance(entry.get("helper"), str)
@@ -108,21 +122,57 @@ def main() -> int:
         for entry in overrides
     ):
         fail("consumer feature override identity is invalid")
+    if any(
+        not isinstance(entry.get("path"), str)
+        or not isinstance(entry.get("helper"), str)
+        or not isinstance(entry.get("line"), str)
+        for entry in reference_noise
+    ):
+        fail("consumer reference noise identity is invalid")
 
     selected = set(selected_features)
     selected_closures = {feature: closure(feature, dependencies) for feature in selected}
     pinned_cache: dict[str, str] = {}
     evidence: list[dict[str, object]] = []
-    source_paths: set[str] = set()
+    declared_source_paths: set[str] = set()
     for helper, entry in runtime_surface.items():
         if not isinstance(entry, dict):
             fail(f"runtime surface entry for {helper} is invalid")
         for source in entry.get("consumerSources", []):
             if isinstance(source, dict) and isinstance(source.get("path"), str):
-                source_paths.add(source["path"])
+                declared_source_paths.add(source["path"])
         consumer = entry.get("consumer")
         if isinstance(consumer, str):
-            source_paths.add(consumer)
+            declared_source_paths.add(consumer)
+
+    source_paths: set[str] = set()
+    for root_entry in roots:
+        prefix = root_entry["prefix"]
+        feature = root_entry["feature"]
+        if feature not in selected:
+            continue
+        source_root = root / prefix.rstrip("/")
+        if source_root.is_file():
+            candidates = [source_root]
+        elif source_root.is_dir():
+            candidates = sorted(
+                path
+                for path in source_root.rglob("*")
+                if path.is_file() and path.suffix in SOURCE_SUFFIXES
+            )
+        else:
+            fail(f"selected feature root is missing: {prefix}")
+        for candidate in candidates:
+            source_paths.add(str(candidate.relative_to(root)))
+
+    for relative in sorted(declared_source_paths):
+        if not (root / relative).is_file():
+            fail(f"declared post-patch consumer is missing: {relative}")
+        feature = feature_for(relative, roots)
+        if feature is None:
+            fail(f"post-patch consumer has no feature identity: {relative}")
+        if feature in selected:
+            source_paths.add(relative)
 
     for relative in sorted(source_paths):
         current = root / relative
@@ -136,7 +186,7 @@ def main() -> int:
             fail(f"cannot read post-patch consumer {relative}: {error}")
         feature = feature_for(relative, roots)
         if feature is None:
-            fail(f"post-patch consumer has no feature identity: {relative}")
+            fail(f"supported source has no feature identity: {relative}")
         if feature not in selected:
             continue
         pinned = pinned_source / relative
@@ -153,12 +203,22 @@ def main() -> int:
             and "WlrLayershell.namespace" not in line
             for helper in HELPER_PATTERN.findall(line.replace("omarchy-menu.jsonc", ""))
         )
-        unknown_helpers = sorted(discovered_helpers - set(helper_features))
+        for noise in reference_noise:
+            if noise["path"] != relative or noise["helper"] not in discovered_helpers:
+                continue
+            matching_lines = [
+                line for line in current_text.splitlines()
+                if noise["helper"] in line
+            ]
+            if matching_lines and all(line == noise["line"] for line in matching_lines):
+                discovered_helpers.remove(noise["helper"])
+        unknown_helpers = sorted(discovered_helpers - set(helper_features) - set(scanner_noise))
         if unknown_helpers:
             fail(
                 f"{relative} references helpers without feature identities: "
                 + ", ".join(unknown_helpers)
             )
+        discovered_helpers -= set(scanner_noise)
         for helper in sorted(discovered_helpers):
             helper_feature = helper_features[helper]
             if not isinstance(helper_feature, str):

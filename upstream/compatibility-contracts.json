@@ -923,8 +923,14 @@
   },
   "scannerNoise": [
     "omarchy-bar-text-color",
+    "omarchy-channel-current",
     "omarchy-cmd-missing",
     "omarchy-cmd-present",
+    "omarchy-default-agent",
+    "omarchy-default-browser",
+    "omarchy-default-editor",
+    "omarchy-default-terminal",
+    "omarchy-pkg-missing",
     "omarchy-pkg-present"
   ],
   "omittedReachability": [

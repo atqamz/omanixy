@@ -114,6 +114,7 @@ if [[ -n "$runtime_bin" ]]; then
   runtime_copy="$test_root/runtime-bin"
   mkdir -p "$runtime_copy"
   for helper in $(jq -r '.helpers | keys[]' "$repo/upstream/compatibility-contracts.json"); do
+    [[ $helper == omarchy-shell ]] && continue
     cp "$runtime_bin/$helper" "$runtime_copy/$helper"
     sed -i "s|^export PATH=.*$|export PATH=\"\${PATH}\"|" "$runtime_copy/$helper"
     chmod +x "$runtime_copy/$helper"
@@ -1584,5 +1585,8 @@ run_invalid_args_status omarchy-weather-location --unexpected
 run_invalid_args_status omarchy-weather-status unexpected
 
 sort -u "$case_log"
+if [[ -n ${OMANIXY_CASE_LOG:-} ]]; then
+  cat "$case_log" >> "$OMANIXY_CASE_LOG"
+fi
 
 printf '%s\n' 'compat adapter tests passed'

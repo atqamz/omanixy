@@ -107,4 +107,18 @@ test "$(unit_path "$runtime/bin/omarchy-network-qr")" = "$(unit_path "$compatibi
 test "$(unit_path "$runtime/bin/omarchy-network-password")" = "$(unit_path "$compatibility_bin/bin/omarchy-network-password")"
 test -f "$runtime_source/shell/services/AppLibrarySupport.js"
 
+ipc_target=$(readlink -f "$runtime/bin/omanixy-shell")
+compatibility_target=$(readlink -f "$runtime/bin/omanixy-compat-adapter")
+case "$ipc_target" in
+  /nix/store/*-omanixy-shell/bin/omanixy-shell) ;;
+  *)
+    printf '%s\n' 'final omanixy-shell is not owned by the dedicated IPC package' >&2
+    exit 1
+    ;;
+esac
+test "$ipc_target" != "$compatibility_target"
+test "$(readlink -f "$runtime/bin/omarchy-audio-output-set-default")" = \
+  "$(readlink -f "$compatibility_bin/bin/omarchy-audio-output-set-default")"
+test ! -e "$runtime/bin/omanixy-shell/omarchy-shell"
+
 printf '%s\n' 'runtime closure invariants passed'

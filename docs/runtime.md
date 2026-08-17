@@ -66,14 +66,19 @@ immutable floor in the compatibility-root plugin registry, even when a custom
 whole-file config omits or removes those entries.
 The raw config escape hatch cannot enable unfinished lock, polkit, idle,
 notification, or related security-sensitive surfaces.
+`shell.json` stores the baseline permanently disabled plugins plus explicit
+user choices; it does not store temporary omissions caused by `features`.
+The immutable registry adds the currently unselected feature plugins to its
+runtime block set, so a stale writable file cannot revive an absent helper or
+backend and a later feature expansion is not blocked by an old seed.
 The NixOS module is valid and intentionally has no privileged declarations for
 this baseline.
 
 The package output is
 `packages.${system}.omanixy-shell`.
-It contains the runtime entry point, the IPC wrapper, the selected Quickshell
-executables, and only the audited compatibility helpers required by the
-baseline.
+It contains the dedicated `omanixy-shell` IPC executable, the runtime entry
+point, selected Quickshell executables, and only the audited compatibility
+helpers required by the selected feature closure.
 
 ## Service lifecycle
 
@@ -215,6 +220,7 @@ The ownership model is deliberately whole-file and idempotent:
 | Path | Ownership |
 | --- | --- |
 | `~/.config/omarchy/shell.json` | Declaratively seeded, then fully user-owned and writable |
+| `~/.local/state/omanixy/capabilities.json` | Omanixy-owned generated capability metadata; refreshed only while its owner marker remains valid |
 | `~/.config/omarchy/shell.toml` | User-owned theme/config file; the monitor text-size adapter updates only `[font].base-size`, while preserving unrelated content |
 | `~/.config/omarchy/plugins/` | User-local plugin directory |
 | `~/.local/state/omarchy/current/theme/` | Seeded generated theme state, then runtime writable |
@@ -241,8 +247,10 @@ immutable floor at runtime.
 First-party plugins omitted from the immutable compatibility view remain
 unavailable even if a user removes their disabled ID.
 Store-backed shell configuration symlinks are the one migration case where
-Omanixy preserves the existing JSON while adding its mandatory safety floor
-before materializing the file.
+Omanixy has immutable provenance and may remove old feature-derived disable
+entries before materializing the file.
+The baseline safety entries remain, while explicit regular-file choices are
+never guessed or removed.
 If an older activation left a writable-state symlink into the store, the
 activation copies its contents out to ordinary user storage before continuing.
 It never writes runtime state into the store.

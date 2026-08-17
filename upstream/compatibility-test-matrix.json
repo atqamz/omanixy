@@ -10,25 +10,35 @@
   ],
   "expectedExitStatus": {
     "valid": 0,
-    "invalidArgs": 2,
-    "missingBackend": 127,
+    "invalidArgs": {
+      "default": 2,
+      "omarchy-shell": 1
+    },
+    "missingBackend": {
+      "default": 127,
+      "omarchy-shell": 1
+    },
     "backendFailure": {
       "default": 1,
-      "omarchy-audio-sink-availability": 4
+      "omarchy-audio-sink-availability": 4,
+      "omarchy-shell": 1
     },
     "stdout": 0,
-    "exitStatus": 2,
+    "exitStatus": {
+      "default": 2,
+      "omarchy-shell": 0
+    },
     "editor": 0
   },
   "helpers": {
     "omarchy-shell": {
       "tests": {
-        "valid": {"status": "not-applicable", "reason": "IPC reference surface is tested by test/ipc-wrapper.sh"},
-        "invalidArgs": {"status": "not-applicable", "reason": "IPC wrapper has no shell-facing helper argument contract"},
-        "missingBackend": {"status": "not-applicable", "reason": "IPC wrapper delegates to the shell service rather than a backend command"},
-        "backendFailure": {"status": "not-applicable", "reason": "IPC wrapper delegates failure semantics to the shell service"},
-        "stdout": {"status": "not-applicable", "reason": "IPC wrapper is validated by its protocol marker rather than helper stdout"},
-        "exitStatus": {"status": "not-applicable", "reason": "IPC wrapper status is covered by the protocol test"}
+        "valid": {"status": "required"},
+        "invalidArgs": {"status": "required"},
+        "missingBackend": {"status": "required"},
+        "backendFailure": {"status": "required"},
+        "stdout": {"status": "required"},
+        "exitStatus": {"status": "required"}
       }
     },
     "omarchy-audio-input-set-default": {"tests": {"valid": {"status": "required"}, "invalidArgs": {"status": "required"}, "missingBackend": {"status": "required"}, "backendFailure": {"status": "required"}, "stdout": {"status": "required"}, "exitStatus": {"status": "required"}}},

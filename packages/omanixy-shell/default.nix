@@ -94,10 +94,8 @@ let
   omittedFeaturePlugins = lib.concatLists (map
     (feature: baselineSource.featurePlugins.${feature} or [ ])
     (lib.filter (feature: !builtins.elem feature selectedFeatures) (builtins.attrNames baselineSource.featurePlugins)));
-  selectedBaselineConfig = baselineConfig // {
-    disabledPlugins = lib.unique (baselineConfig.disabledPlugins ++ omittedFeaturePlugins);
-  };
-  blockedPluginIds = builtins.toJSON selectedBaselineConfig.disabledPlugins;
+  runtimeBlockedPlugins = lib.unique (baselineConfig.disabledPlugins ++ omittedFeaturePlugins);
+  blockedPluginIds = builtins.toJSON runtimeBlockedPlugins;
   safeMenuSource = builtins.fromJSON (builtins.readFile ./safe-menu.jsonc);
   safeMenuFeature = {
     apps = "launcher";
@@ -111,7 +109,7 @@ let
     safeMenuSource;
   safeMenu = pkgs.writeText "omanixy-safe-omarchy-menu.jsonc" (builtins.toJSON selectedSafeMenu);
 
-  safeShellConfig = pkgs.writeText "omanixy-safe-shell.json" (builtins.toJSON selectedBaselineConfig);
+  safeShellConfig = pkgs.writeText "omanixy-safe-shell.json" (builtins.toJSON baselineConfig);
 
   omarchyCompatibilityRoot = stdenvNoCC.mkDerivation {
     pname = "omanixy-omarchy-compat-root";
@@ -254,7 +252,7 @@ let
             done
     '';
     passthru = {
-      inherit omarchySource safeMenu safeShellConfig selectedFeatures compatibilityHelpers;
+      inherit omarchySource safeMenu safeShellConfig selectedFeatures compatibilityHelpers runtimeBlockedPlugins;
     };
   };
 
@@ -322,12 +320,18 @@ let
     omarchy-weather-status = "weather";
   };
   featureRoots = [
+    { prefix = "shell/Commons/"; feature = "core"; }
+    { prefix = "shell/Ui/"; feature = "core"; }
     { prefix = "shell/shell.qml"; feature = "core"; }
+    { prefix = "shell/plugins/bar/"; feature = "core"; }
     { prefix = "shell/plugins/panels/audio/"; feature = "audio"; }
     { prefix = "shell/plugins/panels/bluetooth/"; feature = "bluetooth"; }
     { prefix = "shell/plugins/clipboard/"; feature = "clipboard"; }
     { prefix = "shell/plugins/emojis/"; feature = "clipboard"; }
     { prefix = "shell/plugins/menu/"; feature = "core"; }
+    { prefix = "shell/plugins/osd/"; feature = "core"; }
+    { prefix = "shell/plugins/services/"; feature = "core"; }
+    { prefix = "shell/plugins/panels/clock/"; feature = "core"; }
     { prefix = "shell/plugins/panels/monitor/"; feature = "monitor"; }
     { prefix = "shell/plugins/panels/network/"; feature = "network"; }
     { prefix = "shell/plugins/panels/power/"; feature = "power"; }
@@ -343,6 +347,14 @@ let
       omarchy-shell = "core";
     };
     inherit featureRoots;
+    scannerNoise = contractSource.scannerNoise or [ ];
+    consumerReferenceNoise = [
+      {
+        path = "shell/plugins/menu/MenuModel.js";
+        helper = "omarchy-dns";
+        line = "  \"omarchy-dns\"";
+      }
+    ];
     consumerFeatureOverrides = [
       { path = "shell/plugins/menu/Menu.qml"; helper = "omarchy-powerprofiles-list"; feature = "power"; }
       { path = "shell/plugins/menu/Menu.qml"; helper = "omarchy-powerprofiles-set"; feature = "power"; }
@@ -441,12 +453,15 @@ pkgs.symlinkJoin {
     ln -s ${pkgs.gtk3}/bin/gtk-launch "$out/bin/gtk-launch"
     ''}
     for helper in ${lib.concatStringsSep " " compatibilityHelpers}; do
+      if [ "$helper" = omarchy-shell ]; then
+        continue
+      fi
       ln -s ${compatibilityBin}/bin/$helper "$out/bin/$helper"
     done
     ln -s ${theme} "$out/share/omarchy-theme"
   '';
   passthru = {
-    inherit omarchyRevision quickshellRevision nixpkgsRevision omarchySource omarchyCompatibilityRoot compatibilityBin compatibilityProbes quickshell theme supportedSystems safeMenu safeShellConfig selectedFeatures compatibilityHelpers adapterSources adapterSourceHash featureSurface;
+    inherit omarchyRevision quickshellRevision nixpkgsRevision omarchySource omarchyCompatibilityRoot compatibilityBin compatibilityProbes quickshell theme supportedSystems safeMenu safeShellConfig selectedFeatures compatibilityHelpers runtimeBlockedPlugins adapterSources adapterSourceHash featureSurface;
     buildProvenance = {
       inherit omarchyRevision quickshellRevision nixpkgsRevision;
     };

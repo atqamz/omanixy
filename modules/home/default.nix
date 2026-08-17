@@ -14,19 +14,28 @@ let
   historicalBaseline = builtins.fromJSON (builtins.readFile ../../upstream/shell-baseline-v1.json);
   baselineConfig = builtins.removeAttrs baselineSource [ "featurePlugins" "featureDependencies" "featureOrder" "migrations" ];
   featurePlugins = baselineSource.featurePlugins;
+  featurePluginIds = lib.unique (lib.concatLists (builtins.attrValues featurePlugins));
   selectedFeatures = featureSelection.select cfg.features;
-  disabledFeaturePlugins = lib.concatLists (map
+  configuredDisabledPlugins = cfg.shell.config.disabledPlugins or [ ];
+  omittedFeaturePlugins = lib.concatLists (map
     (feature: featurePlugins.${feature} or [ ])
     (lib.filter (feature: !builtins.elem feature selectedFeatures) (builtins.attrNames featurePlugins)));
-  disabledPluginsFloor = lib.unique (baselineConfig.disabledPlugins ++ disabledFeaturePlugins);
-  configuredDisabledPlugins = cfg.shell.config.disabledPlugins or [ ];
+  runtimeBlockedPlugins = lib.unique (baselineConfig.disabledPlugins ++ omittedFeaturePlugins);
   effectiveConfig = cfg.shell.config // {
-    disabledPlugins = lib.unique (disabledPluginsFloor ++ configuredDisabledPlugins);
+    disabledPlugins = lib.unique (baselineConfig.disabledPlugins ++ configuredDisabledPlugins);
   };
   configJson = builtins.toJSON effectiveConfig;
   configSeed = pkgs.writeText "omanixy-shell-config" configJson;
-  disabledPluginsFloorJson = builtins.toJSON disabledPluginsFloor;
+  baselineDisabledPluginsJson = builtins.toJSON baselineConfig.disabledPlugins;
+  featurePluginIdsJson = builtins.toJSON featurePluginIds;
   legacyBaselineJson = builtins.toJSON historicalBaseline;
+  capabilityState = pkgs.writeText "omanixy-capability-state" (builtins.toJSON {
+    schema = 1;
+    owner = "omanixy";
+    selectedFeatures = selectedFeatures;
+    baselineDisabledPlugins = baselineConfig.disabledPlugins;
+    runtimeBlockedPlugins = runtimeBlockedPlugins;
+  });
   migrateGeneratedConfig = pkgs.writeShellScript "omanixy-migrate-generated-shell-config" ''
     set -euo pipefail
     file=$1
@@ -47,18 +56,17 @@ let
     ${pkgs.jq}/bin/jq \
       --argjson legacy '${legacyBaselineJson}' \
       --argjson current '${builtins.toJSON baselineConfig}' \
-      --argjson disabledPluginsFloor '${disabledPluginsFloorJson}' \
+      --argjson baselineDisabledPlugins '${baselineDisabledPluginsJson}' \
+      --argjson featurePluginIds '${featurePluginIdsJson}' \
       '
         if . == $legacy then
           $current
         elif .disabledPlugins == null then
-          .disabledPlugins = $disabledPluginsFloor
+          .disabledPlugins = $baselineDisabledPlugins
         elif (.disabledPlugins | type) == "array" then
           .disabledPlugins = (
-            reduce $disabledPluginsFloor[] as $plugin (
-              .disabledPlugins;
-              if index($plugin) == null then . + [$plugin] else . end
-            )
+            .disabledPlugins
+            | map(select(($featurePluginIds | index(.)) == null))
           )
         else
           error("disabledPlugins must be a JSON array")
@@ -84,13 +92,17 @@ in
       defaultText = lib.literalExpression "<safe Quattro baseline>";
       description = ''
         Whole-file upstream-compatible Quattro shell.json configuration.
-        Omanixy includes its disabled-plugin floor in generated config and the
-        compatibility-root registry enforces it at runtime, so this option
-        cannot enable unfinished issue #4 security surfaces or unsupported
-        first-party Quattro plugins.
+        Omanixy preserves the baseline disabled-plugin floor and explicit
+        user preferences in the generated file.
+        The immutable compatibility-root registry separately enforces the
+        selected feature capability floor, so changing features cannot revive
+        omitted runtime support or make unfinished issue #4 security surfaces
+        reachable.
         The file is seeded on first activation and remains user-owned after
         that; only an exact known Omanixy-generated baseline is migrated to the
         current baseline, while customized or malformed files remain untouched.
+        Omanixy-owned capability metadata is stored separately under
+        .local/state/omanixy and is not shell configuration.
       '';
     };
   };
@@ -113,9 +125,12 @@ in
     home.activation.omanixyShellState = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
       config_dir="$HOME/.config/omarchy"
       config_file="$config_dir/shell.json"
+      capability_dir="$HOME/.local/state/omanixy"
+      capability_file="$capability_dir/capabilities.json"
       theme_dir="$HOME/.local/state/omarchy/current/theme"
 
       run ${coreutils}/mkdir -p "$config_dir" "$config_dir/plugins"
+      run ${coreutils}/mkdir -p "$capability_dir"
 
       if [ -L "$config_file" ]; then
         config_target=$(${coreutils}/readlink -f "$config_file" || true)
@@ -156,6 +171,10 @@ in
 
       if [ ! -e "$config_file" ]; then
         run ${coreutils}/install -Dm600 -- '${configSeed}' "$config_file"
+      fi
+
+      if [ ! -L "$capability_file" ] && { [ ! -e "$capability_file" ] || ${pkgs.jq}/bin/jq -e '.owner == "omanixy" and .schema == 1' "$capability_file" >/dev/null 2>&1; }; then
+        run ${coreutils}/install -Dm600 -- '${capabilityState}' "$capability_file"
       fi
 
       if [ -L "$theme_dir" ]; then

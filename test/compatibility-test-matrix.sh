@@ -15,10 +15,14 @@ test_root=$(mktemp -d)
 trap 'rm -rf "$test_root"' EXIT
 
 output="$test_root/compat-adapters.log"
+ipc_output="$test_root/ipc-wrapper.log"
 PATH="$runtime_bin:$PATH" \
   bash "$repo/test/compat-adapters.sh" "$repo" "$compat_root" "$runtime_bin" >"$output"
-grep '^CASE' "$output" | cut -f2- | sort -u > "$test_root/actual"
-grep '^STATUS' "$output" | cut -f2- > "$test_root/actual-status-raw"
+PYTHON="${PYTHON:-python3}" \
+  bash "$repo/test/ipc-wrapper.sh" "$repo" >"$ipc_output"
+cat "$output" "$ipc_output" > "$test_root/all-evidence"
+grep '^CASE' "$test_root/all-evidence" | cut -f2- | sort -u > "$test_root/actual"
+grep '^STATUS' "$test_root/all-evidence" | cut -f2- > "$test_root/actual-status-raw"
 
 validate_schema() {
   local matrix=$1
@@ -26,8 +30,21 @@ validate_schema() {
     (.schema == 2)
     and (.requiredCases == ["valid", "invalidArgs", "missingBackend", "backendFailure", "stdout", "exitStatus"])
     and (.expectedExitStatus | type == "object")
-    and (.expectedExitStatus == {valid: 0, invalidArgs: 2, missingBackend: 127, backendFailure: {default: 1, "omarchy-audio-sink-availability": 4}, stdout: 0, exitStatus: 2, editor: 0})
+    and ((.expectedExitStatus | keys_unsorted | sort) == ["backendFailure", "editor", "exitStatus", "invalidArgs", "missingBackend", "stdout", "valid"])
+    and (.expectedExitStatus.valid | type == "number")
+    and (.expectedExitStatus.stdout | type == "number")
+    and (.expectedExitStatus.editor | type == "number")
+    and (.expectedExitStatus.invalidArgs.default | type == "number")
+    and (.expectedExitStatus.invalidArgs["omarchy-shell"] | type == "number")
+    and (.expectedExitStatus.missingBackend.default | type == "number")
+    and (.expectedExitStatus.missingBackend["omarchy-shell"] | type == "number")
+    and (.expectedExitStatus.backendFailure.default | type == "number")
+    and (.expectedExitStatus.backendFailure["omarchy-audio-sink-availability"] | type == "number")
+    and (.expectedExitStatus.backendFailure["omarchy-shell"] | type == "number")
+    and (.expectedExitStatus.exitStatus.default | type == "number")
+    and (.expectedExitStatus.exitStatus["omarchy-shell"] | type == "number")
     and (.helpers | type == "object")
+    and (all(.helpers["omarchy-shell"].tests[]; .status == "required"))
     and (all(.helpers[];
       (.tests | type == "object")
       and (((.tests | keys_unsorted | sort) == ["backendFailure", "exitStatus", "invalidArgs", "missingBackend", "stdout", "valid"]) or ((.tests | keys_unsorted | sort) == ["backendFailure", "editor", "exitStatus", "invalidArgs", "missingBackend", "stdout", "valid"]))
@@ -87,6 +104,15 @@ if ! cmp -s "$test_root/expected-status" "$test_root/actual-status"; then
   exit 1
 fi
 
+write_expected_status() {
+  local matrix=$1
+  local destination=$2
+  jq -r '.helpers | to_entries[] | .key as $helper | .value.tests | to_entries[] | select(.value.status == "required") | "\($helper)\t\(.key)"' "$matrix" \
+    | while IFS=$'\t' read -r helper category; do
+        printf '%s\t%s\t%s\n' "$helper" "$category" "$(jq -r --arg category "$category" --arg helper "$helper" '.expectedExitStatus[$category] | if type == "object" then .[$helper] // .default else . end' "$matrix")"
+      done | sort > "$destination"
+}
+
 for category in invalidArgs backendFailure stdout exitStatus; do
   mutated="$test_root/missing-$category.json"
   jq --arg category "$category" 'del(.helpers["omarchy-audio-output-sink"].tests[$category])' "$manifest" > "$mutated"
@@ -96,6 +122,14 @@ for category in invalidArgs backendFailure stdout exitStatus; do
   fi
   printf 'REJECTED\tmissing required %s declaration\n' "$category"
 done
+
+mutated="$test_root/missing-omarchy-shell-valid.json"
+jq 'del(.helpers["omarchy-shell"].tests.valid)' "$manifest" > "$mutated"
+if validate_schema "$mutated"; then
+  printf '%s\n' 'matrix accepted removal of the omarchy-shell valid case' >&2
+  exit 1
+fi
+printf '%s\n' 'REJECTED missing omarchy-shell valid declaration'
 
 mutated="$test_root/unexecuted.json"
 jq '.helpers["omarchy-audio-output-sink"].tests.stdout.status = "required"' "$manifest" > "$mutated"
@@ -116,8 +150,9 @@ fi
 printf '%s\n' 'REJECTED unjustified not-applicable case'
 
 mutated="$test_root/changed-exit-status.json"
-jq '.expectedExitStatus.invalidArgs = 1' "$manifest" > "$mutated"
-if validate_schema "$mutated"; then
+jq '.expectedExitStatus.invalidArgs.default = 1' "$manifest" > "$mutated"
+write_expected_status "$mutated" "$test_root/changed-exit-status"
+if validate_schema "$mutated" && cmp -s "$test_root/changed-exit-status" "$test_root/actual-status"; then
   printf '%s\n' 'matrix accepted an exit-status change without matching test evidence' >&2
   exit 1
 fi
@@ -139,6 +174,23 @@ if cmp -s "$test_root/expected" "$mutated"; then
   exit 1
 fi
 printf '%s\n' 'REJECTED missing invalid-arguments CASE'
+
+mutated="$test_root/missing-omarchy-shell-case"
+grep -v $'^omarchy-shell	invalidArgs$' "$test_root/actual" > "$mutated"
+if cmp -s "$test_root/expected" "$mutated"; then
+  printf '%s\n' 'matrix accepted removal of the omarchy-shell invalid-arguments test' >&2
+  exit 1
+fi
+printf '%s\n' 'REJECTED missing omarchy-shell invalid-arguments CASE'
+
+mutated="$test_root/changed-omarchy-shell-status.json"
+jq '.expectedExitStatus.exitStatus."omarchy-shell" = 1' "$manifest" > "$mutated"
+write_expected_status "$mutated" "$test_root/mutated-status"
+if validate_schema "$mutated" && cmp -s "$test_root/mutated-status" "$test_root/actual-status"; then
+  printf '%s\n' 'matrix accepted an omarchy-shell status change without evidence update' >&2
+  exit 1
+fi
+printf '%s\n' 'REJECTED changed omarchy-shell expected status without test update'
 
 mutated="$test_root/duplicate-status"
 cp "$test_root/actual-status-raw" "$mutated"
