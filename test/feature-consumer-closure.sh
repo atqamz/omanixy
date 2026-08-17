@@ -372,6 +372,34 @@ fi
 grep -Fq 'unknown external executable: pacman' "$test_root/nested-shell-payload-error"
 printf '%s\n' 'REJECTED pacman in a nested shell payload'
 
+dynamic_nested_shell_payload="$test_root/dynamic-nested-shell-payload-root"
+cp -R -- "$weather_root" "$dynamic_nested_shell_payload"
+chmod -R u+w "$dynamic_nested_shell_payload"
+printf '%s\n' 'Item { script: "bash -lc $dynamicCommand" }' \
+  >> "$dynamic_nested_shell_payload/shell/plugins/panels/weather/Panel.qml"
+if "${PYTHON:-python3}" "$checker" "$dynamic_nested_shell_payload" "$pinned_source" \
+  "$weather_bin/runtime-surface.json" "$weather_bin/feature-surface.json" "$test_root/dynamic-nested-shell-payload.json" \
+  >"$test_root/dynamic-nested-shell-payload-output" 2>"$test_root/dynamic-nested-shell-payload-error"; then
+  printf '%s\n' 'feature consumer closure accepted a dynamic nested shell payload' >&2
+  exit 1
+fi
+grep -Fq 'unknown external executable: __dynamic-executable__' "$test_root/dynamic-nested-shell-payload-error"
+printf '%s\n' 'REJECTED dynamic nested shell payload'
+
+dynamic_invocation_payload="$test_root/dynamic-invocation-payload-root"
+cp -R -- "$weather_root" "$dynamic_invocation_payload"
+chmod -R u+w "$dynamic_invocation_payload"
+printf '%s\n' 'Item { proc.command = runtimeCommand; Quickshell.exec(runtimeCommand) }' \
+  >> "$dynamic_invocation_payload/shell/plugins/panels/weather/Panel.qml"
+if "${PYTHON:-python3}" "$checker" "$dynamic_invocation_payload" "$pinned_source" \
+  "$weather_bin/runtime-surface.json" "$weather_bin/feature-surface.json" "$test_root/dynamic-invocation-payload.json" \
+  >"$test_root/dynamic-invocation-payload-output" 2>"$test_root/dynamic-invocation-payload-error"; then
+  printf '%s\n' 'feature consumer closure accepted dynamic executable invocation shapes' >&2
+  exit 1
+fi
+grep -Fq 'unknown external executable: __dynamic-executable__' "$test_root/dynamic-invocation-payload-error"
+printf '%s\n' 'REJECTED dynamic executable invocation shapes'
+
 unknown_exec_payload="$test_root/unknown-exec-payload-root"
 cp -R -- "$weather_root" "$unknown_exec_payload"
 chmod -R u+w "$unknown_exec_payload"

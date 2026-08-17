@@ -69,12 +69,20 @@ SHELL_COMMAND_RE = re.compile(
 )
 COMMAND_SUBSHELL_RE = re.compile(r"\$\(([^()]*)\)")
 PROCESS_SUBSHELL_RE = re.compile(r"<\s*<\(([^()]*)\)")
+DYNAMIC_EXECUTABLE = "__dynamic-executable__"
 ARRAY_COMMAND_RE = re.compile(
     r"(?:\bcommand\s*[:=]|(?:Quickshell|Util)\.exec(?:Detached)?\s*\()\s*"
     r"\[([^\]]*)\]",
     re.DOTALL,
 )
 DYNAMIC_COMMAND_RE = re.compile(r"\bcommand\s*:\s+(?![\"'\[])[^\n,}]+")
+DYNAMIC_ASSIGNMENT_RE = re.compile(
+    r"\b[A-Za-z_][A-Za-z0-9_]*\.command\s*=\s+(?![\"'\[])[^\n;]+"
+)
+DYNAMIC_CALL_RE = re.compile(
+    r"\b(?:Quickshell|Util)\.exec(?:Detached)?\(\s*(?![\"'\[])[^\)\n]+\)"
+)
+DYNAMIC_RUN_RE = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]*\.run\(\s*(?![\"'\[])[^\)\n]+\)")
 SHELL_PAYLOAD_RE = re.compile(
     r"\b(?:command|script)\s*:\s*([\"'])(.*?)(?<!\\)\1",
     re.DOTALL,
@@ -124,7 +132,11 @@ def shell_executables(value: str) -> list[str]:
             commands.append(first)
             for index, word in enumerate(words[1:], 1):
                 if word.startswith("-") and "c" in word:
-                    commands.extend(shell_executables(" ".join(words[index + 1 :])))
+                    payload = " ".join(words[index + 1 :])
+                    if payload.startswith("$"):
+                        commands.append(DYNAMIC_EXECUTABLE)
+                    else:
+                        commands.extend(shell_executables(payload))
                     break
         elif first == "timeout":
             commands.append(first)
@@ -144,7 +156,7 @@ def source_executables(path: str, text: str) -> list[dict[str, object]]:
     """Discover command names and source-line identity from a supported file."""
 
     references: list[dict[str, object]] = []
-    dynamic_name = "__dynamic-executable__"
+    dynamic_name = DYNAMIC_EXECUTABLE
 
     def add(name: str, line: int, invocation: str, shape: str) -> None:
         allowed_dynamic_shapes = {
@@ -158,6 +170,11 @@ def source_executables(path: str, text: str) -> list[dict[str, object]]:
             'command: ["bash", "-c", root.iconIndexScanCommand()]',
             'scanProcess.command = ["bash", "-c", script, registry.firstPartyDir, registry.pluginsDir]',
             'command: ["bash", "-lc", String(customRoot.setting("exec", ""))]',
+            'customProc.command: ["bash", "-lc", String(customRoot.setting("exec", ""))]',
+            'optionsProcess.command = cmd',
+            'Util.execDetached(command)',
+            'root.run(command)',
+            'if (command) root.run(command)',
         }
         normalized_shape = " ".join(shape.split())
         known_custom_command = re.fullmatch(
@@ -239,6 +256,12 @@ def source_executables(path: str, text: str) -> list[dict[str, object]]:
         line_number = text.count("\n", 0, match.start()) + 1
         source_line = text.splitlines()[line_number - 1]
         add(dynamic_name, line_number, "dynamic-command", source_line)
+
+    for pattern in (DYNAMIC_ASSIGNMENT_RE, DYNAMIC_CALL_RE, DYNAMIC_RUN_RE):
+        for match in pattern.finditer(text):
+            line_number = text.count("\n", 0, match.start()) + 1
+            source_line = text.splitlines()[line_number - 1]
+            add(dynamic_name, line_number, "dynamic-invocation", source_line)
 
     for match in SHELL_PAYLOAD_RE.finditer(text):
         line_number = text.count("\n", 0, match.start()) + 1
