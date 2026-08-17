@@ -55,8 +55,9 @@ Import the Home Manager module and enable the shell:
 `programs.omanixy.enable`, `programs.omanixy.features`, and
 `programs.omanixy.shell.config` are the public options.
 `features` selects the optional compatibility feature groups whose runtime
-dependencies, helpers, and menu actions are built into the runtime; it defaults
-to every group and is closed transitively.
+dependencies, helpers, and menu actions are built into the runtime; the `core`
+group is always selected, the option defaults to every optional group, and
+selection is closed transitively.
 See [Source and runtime closure](#source-and-runtime-closure) for the group
 list and for what omitting a group removes.
 The structured config is the escape hatch for upstream schema changes rather
@@ -148,7 +149,8 @@ filesystem.
 The closure contains the selected Quickshell, its Qt/QML dependencies,
 `hyprctl`, `inotifywait`, and only the feature-group utilities selected by the
 consumer.
-The feature groups are `network`, `audio`, `bluetooth`, `screenshot`,
+The always-selected core group provides the baseline shell support.
+The optional feature groups are `network`, `audio`, `bluetooth`, `screenshot`,
 `clipboard`, `power`, `monitor`, `weather`, `notification`, and `launcher`.
 Selecting `bluetooth` also selects `audio` because the pinned Bluetooth panel
 uses the audio default-device contract when connecting a device.
