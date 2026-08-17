@@ -14,7 +14,8 @@ from source_discovery import shell_executables, source_executables
 HELPER_PATTERN = re.compile(r"\bomarchy-[a-z0-9-]+\b")
 HELPER_INVOCATION_PATTERN = re.compile(
     r"(?:\.run\s*\(|\.exec(?:Detached)?\s*\(|\bcommand\s*[:=]|\.command\s*=|"
-    r"\b(?:action|script)\s*[:=]|shellQuote\s*\(|\bexec\s+|\bsource\s+)"
+    r"\b(?:action|script)\s*[:=]|shellQuote\s*\(|\bexec\s+|\bsource\s+|"
+    r"(?:^|[;&|]\s*)omarchy-[a-z0-9-]+(?:\s|$))"
 )
 SOURCE_SUFFIXES = {".qml", ".js", ".json", ".jsonc", ".sh", ".bash"}
 MENU_FIELDS = ("action", "when", "checked")

@@ -200,7 +200,7 @@ def source_executables(path: str, text: str) -> list[dict[str, object]]:
             return
         if name.startswith("/"):
             name = name.rsplit("/", 1)[-1]
-        if not name or name in SHELL_BUILTINS or name.startswith("$"):
+        if not name or name in SHELL_BUILTINS or name.startswith(("$", "omarchy-")):
             return
         references.append({"name": name, "line": line, "invocation": invocation, "shape": shape.strip()})
 
@@ -291,14 +291,6 @@ def source_executables(path: str, text: str) -> list[dict[str, object]]:
         for name in shell_executables(match.group(2)):
             add(name, line_number, "shell-string", source_line)
 
-    if path.endswith((".sh", ".bash")):
-        function_names = {
-            match.group(1)
-            for match in re.finditer(
-                r"^\s*(?:function\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*(?:\(\s*\))?\s*\{", text, re.MULTILINE
-            )
-        }
-        references = [reference for reference in references if reference["name"] not in function_names]
     unique: dict[tuple[str, int, str], dict[str, object]] = {}
     for reference in references:
         key = (str(reference["name"]), int(reference["line"]), str(reference["invocation"]))
