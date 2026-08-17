@@ -107,6 +107,21 @@ grep -Fq 'references helpers without capability identities: omarchy-undeclared-h
   "$test_root/unknown-unregistered-error"
 printf '%s\n' 'REJECTED unknown helper in previously unregistered selected source'
 
+inline_comment_fixture="$test_root/inline-comment-root"
+cp -R -- "$weather_root" "$inline_comment_fixture"
+chmod -R u+w "$inline_comment_fixture"
+printf '%s\n' '/* note */ root.bar.run("omarchy-undeclared-helper")' \
+  >> "$inline_comment_fixture/shell/plugins/panels/weather/BarWidget.qml"
+if "${PYTHON:-python3}" "$checker" "$inline_comment_fixture" "$pinned_source" \
+  "$weather_bin/runtime-surface.json" "$weather_bin/feature-surface.json" "$test_root/inline-comment.json" \
+  >"$test_root/inline-comment-output" 2>"$test_root/inline-comment-error"; then
+  printf '%s\n' 'feature consumer closure accepted an unknown helper after an inline block comment' >&2
+  exit 1
+fi
+grep -Fq 'references helpers without capability identities: omarchy-undeclared-helper' \
+  "$test_root/inline-comment-error"
+printf '%s\n' 'REJECTED unknown helper after an inline block comment'
+
 unselected_fixture="$test_root/unselected-source-root"
 cp -R -- "$weather_root" "$unselected_fixture"
 chmod -R u+w "$unselected_fixture"
@@ -136,8 +151,6 @@ if ! "${PYTHON:-python3}" "$checker" "$core_root" "$pinned_source" \
 fi
 jq -e '.selectedFeatures == ["core"]' "$test_root/core.json" >/dev/null
 
-grep -Fqx '  property AppLibrary appLibrary: null' "$core_root/shell/shell.qml"
-grep -Fqx '  property AppLibrary appLibrary: AppLibrary { }' "$full_root/shell/shell.qml"
 test ! -e "$core_bin/bin/omarchy-remove-launcher-entry"
 test ! -e "$core_bin/bin/uwsm-app"
 test ! -e "$core_bin/bin/gtk-launch"

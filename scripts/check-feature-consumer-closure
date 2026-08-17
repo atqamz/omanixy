@@ -55,17 +55,31 @@ def active_lines(text: str) -> list[str]:
     lines: list[str] = []
     block_comment = False
     for line in text.splitlines():
-        if block_comment:
-            if "*/" in line:
-                block_comment = False
-            continue
         stripped = line.lstrip()
         if stripped.startswith("//"):
             continue
-        if stripped.startswith("/*"):
-            block_comment = "*/" not in stripped[2:]
-            continue
-        lines.append(line)
+        active = []
+        index = 0
+        while index < len(line):
+            if block_comment:
+                end = line.find("*/", index)
+                if end < 0:
+                    break
+                block_comment = False
+                index = end + 2
+                continue
+            start = line.find("/*", index)
+            if start < 0:
+                active.append(line[index:])
+                break
+            active.append(line[index:start])
+            end = line.find("*/", start + 2)
+            if end < 0:
+                block_comment = True
+                break
+            index = end + 2
+        if active:
+            lines.append("".join(active))
     return lines
 
 

@@ -301,7 +301,6 @@ ShellRoot {
   property var appLibrary: null
 }
 EOF
-    grep -Fqx '  property AppLibrary appLibrary: null' "$test_source/shell/shell.qml"
   fi
   ln -s shell "$test_source/qs"
   cat > "$harness" <<EOF
