@@ -33,9 +33,9 @@ changes the pin.
 The target source model is:
 
 ```text
-reviewed Omarchy Quattro revision X
+Omarchy Quattro f0020448ca87329199de7cb12f2015ebc4a3e5e7
               +
-     tested Quickshell revision Y
+Quickshell 28771c7c74b42e20afca0b1b63980cb46515537c
               ↓
          Omanixy release
 ```

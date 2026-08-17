@@ -234,7 +234,9 @@ reviewed Omarchy Quattro source
 
 The service name `omanixy-shell.service` describes the runtime component.
 It does not redefine the repository as only a shell package.
-The runtime, lifecycle, source consumption, and pairing are owned by issue #2.
+Issue #2 established the runtime lifecycle and pinned pairing.
+This branch extends that baseline with the immutable compatibility view,
+feature closure, and audited adapters described below.
 
 The upstream shell source should remain pinned and read-only in the Nix store
 where technically possible.
