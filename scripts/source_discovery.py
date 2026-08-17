@@ -76,9 +76,7 @@ ARRAY_COMMAND_RE = re.compile(
     re.DOTALL,
 )
 DYNAMIC_COMMAND_RE = re.compile(r"\bcommand\s*:\s+(?![\"'\[])[^\n,}]+")
-DYNAMIC_SCRIPT_RE = re.compile(
-    r"\bscript\s*:\s+(?![\"'\[])([A-Za-z_][A-Za-z0-9_]*)\b"
-)
+DYNAMIC_SCRIPT_RE = re.compile(r"\bscript\s*:\s+(?![\"'\[])[^\n,}]+")
 DYNAMIC_ASSIGNMENT_RE = re.compile(
     r"\b[A-Za-z_][A-Za-z0-9_]*\.command\s*=\s+(?![\"'\[])[^\n;]+"
 )
@@ -162,7 +160,7 @@ def shell_executables(value: str) -> list[str]:
         elif first.startswith("$") or "=" in first and first.split("=", 1)[0].isidentifier():
             if "$(" not in first:
                 commands.extend(_next_command(words, 1))
-        elif first not in SHELL_BUILTINS and not first.startswith(("/", "-")):
+        elif first not in SHELL_BUILTINS and not first.startswith("-"):
             commands.append(first)
     return list(dict.fromkeys(commands))
 
@@ -202,7 +200,7 @@ def source_executables(path: str, text: str) -> list[dict[str, object]]:
             return
         if name.startswith("/"):
             name = name.rsplit("/", 1)[-1]
-        if not name or name in SHELL_BUILTINS or name.startswith(("$", "omarchy-")):
+        if not name or name in SHELL_BUILTINS or name.startswith("$"):
             return
         references.append({"name": name, "line": line, "invocation": invocation, "shape": shape.strip()})
 
