@@ -71,7 +71,6 @@ import Quickshell
 import Quickshell.Io
 ShellRoot {
   id: root
-  property bool ready: false
   Item {
     Loader { id: bar; source: "$bar_fixture" }
     Timer {
@@ -81,17 +80,11 @@ ShellRoot {
       onTriggered: {
         if (!bar.item || bar.item.transparentForeground !== bar.item.themeForeground || bar.item.barForeground !== bar.item.themeForeground)
           console.log("QML_PATCH_FAIL", bar.status, bar.item ? bar.item.transparentForeground : "no-item", bar.item ? bar.item.themeForeground : "no-item", bar.item ? bar.item.barForeground : "no-item")
-        else if (!root.ready) {
-          if (bar.item.barHidden)
-            console.log("QML_PATCH_FAIL", "barHidden changed before bar-off toggle")
-          else {
-            root.ready = true
-            console.log("QML_PATCH_READY")
-          }
-        } else if (bar.item.barHidden) {
+        else if (bar.item.barHidden) {
           console.log("QML_PATCH_PASS")
           Qt.quit()
-        }
+        } else
+          console.log("QML_PATCH_FAIL", "barHidden did not reflect bar-off toggle")
       }
     }
   }
@@ -102,14 +95,9 @@ cp -R "$root/shell/Commons" "$test_root/Commons"
 cp -R "$root/shell/Ui" "$test_root/Ui"
 cp "$root/shell/plugins/bar/BarModel.js" "$test_root/BarModel.js"
 chmod -R u+w "$test_root/Commons" "$test_root/Ui" "$test_root/BarModel.js"
+: > "$test_root/home/.local/state/omarchy/toggles/bar-off"
 HOME="$test_root/home" XDG_RUNTIME_DIR="$test_root/runtime" QML2_IMPORT_PATH="$test_root" QT_QPA_PLATFORM=offscreen timeout 10s "$quickshell" -n -p "$test_root" >"$test_root/quickshell.log" 2>&1 &
 quickshell_pid=$!
-for _ in $(seq 1 100); do
-  grep -Fq 'QML_PATCH_READY' "$test_root/quickshell.log" && break
-  sleep 0.1
-done
-grep -Fq 'QML_PATCH_READY' "$test_root/quickshell.log"
-: > "$test_root/home/.local/state/omarchy/toggles/bar-off"
 wait "$quickshell_pid" || true
 if ! grep -Fq 'QML_PATCH_PASS' "$test_root/quickshell.log"; then
   cat "$test_root/quickshell.log" >&2
