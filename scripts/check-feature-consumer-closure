@@ -59,7 +59,7 @@ def active_lines(text: str) -> list[str]:
     block_comment = False
     for line in text.splitlines():
         stripped = line.lstrip()
-        if stripped.startswith("//"):
+        if not block_comment and stripped.startswith("//"):
             lines.append("")
             continue
         active = []
