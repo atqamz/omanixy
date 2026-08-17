@@ -182,6 +182,17 @@ def shell_executables(value: str) -> list[str]:
         elif first == "env":
             commands.append(first)
             commands.extend(_next_command(words, 1))
+            for index, word in enumerate(words[1:], 1):
+                if word.rsplit("/", 1)[-1] in {"bash", "dash", "sh", "zsh"}:
+                    for option_index, option in enumerate(words[index + 1 :], index + 1):
+                        if option.startswith("-") and "c" in option:
+                            payload = " ".join(words[option_index + 1 :])
+                            if payload.startswith("$"):
+                                commands.append(DYNAMIC_EXECUTABLE)
+                            else:
+                                commands.extend(shell_executables(payload))
+                            break
+                    break
         elif first.startswith("$") or "=" in first and first.split("=", 1)[0].isidentifier():
             if "$(" not in first:
                 commands.extend(_next_command(words, 1))
