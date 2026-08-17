@@ -71,7 +71,8 @@ COMMAND_SUBSHELL_RE = re.compile(r"\$\(([^()]*)\)")
 PROCESS_SUBSHELL_RE = re.compile(r"<\s*<\(([^()]*)\)")
 DYNAMIC_EXECUTABLE = "__dynamic-executable__"
 ARRAY_COMMAND_RE = re.compile(
-    r"(?:\bcommand\s*[:=]|(?:Quickshell|Util)\.exec(?:Detached)?\s*\()\s*"
+    r"(?:(?:\b[A-Za-z_][A-Za-z0-9_]*\.)?command\s*[:=]|"
+    r"(?:Quickshell|Util)\.exec(?:Detached)?\s*\()\s*"
     r"\[([^\]]*)\]",
     re.DOTALL,
 )
@@ -293,7 +294,11 @@ def source_executables(path: str, text: str, pinned_text: str = "") -> list[dict
             for name in shell_executables(payload):
                 add(name, line_number, "command-array-shell", source_line)
         elif (
-            re.match(r"\s*(?:command\s*[:=]|(?:Quickshell|Util)\.exec(?:Detached)?\s*\()", match.group(0))
+            re.match(
+                r"\s*(?:(?:[A-Za-z_][A-Za-z0-9_]*\.)?command\s*[:=]|"
+                r"(?:Quickshell|Util)\.exec(?:Detached)?\s*\()",
+                match.group(0),
+            )
             and re.search(
             r"['\"](?:bash|dash|sh|zsh)['\"]\s*,\s*['\"][^'\"]*c[^'\"]*['\"]\s*,",
             match.group(1),
