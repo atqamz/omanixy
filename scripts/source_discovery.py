@@ -141,6 +141,17 @@ def shell_executables(value: str) -> list[str]:
             continue
         if first in {"command", "builtin", "exec"}:
             commands.extend(_next_command(words, 1))
+            for index, word in enumerate(words[1:], 1):
+                if word.rsplit("/", 1)[-1] in {"bash", "dash", "sh", "zsh"}:
+                    for option_index, option in enumerate(words[index + 1 :], index + 1):
+                        if option.startswith("-") and "c" in option:
+                            payload = " ".join(words[option_index + 1 :])
+                            if payload.startswith("$"):
+                                commands.append(DYNAMIC_EXECUTABLE)
+                            else:
+                                commands.extend(shell_executables(payload))
+                            break
+                    break
         elif first.rsplit("/", 1)[-1] in {"bash", "dash", "sh", "zsh"}:
             commands.append(first)
             for index, word in enumerate(words[1:], 1):
@@ -239,8 +250,9 @@ def source_executables(path: str, text: str, pinned_text: str = "") -> list[dict
     for line_number, line in enumerate(text.splitlines(), 1):
         if path.endswith((".sh", ".bash")):
             command_line = re.sub(r"^\s*[A-Za-z_][A-Za-z0-9_]*(?:\[[^]]+\])?=", "", line)
-            if re.match(r"^\s*[A-Za-z_][A-Za-z0-9_]*\s*\(\)\s*\{", line):
-                command_line = ""
+            function_body = re.match(r"^\s*[A-Za-z_][A-Za-z0-9_]*\s*\(\s*\)\s*\{", line)
+            if function_body:
+                command_line = line[function_body.end() :]
             else:
                 case_arm = re.match(r"^\s*[^;&]+\)\s*", line)
                 if case_arm:
