@@ -918,7 +918,9 @@ grep -Fqx auto "$test_root/nmcli-state"
 grep -q 'profile was not changed' "$test_root/error"
 TEST_NMCLI_STATE="$test_root/nmcli-state" HOME="$home" PATH="$bin:$PATH" \
   run_adapter omarchy-dns > "$test_root/dns"
-last_status=0
+grep -Fqx DHCP "$test_root/dns"
+record_case omarchy-dns valid
+record_case omarchy-dns stdout
 network_status_failure_status=0
 if TEST_IP_FAIL=1 HOME="$home" PATH="$bin:$PATH" run_adapter omarchy-network-status 2>"$test_root/error"; then
   printf '%s\n' 'network status backend failure unexpectedly succeeded' >&2
@@ -954,9 +956,6 @@ if TEST_NMCLI_FAIL=all TEST_NMCLI_STATE="$test_root/nmcli-state" HOME="$home" PA
 fi
 grep -q 'active NetworkManager connection lookup failed' "$test_root/error"
 record_case omarchy-dns backendFailure
-grep -Fqx DHCP "$test_root/dns"
-record_case omarchy-dns valid
-record_case omarchy-dns stdout
 TEST_NMCLI_STATE="$test_root/nmcli-state" HOME="$home" PATH="$bin:$PATH" \
   run_adapter omarchy-dns Cloudflare
 grep -Fqx yes "$test_root/nmcli-state" && grep -Fqx '1.1.1.1,1.0.0.1' <(sed -n '3p' "$test_root/nmcli-state")
