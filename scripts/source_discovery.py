@@ -74,9 +74,7 @@ ARRAY_COMMAND_RE = re.compile(
     r"\[([^\]]*)\]",
     re.DOTALL,
 )
-DYNAMIC_COMMAND_RE = re.compile(
-    r"\bcommand\s*:\s+dynamic[A-Za-z0-9_]*\b"
-)
+DYNAMIC_COMMAND_RE = re.compile(r"\bcommand\s*:\s+(?![\"'\[])[^\n,}]+")
 SHELL_PAYLOAD_RE = re.compile(
     r"\b(?:command|script)\s*:\s*([\"'])(.*?)(?<!\\)\1",
     re.DOTALL,
@@ -122,6 +120,12 @@ def shell_executables(value: str) -> list[str]:
             continue
         if first in {"command", "builtin", "exec"}:
             commands.extend(_next_command(words, 1))
+        elif first in {"bash", "dash", "sh", "zsh"}:
+            commands.append(first)
+            for index, word in enumerate(words[1:], 1):
+                if word.startswith("-") and "c" in word:
+                    commands.extend(shell_executables(" ".join(words[index + 1 :])))
+                    break
         elif first == "timeout":
             commands.append(first)
             commands.extend(_next_command(words, 2))
@@ -143,18 +147,28 @@ def source_executables(path: str, text: str) -> list[dict[str, object]]:
     dynamic_name = "__dynamic-executable__"
 
     def add(name: str, line: int, invocation: str, shape: str) -> None:
-        allowed_dynamic_shapes = (
-            "customRoot.setting",
-            "providerProc.command",
-            "guardProc.command",
-            "root.dnsCommand",
-            "Model.enterpriseConnectScript",
-            "root.userOwnedEntryScanCommand",
-            "root.hiddenEntryScanCommand",
-            "root.iconIndexScanCommand",
-            "scanProcess.command",
+        allowed_dynamic_shapes = {
+            'command: ["bash", "-c", root.dnsCommand("")]',
+            'actionProc.command = ["bash", "-c", root.dnsCommand(provider)]',
+            'providerProc.command = ["bash", "-lc", spec.script]',
+            'guardProc.command = ["bash", "-lc", script]',
+            'enterpriseConnect.command = ["bash", "-c", Model.enterpriseConnectScript, "nmcli-eap", ssid, identity]',
+            'command: ["bash", "-c", root.userOwnedEntryScanCommand()]',
+            'command: ["bash", "-c", root.hiddenEntryScanCommand()]',
+            'command: ["bash", "-c", root.iconIndexScanCommand()]',
+            'scanProcess.command = ["bash", "-c", script, registry.firstPartyDir, registry.pluginsDir]',
+            'command: ["bash", "-lc", String(customRoot.setting("exec", ""))]',
+        }
+        normalized_shape = " ".join(shape.split())
+        known_custom_command = re.fullmatch(
+            r'command: \["bash", "-lc", String\(customRoot\.setting\("exec", ""\)\)\]',
+            normalized_shape,
         )
-        if name == dynamic_name and any(marker in shape for marker in allowed_dynamic_shapes):
+        if name == dynamic_name and (
+            shape.strip() in allowed_dynamic_shapes
+            or known_custom_command
+            or shape.strip() == 'command: ["bash", "-lc", String(customRoot.setting("exec", ""))]'
+        ):
             return
         if not name or name in SHELL_BUILTINS or name.startswith(("/", "$", "omarchy-")):
             return
@@ -213,9 +227,7 @@ def source_executables(path: str, text: str) -> list[dict[str, object]]:
             for name in shell_executables(payload):
                 add(name, line_number, "command-array-shell", source_line)
         elif (
-            "customRoot.setting" not in source_line
-            and "customRoot.setting" not in match.group(1)
-            and re.match(r"\s*command\s*[:=]", match.group(0))
+            re.match(r"\s*command\s*[:=]", match.group(0))
             and re.search(
             r"['\"](?:bash|dash|sh|zsh)['\"]\s*,\s*['\"][^'\"]*c[^'\"]*['\"]\s*,",
             match.group(1),

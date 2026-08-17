@@ -358,6 +358,20 @@ fi
 grep -Fq 'unknown external executable: pacman' "$test_root/unknown-script-payload-error"
 printf '%s\n' 'REJECTED pacman in a script payload'
 
+nested_shell_payload="$test_root/nested-shell-payload-root"
+cp -R -- "$weather_root" "$nested_shell_payload"
+chmod -R u+w "$nested_shell_payload"
+printf '%s\n' 'Item { script: "bash -lc pacman" }' \
+  >> "$nested_shell_payload/shell/plugins/panels/weather/Panel.qml"
+if "${PYTHON:-python3}" "$checker" "$nested_shell_payload" "$pinned_source" \
+  "$weather_bin/runtime-surface.json" "$weather_bin/feature-surface.json" "$test_root/nested-shell-payload.json" \
+  >"$test_root/nested-shell-payload-output" 2>"$test_root/nested-shell-payload-error"; then
+  printf '%s\n' 'feature consumer closure accepted pacman in a nested shell payload' >&2
+  exit 1
+fi
+grep -Fq 'unknown external executable: pacman' "$test_root/nested-shell-payload-error"
+printf '%s\n' 'REJECTED pacman in a nested shell payload'
+
 unknown_exec_payload="$test_root/unknown-exec-payload-root"
 cp -R -- "$weather_root" "$unknown_exec_payload"
 chmod -R u+w "$unknown_exec_payload"
