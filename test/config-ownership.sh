@@ -9,7 +9,8 @@ store_home=${5:?store-link test home required}
 store_config=${6:?store-backed source config required}
 explicit_store_config=${7:?explicit store-backed source config required}
 malformed_store_config=${8:?malformed store-backed source config required}
-historical_baseline=${9:?historical issue #2 baseline required}
+custom_store_config=${9:?custom store-backed source config required}
+historical_baseline=${10:?historical issue #2 baseline required}
 mkdir -p "$home"
 mkdir -p "$custom_home"
 mkdir -p "$store_home/.config/omarchy"
@@ -188,6 +189,14 @@ test "$(stat -c '%a' "$explicit_store_file")" = 600
 for plugin in omarchy.audio omarchy.network; do
   jq -e --arg plugin "$plugin" '.disabledPlugins | index($plugin) != null' "$explicit_store_file" >/dev/null
 done
+
+custom_store_home="${home}-custom-store-link"
+mkdir -p "$custom_store_home/.config/omarchy"
+ln -s "$custom_store_config" "$custom_store_home/.config/omarchy/shell.json"
+HOME="$custom_store_home" USER=omanixy-test XDG_RUNTIME_DIR="$custom_store_home/runtime" \
+  bash -c 'run() { "$@"; }; source "$1"' bash "$activation"
+jq -e '.version == 1 and .custom == true and (has("disabledPlugins") | not)' \
+  "$custom_store_home/.config/omarchy/shell.json" >/dev/null
 
 mkdir -p "$malformed_store_home/.config/omarchy"
 ln -s "$malformed_store_config" "$malformed_store_home/.config/omarchy/shell.json"

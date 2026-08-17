@@ -68,17 +68,33 @@
     "screenshot",
     "weather"
   ],
-  "featureDependencies": {
-    "audio": [],
-    "bluetooth": ["audio"],
-    "clipboard": [],
-    "core": [],
-    "launcher": [],
-    "monitor": [],
-    "network": ["clipboard"],
-    "notification": [],
-    "power": [],
-    "screenshot": ["notification"],
-    "weather": ["notification"]
+  "featureCapabilities": {
+    "audio": ["audio-control", "audio-default-output"],
+    "bluetooth": ["bluetooth-control", "audio-default-output"],
+    "clipboard": ["clipboard-presentation"],
+    "core": ["core-runtime"],
+    "launcher": ["launcher"],
+    "monitor": ["monitor-control"],
+    "network": ["network-manager", "wayland-clipboard-write"],
+    "notification": ["notification-send"],
+    "power": ["power-control"],
+    "screenshot": ["screenshot-capture", "wayland-clipboard-write", "notification-send"],
+    "weather": ["weather-network", "notification-send"]
+  },
+  "capabilityDependencies": {
+    "audio-control": ["core-runtime"],
+    "audio-default-output": ["core-runtime"],
+    "bluetooth-control": ["core-runtime"],
+    "clipboard-presentation": ["core-runtime", "wayland-clipboard-write", "text-injection"],
+    "core-runtime": [],
+    "launcher": ["core-runtime"],
+    "monitor-control": ["core-runtime"],
+    "network-manager": ["core-runtime"],
+    "notification-send": ["core-runtime"],
+    "power-control": ["core-runtime"],
+    "screenshot-capture": ["core-runtime"],
+    "text-injection": ["core-runtime"],
+    "wayland-clipboard-write": ["core-runtime"],
+    "weather-network": ["core-runtime"]
   }
 }

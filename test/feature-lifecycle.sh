@@ -20,6 +20,8 @@ network_runtime=${16:?network runtime required}
 audio_root=${17:?audio compatibility root required}
 weather_root=${18:?weather compatibility root required}
 network_root=${19:?network compatibility root required}
+bluetooth_root=${20:?bluetooth compatibility root required}
+screenshot_root=${21:?screenshot compatibility root required}
 
 activate() {
   local home=$1
@@ -61,6 +63,7 @@ mkdir -p "$fresh_clipboard_home"
 activate "$fresh_clipboard_home" "$clipboard_activation"
 fresh_clipboard_config="$fresh_clipboard_home/.config/omarchy/shell.json"
 test -f "$fresh_clipboard_config"
+jq -e '(has("featureCapabilities") | not) and (has("capabilityDependencies") | not)' "$fresh_clipboard_config" >/dev/null
 assert_no_feature_omissions "$fresh_clipboard_config"
 jq -e '.selectedFeatures == ["core", "clipboard"] and (.runtimeBlockedPlugins | index("omarchy.audio") != null)' \
   "$fresh_clipboard_home/.local/state/omanixy/capabilities.json" >/dev/null
@@ -73,6 +76,7 @@ mkdir -p "$fresh_core_home"
 activate "$fresh_core_home" "$core_activation"
 fresh_core_config="$fresh_core_home/.config/omarchy/shell.json"
 test -f "$fresh_core_config"
+jq -e '(has("featureCapabilities") | not) and (has("capabilityDependencies") | not)' "$fresh_core_config" >/dev/null
 assert_no_feature_omissions "$fresh_core_config"
 jq -e '.selectedFeatures == ["core"]' \
   "$fresh_core_home/.local/state/omanixy/capabilities.json" >/dev/null
@@ -85,7 +89,7 @@ fresh_audio_config="$fresh_audio_home/.config/omarchy/shell.json"
 test -f "$fresh_audio_config"
 assert_no_feature_omissions "$fresh_audio_config"
 activate "$fresh_audio_home" "$network_activation"
-jq -e '.selectedFeatures == ["core", "network", "clipboard"]' \
+jq -e '.selectedFeatures == ["core", "network"]' \
   "$fresh_audio_home/.local/state/omanixy/capabilities.json" >/dev/null
 
 fresh_clipboard_weather_home="$test_root/fresh-clipboard-weather-home"
@@ -93,7 +97,7 @@ mkdir -p "$fresh_clipboard_weather_home"
 activate "$fresh_clipboard_weather_home" "$clipboard_activation"
 fresh_clipboard_weather_config="$fresh_clipboard_weather_home/.config/omarchy/shell.json"
 activate "$fresh_clipboard_weather_home" "$weather_activation"
-jq -e '.selectedFeatures == ["core", "weather", "notification"]' \
+jq -e '.selectedFeatures == ["core", "weather"]' \
   "$fresh_clipboard_weather_home/.local/state/omanixy/capabilities.json" >/dev/null
 
 full_home="$test_root/full-home"
@@ -131,6 +135,10 @@ full_path=$(runtime_path "$full_runtime")
 audio_path=$(runtime_path "$audio_runtime")
 weather_path=$(runtime_path "$weather_runtime")
 network_path=$(runtime_path "$network_runtime")
+core_path=$(runtime_path "$core_runtime")
+
+jq -e 'has("trigger.screenshot") and (has("trigger.emoji") | not)' \
+  "$screenshot_root/default/omarchy/omarchy-menu.jsonc" >/dev/null
 
 test -x "$full_runtime/bin/omarchy-audio-output-set-default"
 test -x "$full_runtime/bin/omarchy-weather-status"
@@ -144,6 +152,10 @@ PATH="$full_path" command -v nmcli >/dev/null
 PATH="$audio_path" command -v pactl >/dev/null
 PATH="$weather_path" command -v curl >/dev/null
 PATH="$network_path" command -v nmcli >/dev/null
+if PATH="$core_path" command -v uwsm-app >/dev/null || PATH="$core_path" command -v gtk-launch >/dev/null; then
+  printf '%s\n' 'core-only runtime unexpectedly contains launcher executables' >&2
+  exit 1
+fi
 test -x "$audio_runtime/bin/omarchy-audio-output-set-default"
 test -x "$weather_runtime/bin/omarchy-weather-status"
 test -x "$network_runtime/bin/omarchy-network-status"
@@ -243,13 +255,96 @@ EOF
 run_registry_policy "$full_root" '["omarchy.audio", "omarchy.bluetooth", "omarchy.clipboard", "omarchy.emojis", "omarchy.monitor", "omarchy.network", "omarchy.power", "omarchy.weather"]' full "$test_root/full-shell.json"
 run_registry_policy "$clipboard_root" '["omarchy.clipboard", "omarchy.emojis"]' clipboard "$test_root/full-shell.json"
 run_registry_policy "$core_root" '[]' core "$test_root/full-shell.json"
+run_registry_policy "$network_root" '["omarchy.network"]' network "$test_root/full-shell.json"
+run_registry_policy "$bluetooth_root" '["omarchy.bluetooth"]' bluetooth "$test_root/full-shell.json"
 run_registry_policy "$full_root" '["omarchy.audio", "omarchy.bluetooth", "omarchy.clipboard", "omarchy.emojis", "omarchy.monitor", "omarchy.network", "omarchy.power", "omarchy.weather"]' fresh-clipboard-full "$fresh_clipboard_config"
 run_registry_policy "$full_root" '["omarchy.audio", "omarchy.bluetooth", "omarchy.clipboard", "omarchy.emojis", "omarchy.monitor", "omarchy.network", "omarchy.power", "omarchy.weather"]' fresh-core-full "$fresh_core_config"
 run_registry_policy "$audio_root" '["omarchy.audio"]' fresh-audio "$fresh_audio_config"
-run_registry_policy "$network_root" '["omarchy.clipboard", "omarchy.emojis", "omarchy.network"]' fresh-audio-network "$fresh_audio_config"
+run_registry_policy "$network_root" '["omarchy.network"]' fresh-audio-network "$fresh_audio_config"
 run_registry_policy "$weather_root" '["omarchy.weather"]' fresh-clipboard-weather "$fresh_clipboard_weather_config"
 run_registry_policy "$clipboard_root" '["omarchy.clipboard", "omarchy.emojis"]' customized-clipboard "$test_root/custom-shell.json"
 activate "$fresh_clipboard_home" "$core_activation"
 run_registry_policy "$core_root" '[]' fresh-clipboard-full-core "$fresh_clipboard_config"
+
+run_app_library_reachability() {
+  local root=$1 expected=$2 name=$3
+  local test_source="$test_root/$name-root"
+  local harness="$test_root/$name.qml"
+  local gate="$test_source/shell/feature-gate.qml"
+  local marker="$test_root/$name-hidden-entries-ran"
+  cp -R -- "$root" "$test_source"
+  chmod -R u+w "$test_source"
+  sed -i '0,/Component.onCompleted: {/s//Component.onCompleted: { console.log("APP_LIBRARY_STARTED")/' \
+    "$test_source/shell/services/AppLibrary.qml"
+  cat > "$test_source/shell/services/hidden-entries.sh" <<EOF
+#!/bin/sh
+printf '%s\\n' ran > "\$OMANIXY_HIDDEN_MARKER"
+EOF
+  chmod 0555 "$test_source/shell/services/hidden-entries.sh"
+  if [[ $expected == true ]]; then
+    cat > "$gate" <<EOF
+import QtQuick
+import Quickshell
+
+ShellRoot {
+  Loader {
+    source: "${test_source}/shell/services/AppLibrary.qml"
+  }
+}
+EOF
+  else
+    cat > "$gate" <<'EOF'
+import QtQuick
+import Quickshell
+
+ShellRoot {
+  property var appLibrary: null
+}
+EOF
+    grep -Fqx '  property AppLibrary appLibrary: null' "$test_source/shell/shell.qml"
+  fi
+  ln -s shell "$test_source/qs"
+  cat > "$harness" <<EOF
+import QtQuick
+import Quickshell
+
+ShellRoot {
+  Loader {
+    source: "${gate}"
+  }
+
+  Timer {
+    interval: 2000
+    running: true
+    onTriggered: Qt.quit()
+  }
+}
+EOF
+  HOME="$test_root/$name-home" XDG_RUNTIME_DIR="$test_root/$name-runtime" \
+    OMANIXY_HIDDEN_MARKER="$marker" OMARCHY_PATH="$test_source" \
+    QML2_IMPORT_PATH="$test_source" QT_QPA_PLATFORM=offscreen \
+    timeout 10s "$quickshell" -n -p "$harness" >"$test_root/$name.log" 2>&1 || true
+  if [[ $expected == true ]]; then
+    grep -Fq 'APP_LIBRARY_STARTED' "$test_root/$name.log" || {
+      cat "$test_root/$name.log" >&2
+      printf '%s\n' 'launcher runtime did not instantiate AppLibrary' >&2
+      exit 1
+    }
+    test -f "$marker" || {
+      cat "$test_root/$name.log" >&2
+      printf '%s\n' 'launcher runtime did not execute hidden-entries.sh' >&2
+      exit 1
+    }
+  else
+    if grep -Fq 'APP_LIBRARY_STARTED' "$test_root/$name.log" || test -e "$marker"; then
+      cat "$test_root/$name.log" >&2
+      printf '%s\n' 'core-only shell instantiated launcher AppLibrary' >&2
+      exit 1
+    fi
+  fi
+}
+
+run_app_library_reachability "$core_root" false core-app-library
+run_app_library_reachability "$full_root" true launcher-app-library
 
 printf '%s\n' 'feature lifecycle checks passed'

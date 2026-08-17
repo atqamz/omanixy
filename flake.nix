@@ -79,18 +79,23 @@
           screenshotRuntime = runtimeFor system [ "screenshot" ];
           coreRuntime = runtimeFor system [ "core" ];
           monitorRuntime = runtimeFor system [ "monitor" ];
-          featureRuntimePaths = pkgs.writeText "omanixy-feature-runtime-paths" (builtins.toJSON {
-            audio = toString audioRuntime;
-            bluetooth = toString bluetoothRuntime;
-            clipboard = toString clipboardRuntime;
-            core = toString coreRuntime;
+          powerRuntime = runtimeFor system [ "power" ];
+          notificationRuntime = runtimeFor system [ "notification" ];
+          capabilityRuntimePaths = pkgs.writeText "omanixy-capability-runtime-paths" (builtins.toJSON {
+            "audio-control" = toString audioRuntime;
+            "audio-default-output" = toString audioRuntime;
+            "bluetooth-control" = toString bluetoothRuntime;
+            "clipboard-presentation" = toString clipboardRuntime;
+            "core-runtime" = toString coreRuntime;
             launcher = toString launcherRuntime;
-            monitor = toString monitorRuntime;
-            network = toString networkRuntime;
-            notification = toString (runtimeFor system [ "notification" ]);
-            power = toString (runtimeFor system [ "power" ]);
-            screenshot = toString screenshotRuntime;
-            weather = toString weatherRuntime;
+            "monitor-control" = toString monitorRuntime;
+            "network-manager" = toString networkRuntime;
+            "notification-send" = toString notificationRuntime;
+            "power-control" = toString powerRuntime;
+            "screenshot-capture" = toString screenshotRuntime;
+            "text-injection" = toString clipboardRuntime;
+            "wayland-clipboard-write" = toString networkRuntime;
+            "weather-network" = toString weatherRuntime;
           });
           clipboardHomeConfiguration = homeConfigurationFor system {
             programs.omanixy.features = [ "clipboard" ];
@@ -111,7 +116,7 @@
           compatibilityRoot = runtime.passthru.omarchyCompatibilityRoot;
           baselineConfigForTests = builtins.removeAttrs
             (builtins.fromJSON (builtins.readFile ./upstream/shell-baseline.json))
-            [ "featurePlugins" "featureDependencies" "featureOrder" "migrations" ];
+            [ "featurePlugins" "featureDependencies" "featureOrder" "migrations" "featureCapabilities" "capabilityDependencies" ];
           storeConfig = pkgs.writeText "omanixy-historical-shell-config" (builtins.readFile ./upstream/shell-baseline-v1.json);
           explicitStoreConfig = pkgs.writeText "omanixy-explicit-store-shell-config" (builtins.toJSON (baselineConfigForTests // {
             disabledPlugins = nixpkgs.lib.unique (baselineConfigForTests.disabledPlugins ++ [
@@ -119,6 +124,7 @@
               "omarchy.network"
             ]);
           }));
+          customStoreConfig = pkgs.writeText "omanixy-custom-store-shell-config" ''{"version":1,"custom":true}'';
           malformedStoreConfig = pkgs.writeText "omanixy-malformed-store-shell-config" ''{"disabledPlugins":'';
           homeConfiguration = homeConfigurationFor system { };
           customHomeConfiguration = homeConfigurationFor system {
@@ -224,9 +230,20 @@
             {
               nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.jq ];
             } ''
+            jq -e '.selectedFeatures == ["core", "network"] and (.selectedCapabilities | index("network-manager") != null) and (.selectedCapabilities | index("wayland-clipboard-write") != null) and (.selectedCapabilities | index("clipboard-presentation") == null)' ${networkRuntime.passthru.compatibilityBin}/feature-surface.json >/dev/null
+            jq -e 'has("trigger.emoji") | not' ${networkRuntime.passthru.safeMenu} >/dev/null
             test -e ${clipboardRuntime.passthru.compatibilityBin}/bin/omarchy-menu-emoji-insert
             test ! -e ${clipboardRuntime.passthru.compatibilityBin}/bin/omarchy-network-status
+            test -e ${networkRuntime.passthru.compatibilityBin}/bin/omarchy-network-status
+            test ! -e ${networkRuntime.passthru.compatibilityBin}/bin/omarchy-clipboard-open
+            test ! -e ${networkRuntime.passthru.compatibilityBin}/bin/omarchy-menu-emoji-insert
             test -e ${bluetoothRuntime.passthru.compatibilityBin}/bin/omarchy-audio-output-set-default
+            test ! -e ${bluetoothRuntime.passthru.compatibilityBin}/bin/omarchy-audio-input-set-default
+            test ! -e ${bluetoothRuntime.passthru.compatibilityBin}/bin/omarchy-audio-output-sink
+            test ! -e ${bluetoothRuntime.passthru.compatibilityBin}/bin/omarchy-audio-sink-availability
+            jq -e '.selectedFeatures == ["core", "bluetooth"] and (.selectedCapabilities | index("audio-default-output") != null) and (.selectedCapabilities | index("audio-control") == null)' ${bluetoothRuntime.passthru.compatibilityBin}/feature-surface.json >/dev/null
+            test ! -e ${networkRuntime.passthru.compatibilityBin}/bin/omarchy-clipboard-open
+            test ! -e ${networkRuntime.passthru.compatibilityBin}/bin/omarchy-menu-emoji-insert
             clipboard_path=$(sed -n 's/^export PATH="\(.*\)"$/\1/p' ${clipboardRuntime}/bin/omanixy-shell-runtime)
             PATH="$clipboard_path" command -v wl-copy >/dev/null
             if PATH="$clipboard_path" command -v nmcli >/dev/null; then
@@ -234,6 +251,12 @@
             fi
             bluetooth_path=$(sed -n 's/^export PATH="\(.*\)"$/\1/p' ${bluetoothRuntime}/bin/omanixy-shell-runtime)
             PATH="$bluetooth_path" command -v pactl >/dev/null
+            network_path=$(sed -n 's/^export PATH="\(.*\)"$/\1/p' ${networkRuntime}/bin/omanixy-shell-runtime)
+            PATH="$network_path" command -v wl-copy >/dev/null
+            jq -e '.selectedFeatures == ["core", "weather"] and (.selectedCapabilities | index("notification-send") != null)' ${weatherRuntime.passthru.compatibilityBin}/feature-surface.json >/dev/null
+            jq -e '.selectedFeatures == ["core", "screenshot"] and (.selectedCapabilities | index("notification-send") != null)' ${screenshotRuntime.passthru.compatibilityBin}/feature-surface.json >/dev/null
+            test -e ${weatherRuntime.passthru.compatibilityBin}/bin/omarchy-notification-send
+            test -e ${screenshotRuntime.passthru.compatibilityBin}/bin/omarchy-notification-send
             jq -e '
               has("trigger.emoji")
               and (has("apps") | not)
@@ -247,7 +270,7 @@
             {
               nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnused pkgs.jq ];
             } ''
-            ${pkgs.bash}/bin/bash ${./test/feature-runtime-inputs.sh} ${./upstream/compatibility-contracts.json} ${featureRuntimePaths}
+            ${pkgs.bash}/bin/bash ${./test/feature-runtime-inputs.sh} ${./upstream/compatibility-contracts.json} ${capabilityRuntimePaths}
             touch "$out"
           '';
           feature-closure = pkgs.runCommand "omanixy-feature-closure"
@@ -263,7 +286,7 @@
             {
               nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.jq pkgs.python3 ];
             } ''
-            ${pkgs.bash}/bin/bash ${./test/feature-consumer-closure.sh} \
+            PYTHONPATH=${./scripts} ${pkgs.bash}/bin/bash ${./test/feature-consumer-closure.sh} \
               ${./.} ${runtime.passthru.omarchySource} \
               ${runtime.passthru.omarchyCompatibilityRoot} \
               ${runtime.passthru.compatibilityBin} \
@@ -273,6 +296,10 @@
               ${clipboardRuntime.passthru.compatibilityBin} \
               ${coreRuntime.passthru.omarchyCompatibilityRoot} \
               ${coreRuntime.passthru.compatibilityBin} \
+              ${launcherRuntime.passthru.omarchyCompatibilityRoot} \
+              ${launcherRuntime.passthru.compatibilityBin} \
+              ${screenshotRuntime.passthru.omarchyCompatibilityRoot} \
+              ${screenshotRuntime.passthru.compatibilityBin} \
               ${./scripts/check-feature-consumer-closure}
             touch "$out"
           '';
@@ -291,7 +318,9 @@
               ${audioRuntime} ${weatherRuntime} ${networkRuntime} \
               ${audioRuntime.passthru.omarchyCompatibilityRoot} \
               ${weatherRuntime.passthru.omarchyCompatibilityRoot} \
-              ${networkRuntime.passthru.omarchyCompatibilityRoot}
+              ${networkRuntime.passthru.omarchyCompatibilityRoot} \
+              ${bluetoothRuntime.passthru.omarchyCompatibilityRoot} \
+              ${screenshotRuntime.passthru.omarchyCompatibilityRoot}
             touch "$out"
           '';
           config-ownership = pkgs.runCommand "omanixy-config-ownership"
@@ -301,7 +330,7 @@
               malformedStoreConfig = malformedStoreConfig;
               nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.diffutils pkgs.jq ];
             } ''
-            ${pkgs.bash}/bin/bash ${./test/config-ownership.sh} "$activation" "$customActivation" /build/omanixy-test /build/omanixy-custom-test /build/omanixy-store-link-test ${storeConfig} ${explicitStoreConfig} "$malformedStoreConfig" ${./upstream/shell-baseline-v1.json}
+            ${pkgs.bash}/bin/bash ${./test/config-ownership.sh} "$activation" "$customActivation" /build/omanixy-test /build/omanixy-custom-test /build/omanixy-store-link-test ${storeConfig} ${explicitStoreConfig} "$malformedStoreConfig" ${customStoreConfig} ${./upstream/shell-baseline-v1.json}
             touch "$out"
           '';
           service-unit = pkgs.runCommand "omanixy-service-unit"
@@ -409,7 +438,7 @@
             {
               nativeBuildInputs = [ pkgs.bash pkgs.nodejs pkgs.python3 pkgs.coreutils pkgs.gnugrep pkgs.gnused ];
             } ''
-            PYTHON=${pkgs.python3}/bin/python3 ${pkgs.bash}/bin/bash ${./test/qml-patch-behavior.sh} ${compatibilityRoot} ${runtime.passthru.omarchySource} ${./scripts/patch-transparent-foreground-process} ${runtime}/bin/quickshell ${./scripts/patch-menu-power-provider} ${./scripts/patch-menu-font-provider}
+            PYTHON=${pkgs.python3}/bin/python3 ${pkgs.bash}/bin/bash ${./test/qml-patch-behavior.sh} ${compatibilityRoot} ${runtime.passthru.omarchySource} ${./scripts/patch-transparent-foreground-process} ${runtime}/bin/quickshell ${./scripts/patch-menu-power-provider} ${./scripts/patch-menu-font-provider} ${./scripts/patch-menu-terminal-provider}
             touch "$out"
           '';
           launcher-delete-contract = pkgs.runCommand "omanixy-launcher-delete-contract"

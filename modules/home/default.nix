@@ -12,7 +12,7 @@ let
   baselineSource = builtins.fromJSON (builtins.readFile ../../upstream/shell-baseline.json);
   featureSelection = import ../../lib/feature-selection.nix { inherit lib; baseline = baselineSource; };
   historicalBaseline = builtins.fromJSON (builtins.readFile ../../upstream/shell-baseline-v1.json);
-  baselineConfig = builtins.removeAttrs baselineSource [ "featurePlugins" "featureDependencies" "featureOrder" "migrations" ];
+  baselineConfig = builtins.removeAttrs baselineSource [ "featurePlugins" "featureDependencies" "featureOrder" "migrations" "featureCapabilities" "capabilityDependencies" ];
   featurePlugins = baselineSource.featurePlugins;
   selectedFeatures = featureSelection.select cfg.features;
   configuredDisabledPlugins = cfg.shell.config.disabledPlugins or [ ];
@@ -25,7 +25,6 @@ let
   };
   configJson = builtins.toJSON effectiveConfig;
   configSeed = pkgs.writeText "omanixy-shell-config" configJson;
-  baselineDisabledPluginsJson = builtins.toJSON baselineConfig.disabledPlugins;
   legacyBaselineJson = builtins.toJSON historicalBaseline;
   capabilityState = pkgs.writeText "omanixy-capability-state" (builtins.toJSON {
     schema = 1;
@@ -54,16 +53,13 @@ let
     ${pkgs.jq}/bin/jq \
       --argjson legacy '${legacyBaselineJson}' \
       --argjson current '${builtins.toJSON baselineConfig}' \
-      --argjson baselineDisabledPlugins '${baselineDisabledPluginsJson}' \
       '
         if . == $legacy then
           $current
-        elif .disabledPlugins == null then
-          .disabledPlugins = $baselineDisabledPlugins
-        elif (.disabledPlugins | type) == "array" then
-          .
-        else
+        elif has("disabledPlugins") and (.disabledPlugins | type) != "array" then
           error("disabledPlugins must be a JSON array")
+        else
+          .
         end
       ' "$source" > "$destination"
     trap - EXIT
@@ -77,7 +73,7 @@ in
     features = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       default = [ "audio" "bluetooth" "clipboard" "launcher" "monitor" "network" "notification" "power" "screenshot" "weather" ];
-      description = "Optional Omanixy compatibility feature groups whose runtime dependencies and helpers are included; Bluetooth also enables the audio group required by its default-device action.";
+      description = "Optional Omanixy presentation feature groups; each selected group resolves the runtime capabilities and exact helper contracts required by its reachable consumers.";
     };
 
     shell.config = lib.mkOption {

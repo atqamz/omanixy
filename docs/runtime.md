@@ -54,10 +54,11 @@ Import the Home Manager module and enable the shell:
 
 `programs.omanixy.enable`, `programs.omanixy.features`, and
 `programs.omanixy.shell.config` are the public options.
-`features` selects the optional compatibility feature groups whose runtime
-dependencies, helpers, and menu actions are built into the runtime; the `core`
-group is always selected, the option defaults to every optional group, and
-selection is closed transitively.
+`features` selects optional presentation feature groups; the `core` group is
+always selected and the option defaults to every optional group.
+The selected presentation set is kept separate from the runtime capability
+closure, so a shared backend capability never enables another feature's panel,
+plugin, menu action, or unrelated helper group.
 See [Source and runtime closure](#source-and-runtime-closure) for the group
 list and for what omitting a group removes.
 The structured config is the escape hatch for upstream schema changes rather
@@ -79,7 +80,7 @@ It does not establish semantic ownership of individual `disabledPlugins`
 entries, so custom declarative store-backed choices such as `omarchy.audio`
 remain unchanged.
 The selected runtime's capability metadata is separate from `shell.json` and
-is recomputed from the current feature selection on every activation.
+is recomputed from the current presentation selection on every activation.
 The NixOS module is valid and intentionally has no privileged declarations for
 this baseline.
 
@@ -122,15 +123,21 @@ Quattro is consumed from a deterministic immutable compatibility root through
 The root contains the pinned source view used by the supported runtime graph,
 including shared QML libraries, shell services, the baseline bar widgets, and
 the copied panel and overlay sources needed by the registry.
-It applies ten narrow patch sites: the disabled-plugin floor on bar widgets,
+It applies eleven narrow patch sites: the disabled-plugin floor on bar widgets,
 enterprise Wi-Fi filtering through the network panel's model, removal of the
 Custom DNS provider/action/pill, hiding the unsupported speed-test action,
 clock middle-click routing, the native bar transparency fallback, the
 selected-feature power-provider gate, a user-owned launcher-delete guard, and
-the validated app-library launch and removability path.
+the validated app-library launch and removability path, plus the unsupported
+terminal-provider right-click guard.
 Some unsupported first-party plugin directories are omitted from the view,
 while copied baseline modules remain unreachable when disabled by the
 immutable registry floor.
+AppLibrary is also build-time gated: when `launcher` is not requested,
+`shell.qml` holds a null AppLibrary property, so its hidden-entry, icon-index,
+UWSM launch, and user-entry ownership scans do not run.
+The shipped `shell/services/hidden-entries.sh` source is launcher-owned and is
+audited whenever the launcher surface is selected.
 The root supplies Omanixy's safe fallback shell configuration, launcher-hides
 file, audited default menu, and helper view.
 The root `bin/` contains dispatch wrappers only for helper names required by
@@ -155,31 +162,36 @@ Omanixy never copies the upstream `bin/` tree or creates a mutable Omarchy
 filesystem.
 
 The closure contains the selected Quickshell, its Qt/QML dependencies,
-`hyprctl`, `inotifywait`, and only the feature-group utilities selected by the
-consumer.
-The canonical `externalExecutableFeatures` map in
-`upstream/compatibility-contracts.json` records which selected feature owns
-each audited external executable, including explicit `host` ownership for
-commands supplied by the session rather than by Omanixy.
+`hyprctl`, `inotifywait`, and only the capability-owned utilities selected by
+reachable consumers.
+The canonical `externalExecutableCapabilities` map in
+`upstream/compatibility-contracts.json` records the capability required by each
+audited external executable.
+There is no unconditional host capability escape hatch; omitted Arch package
+commands such as `pacman` are rejected as unsupported.
 The feature-consumer closure scans every selected source file in the generated
 post-patch root, including exact always-loaded service sources and the filtered
 safe menu, and rejects an invocation whose helper or executable capability is
-outside the transitive feature closure.
+outside the selected runtime capability closure.
 The scanner's only false-positive suppressions are exact path, helper, and
 source-line records with a reason.
 The always-selected core group provides the baseline shell support.
-The optional feature groups are `network`, `audio`, `bluetooth`, `screenshot`,
-`clipboard`, `power`, `monitor`, `weather`, `notification`, and `launcher`.
-Selecting `bluetooth` also selects `audio` because the pinned Bluetooth panel
-uses the audio default-device contract when connecting a device.
+The optional presentation feature groups are `network`, `audio`, `bluetooth`,
+`screenshot`, `clipboard`, `power`, `monitor`, `weather`, `notification`, and
+`launcher`.
+Capabilities are independent: network consumes NetworkManager and Wayland
+clipboard-write capabilities without enabling clipboard or emoji presentation;
+Bluetooth consumes BlueZ and audio default-output capabilities without enabling
+the audio panel; weather and screenshot consume notification-send capability
+without enabling the blocked notification presentation plugin.
 The default enables all groups needed by the safe baseline.
 When a group is omitted, its helpers and menu actions are omitted and its
 baseline bar widgets are added to the immutable disabled-plugin floor.
 The runtime also removes the pinned core-menu provider for power profiles when
 power is omitted, because that provider is a cross-feature consumer.
-The clipboard group also floors the clipboard and emoji plugin IDs so a custom
-configuration cannot re-enable those panels without selecting their runtime
-dependencies.
+The clipboard group floors the clipboard and emoji plugin IDs so a custom
+configuration cannot re-enable those panels without selecting the presentation
+feature and its runtime capabilities.
 The upstream package list, Arch tools, `pacman`, `yay`, and
 `atqamz/universe` are not dependencies.
 The generated wrappers do not append the host `PATH`.
@@ -274,15 +286,18 @@ by heuristic subtraction.
 If an older activation left a writable-state symlink into the store, the
 activation copies its contents out to ordinary user storage before continuing.
 It never writes runtime state into the store.
+If the store symlink is broken, activation removes the broken link and seeds a
+new writable baseline; this is recovery, not preservation of unavailable bytes.
 Disabling and re-enabling the module does not silently replace customization.
 
 Quattro's user plugin directory remains discoverable.
 The new-install baseline enables the native or adapted tray, media, audio,
 network, Bluetooth, monitor, power, weather, clipboard, emoji, launcher, and
 OSD paths covered by the ledger.
-Feature selection is closed transitively: Bluetooth selects audio, network
-selects clipboard for its Wi-Fi copy action, and weather and screenshot select
-notification because their reachable consumers invoke those helper surfaces.
+Feature selection is not closed across presentation groups.
+Runtime capabilities are resolved separately from the requested presentation
+set, and helper inclusion is exact to those capabilities and reachable
+consumer references.
 The updater, agents, background/theme workflow, nightlight, low-battery
 automation, and issue #4 security plugins remain disabled or absent.
 Third-party and user-local QML are trusted, unsandboxed code running in the

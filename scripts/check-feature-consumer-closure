@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check feature closure against post-patch consumer source evidence."""
+"""Check post-patch source reachability against presentation and capability metadata."""
 
 from __future__ import annotations
 
@@ -8,9 +8,16 @@ import re
 import sys
 from pathlib import Path
 
+from source_discovery import shell_executables, source_executables
+
 
 HELPER_PATTERN = re.compile(r"\bomarchy-[a-z0-9-]+\b")
+HELPER_INVOCATION_PATTERN = re.compile(
+    r"(?:\.run\s*\(|\.exec(?:Detached)?\s*\(|\bcommand\s*[:=]|\.command\s*=|"
+    r"\b(?:action|script)\s*[:=]|shellQuote\s*\(|\bexec\s+|\bsource\s+)"
+)
 SOURCE_SUFFIXES = {".qml", ".js", ".json", ".jsonc", ".sh", ".bash"}
+MENU_FIELDS = ("action", "when", "checked")
 
 
 def fail(message: str) -> None:
@@ -28,49 +35,20 @@ def read_json(path: Path) -> dict:
     return value
 
 
-def feature_for(path: str, roots: list[dict]) -> str | None:
+def root_entry_for(path: str, roots: list[dict]) -> dict | None:
     matches = [
-        entry["feature"]
+        entry
         for entry in roots
-        if path == entry["prefix"].rstrip("/")
-        or path.startswith(entry["prefix"])
+        if path == entry["prefix"].rstrip("/") or path.startswith(entry["prefix"])
     ]
     if len(matches) != 1:
         return None
     return matches[0]
 
 
-def consumer_feature_for(
-    path: str, kind: str, name: str, default: str, overrides: list[dict]
-) -> str:
-    matches = [
-        entry["feature"]
-        for entry in overrides
-        if entry.get("path") == path and entry.get(kind) == name
-    ]
-    if len(matches) > 1:
-        fail(f"duplicate consumer feature override for {path}: {kind}={name}")
-    return matches[0] if matches else default
-
-
-def closure(feature: str, dependencies: dict[str, list[str]]) -> set[str]:
-    result: set[str] = set()
-    active: set[str] = set()
-
-    def visit(name: str) -> None:
-        if name in result:
-            return
-        if name in active:
-            fail(f"cyclic feature dependency at {name}")
-        active.add(name)
-        result.add(name)
-        for dependency in dependencies.get(name, []):
-            visit(dependency)
-        active.remove(name)
-
-    visit("core")
-    visit(feature)
-    return result
+def feature_for(path: str, roots: list[dict]) -> str | None:
+    entry = root_entry_for(path, roots)
+    return entry["feature"] if entry else None
 
 
 def active_lines(text: str) -> list[str]:
@@ -91,12 +69,7 @@ def active_lines(text: str) -> list[str]:
     return lines
 
 
-def noise_for(
-    path: str,
-    helper: str,
-    lines: list[str],
-    scanner_noise: list[dict],
-) -> bool:
+def noise_for(path: str, helper: str, lines: list[str], scanner_noise: list[dict]) -> bool:
     entries = [
         entry
         for entry in scanner_noise
@@ -113,34 +86,155 @@ def noise_for(
     fail(f"scanner noise evidence drifted for {path}: {helper}")
 
 
-def external_references(
-    path: str, lines: list[str], external_features: dict[str, str]
-) -> list[str]:
-    references: list[str] = []
-    for executable in sorted(external_features):
-        direct_pattern = re.compile(
-            r"(?:^|[\"']\s*)" + re.escape(executable) + r"(?=\s|[\"')]|$)"
-        )
-        token_pattern = re.compile(
-            r"(?<![A-Za-z0-9_.+-])" + re.escape(executable) + r"(?![A-Za-z0-9_.+-])"
-        )
-        if path.endswith(".jsonc"):
-            present = any(token_pattern.search(line) for line in lines)
-        else:
-            present = any(
-                direct_pattern.search(line)
-                or (
-                    re.search(
-                        r"\b(?:run|exec|command|script|action|when|checked|provider)\b|Quickshell|Util",
-                        line,
-                    )
-                    and token_pattern.search(line)
+def parse_jsonc(text: str) -> object:
+    stripped = re.sub(r"^\s*//[^\n]*(?:\n|$)", "", text, flags=re.MULTILINE)
+    stripped = re.sub(r",(\s*[}\]])", r"\1", stripped)
+    try:
+        return json.loads(stripped)
+    except json.JSONDecodeError as error:
+        fail(f"supported JSON source is invalid: {error}")
+
+
+def json_executables(path: str, text: str) -> list[dict[str, object]]:
+    data = parse_jsonc(text)
+    entries = data.get("items", data) if isinstance(data, dict) else {}
+    if not isinstance(entries, dict):
+        return []
+    references: list[dict[str, object]] = []
+    for item_id, item in entries.items():
+        if not isinstance(item, dict):
+            continue
+        for field in MENU_FIELDS:
+            value = item.get(field)
+            if not isinstance(value, str) or not value:
+                continue
+            for name in shell_executables(value):
+                if name.startswith("omarchy-"):
+                    continue
+                references.append(
+                    {
+                        "name": name,
+                        "line": 1,
+                        "invocation": f"menu.{field}",
+                        "id": item_id,
+                        "field": field,
+                    }
                 )
-                for line in lines
-            )
-        if present:
-            references.append(executable)
     return references
+
+
+def json_helpers(text: str) -> list[dict[str, object]]:
+    data = parse_jsonc(text)
+    entries = data.get("items", data) if isinstance(data, dict) else {}
+    if not isinstance(entries, dict):
+        return []
+    references: list[dict[str, object]] = []
+    for item_id, item in entries.items():
+        if not isinstance(item, dict):
+            continue
+        for field in MENU_FIELDS:
+            value = item.get(field)
+            if not isinstance(value, str) or not value:
+                continue
+            for match in HELPER_PATTERN.finditer(value):
+                references.append(
+                    {
+                        "name": match.group(0),
+                        "line": 1,
+                        "invocation": f"menu.{field}",
+                        "id": item_id,
+                        "field": field,
+                    }
+                )
+    return references
+
+
+def consumer_feature_for(
+    path: str,
+    kind: str,
+    name: str,
+    default: str,
+    reference: dict[str, object],
+    overrides: list[dict],
+    occurrence_count: int,
+    mixed: bool,
+) -> str:
+    candidates = [
+        entry
+        for entry in overrides
+        if entry.get("path") == path and entry.get(kind) == name
+    ]
+    precise = []
+    generic = []
+    for entry in candidates:
+        identity_fields = [field for field in ("id", "field", "line", "shape") if field in entry]
+        if not identity_fields:
+            generic.append(entry)
+            continue
+        if all(entry[field] == reference.get(field) for field in identity_fields):
+            precise.append(entry)
+    if len(precise) > 1 or len(generic) > 1 or (precise and generic):
+        fail(f"duplicate consumer feature override for {path}: {kind}={name}")
+    if precise:
+        return precise[0]["feature"]
+    if generic:
+        if occurrence_count > 1:
+            fail(
+                f"consumer feature override for {path}: {kind}={name} "
+                "is not occurrence-specific"
+            )
+        return generic[0]["feature"]
+    if mixed and occurrence_count > 1:
+        fail(
+            f"mixed-source references for {path}: {kind}={name} "
+            "must have occurrence-specific feature identities"
+        )
+    return default
+
+
+def validate_source_inventory(root: Path, roots: list[dict]) -> list[str]:
+    source_paths = sorted(
+        str(path.relative_to(root))
+        for path in root.rglob("*")
+        if path.is_file() and path.suffix in SOURCE_SUFFIXES
+    )
+    for entry in roots:
+        source = root / entry["prefix"].rstrip("/")
+        if not source.exists():
+            fail(f"declared feature root is missing: {entry['prefix']}")
+    for relative in source_paths:
+        if feature_for(relative, roots) is None:
+            fail(f"shipped supported source has no feature identity: {relative}")
+    return source_paths
+
+
+def resolve_capabilities(
+    selected_features: list[str],
+    feature_capabilities: dict[str, list[str]],
+    capability_dependencies: dict[str, list[str]],
+) -> set[str]:
+    result: set[str] = set()
+    active: set[str] = set()
+
+    def visit(capability: str) -> None:
+        if capability in result:
+            return
+        if capability in active:
+            fail(f"cyclic capability dependency at {capability}")
+        if capability not in capability_dependencies:
+            fail(f"feature capability has no dependency declaration: {capability}")
+        active.add(capability)
+        result.add(capability)
+        for dependency in capability_dependencies[capability]:
+            visit(dependency)
+        active.remove(capability)
+
+    for feature in selected_features:
+        if feature not in feature_capabilities:
+            fail(f"feature has no capability declaration: {feature}")
+        for capability in feature_capabilities[feature]:
+            visit(capability)
+    return result
 
 
 def main() -> int:
@@ -154,19 +248,37 @@ def main() -> int:
     root, pinned_source, runtime_surface_path, feature_surface_path, output = map(Path, sys.argv[1:])
     runtime_surface = read_json(runtime_surface_path)
     feature_surface = read_json(feature_surface_path)
-    helper_features = feature_surface.get("helperFeatures")
+    helper_capabilities = feature_surface.get("helperCapabilities")
     selected_features = feature_surface.get("selectedFeatures")
-    dependencies = feature_surface.get("dependencies")
+    selected_capabilities = feature_surface.get("selectedCapabilities")
+    feature_capabilities = feature_surface.get("featureCapabilities")
+    capability_dependencies = feature_surface.get("capabilityDependencies")
     roots = feature_surface.get("featureRoots")
     overrides = feature_surface.get("consumerFeatureOverrides", [])
     scanner_noise = feature_surface.get("scannerNoise", [])
     reference_noise = feature_surface.get("consumerReferenceNoise", [])
-    external_features = feature_surface.get("externalExecutableFeatures")
+    external_capabilities = feature_surface.get("externalExecutableCapabilities")
     if (
-        not isinstance(helper_features, dict)
+        not isinstance(helper_capabilities, dict)
         or not isinstance(selected_features, list)
         or not all(isinstance(feature, str) for feature in selected_features)
-        or not isinstance(dependencies, dict)
+        or not isinstance(selected_capabilities, list)
+        or not all(isinstance(capability, str) for capability in selected_capabilities)
+        or not isinstance(feature_capabilities, dict)
+        or not all(isinstance(values, list) for values in feature_capabilities.values())
+        or not all(
+            isinstance(feature, str)
+            and all(isinstance(capability, str) for capability in capabilities)
+            for feature, capabilities in feature_capabilities.items()
+        )
+        or not isinstance(capability_dependencies, dict)
+        or not all(isinstance(values, list) for values in capability_dependencies.values())
+        or not all(
+            isinstance(capability, str)
+            and all(isinstance(dependency, str) for dependency in dependencies)
+            for capability, dependencies in capability_dependencies.items()
+        )
+        or not all(isinstance(helper, str) and isinstance(capability, str) for helper, capability in helper_capabilities.items())
         or not isinstance(roots, list)
         or not all(isinstance(entry, dict) for entry in roots)
         or not isinstance(overrides, list)
@@ -175,13 +287,14 @@ def main() -> int:
         or not all(isinstance(entry, dict) for entry in scanner_noise)
         or not isinstance(reference_noise, list)
         or not all(isinstance(entry, dict) for entry in reference_noise)
-        or not isinstance(external_features, dict)
-        or not all(isinstance(feature, str) for feature in external_features.values())
+        or not isinstance(external_capabilities, dict)
+        or not all(isinstance(capability, str) for capability in external_capabilities.values())
     ):
         fail("feature surface metadata is invalid")
     if any(
         not isinstance(entry.get("prefix"), str)
         or not isinstance(entry.get("feature"), str)
+        or ("mixed" in entry and not isinstance(entry["mixed"], bool))
         for entry in roots
     ):
         fail("feature root identity is invalid")
@@ -192,6 +305,7 @@ def main() -> int:
         not isinstance(entry.get("path"), str)
         or not isinstance(entry.get("feature"), str)
         or sum(isinstance(entry.get(kind), str) for kind in ("helper", "executable")) != 1
+        or any(field in entry and not isinstance(entry[field], (str, int)) for field in ("id", "field", "line", "shape"))
         for entry in overrides
     ):
         fail("consumer feature override identity is invalid")
@@ -216,9 +330,15 @@ def main() -> int:
         fail("consumer reference noise identity is invalid")
 
     selected = set(selected_features)
-    selected_closures = {feature: closure(feature, dependencies) for feature in selected}
-    evidence: list[dict[str, object]] = []
-    executable_evidence: list[dict[str, object]] = []
+    selected_capability_set = resolve_capabilities(
+        selected_features, feature_capabilities, capability_dependencies
+    )
+    if selected_capability_set != set(selected_capabilities):
+        fail(
+            "declared selected capabilities do not match feature capability closure: "
+            f"declared={sorted(set(selected_capabilities))} derived={sorted(selected_capability_set)}"
+        )
+    all_source_paths = validate_source_inventory(root, roots)
     declared_source_paths: set[str] = set()
     for helper, entry in runtime_surface.items():
         if not isinstance(entry, dict):
@@ -231,24 +351,10 @@ def main() -> int:
             declared_source_paths.add(consumer)
 
     source_paths: set[str] = set()
-    for root_entry in roots:
-        prefix = root_entry["prefix"]
-        feature = root_entry["feature"]
-        if feature not in selected:
-            continue
-        source_root = root / prefix.rstrip("/")
-        if source_root.is_file():
-            candidates = [source_root]
-        elif source_root.is_dir():
-            candidates = sorted(
-                path
-                for path in source_root.rglob("*")
-                if path.is_file() and path.suffix in SOURCE_SUFFIXES
-            )
-        else:
-            fail(f"selected feature root is missing: {prefix}")
-        for candidate in candidates:
-            source_paths.add(str(candidate.relative_to(root)))
+    for relative in all_source_paths:
+        feature = feature_for(relative, roots)
+        if feature in selected:
+            source_paths.add(relative)
 
     for relative in sorted(declared_source_paths):
         if not (root / relative).is_file():
@@ -259,107 +365,143 @@ def main() -> int:
         if feature in selected:
             source_paths.add(relative)
 
+    evidence: list[dict[str, object]] = []
+    executable_evidence: list[dict[str, object]] = []
     for relative in sorted(source_paths):
         current = root / relative
-        if not current.is_file():
-            fail(f"declared post-patch consumer is missing: {relative}")
-        if current.suffix not in SOURCE_SUFFIXES:
-            fail(f"declared post-patch consumer has unsupported type: {relative}")
-        try:
-            current_text = current.read_text(encoding="utf-8")
-        except OSError as error:
-            fail(f"cannot read post-patch consumer {relative}: {error}")
+        current_text = current.read_text(encoding="utf-8")
         feature = feature_for(relative, roots)
         if feature is None:
             fail(f"supported source has no feature identity: {relative}")
-        if feature not in selected:
-            continue
+        root_entry = root_entry_for(relative, roots)
+        if root_entry is None:
+            fail(f"supported source has no root identity: {relative}")
+        mixed = bool(root_entry.get("mixed", False))
         pinned = pinned_source / relative
-        pinned_text = ""
-        if pinned.is_file():
-            try:
-                pinned_text = pinned.read_text(encoding="utf-8")
-            except OSError as error:
-                fail(f"cannot read pinned consumer {relative}: {error}")
+        pinned_text = pinned.read_text(encoding="utf-8") if pinned.is_file() else ""
         lines = active_lines(current_text)
-        discovered_helpers = set(
-            helper
-            for line in lines
-            if "WlrLayershell.namespace" not in line
-            for helper in HELPER_PATTERN.findall(line.replace("omarchy-menu.jsonc", ""))
-        )
-        for noise in reference_noise:
-            if noise["path"] != relative or noise["helper"] not in discovered_helpers:
+
+        helper_references: list[dict[str, object]] = []
+        for line_number, line in enumerate(lines, 1):
+            if HELPER_INVOCATION_PATTERN.search(line):
+                for helper in HELPER_PATTERN.findall(line.replace("omarchy-menu.jsonc", "")):
+                    helper_references.append(
+                        {"name": helper, "line": line_number, "invocation": "source", "shape": line.strip()}
+                    )
+        if relative.endswith((".json", ".jsonc")):
+            helper_references.extend(json_helpers(current_text))
+            external_references = json_executables(relative, current_text)
+        else:
+            external_references = source_executables(relative, current_text)
+
+        for noise in scanner_noise:
+            if noise["path"] != relative:
                 continue
             matching_lines = [line for line in lines if noise["helper"] in line]
-            if matching_lines and all(line == noise["line"] for line in matching_lines):
-                discovered_helpers.remove(noise["helper"])
-        for helper in sorted(discovered_helpers):
+            if matching_lines != [noise["exactLine"]]:
+                fail(f"scanner noise evidence drifted for {relative}: {noise['helper']}")
+        for noise in reference_noise:
+            if noise["path"] != relative:
+                continue
+            if noise["line"] not in lines or noise["helper"] not in noise["line"]:
+                fail(f"consumer reference noise evidence drifted for {relative}: {noise['helper']}")
+
+        filtered_helpers: list[dict[str, object]] = []
+        for reference in helper_references:
+            helper = str(reference["name"])
+            if any(
+                noise["path"] == relative
+                and noise["helper"] == helper
+                and noise["line"] == lines[int(reference["line"]) - 1]
+                for noise in reference_noise
+            ):
+                continue
             if noise_for(relative, helper, lines, scanner_noise):
-                discovered_helpers.remove(helper)
-        unknown_helpers = sorted(discovered_helpers - set(helper_features))
+                continue
+            filtered_helpers.append(reference)
+
+        helper_counts: dict[str, int] = {}
+        for reference in filtered_helpers:
+            helper_counts[str(reference["name"])] = helper_counts.get(str(reference["name"]), 0) + 1
+        unknown_helpers = sorted(set(helper_counts) - set(helper_capabilities))
         if unknown_helpers:
             fail(
-                f"{relative} references helpers without feature identities: "
+                f"{relative} references helpers without capability identities: "
                 + ", ".join(unknown_helpers)
             )
-        for helper in sorted(discovered_helpers):
-            helper_feature = helper_features[helper]
-            if not isinstance(helper_feature, str):
-                fail(f"helper feature identity is invalid: {helper}")
-            invocation_feature = consumer_feature_for(relative, "helper", helper, feature, overrides)
+        for reference in filtered_helpers:
+            helper = str(reference["name"])
+            helper_capability = helper_capabilities[helper]
+            invocation_feature = consumer_feature_for(
+                relative, "helper", helper, feature, reference, overrides, helper_counts[helper], mixed
+            )
             if invocation_feature not in selected:
                 fail(
                     f"{relative} ({invocation_feature}) references {helper}, "
                     "but the invocation feature is not selected"
                 )
-            present_in_pinned = helper in pinned_text
-            if helper_feature not in selected_closures[invocation_feature]:
+            if helper_capability not in selected_capability_set:
                 fail(
-                    f"{relative} ({invocation_feature}) requires {helper} ({helper_feature}), "
-                    "but the selected feature closure does not include it"
+                    f"{relative} ({invocation_feature}) requires {helper} ({helper_capability}), "
+                    "but the selected runtime capabilities do not include it"
                 )
             evidence.append(
                 {
                     "consumer": relative,
                     "consumerFeature": invocation_feature,
                     "helper": helper,
-                    "helperFeature": helper_feature,
-                    "closure": sorted(selected_closures[invocation_feature]),
-                    "status": "pinned-reference" if present_in_pinned else "post-patch-reference",
+                    "helperCapability": helper_capability,
+                    "reference": reference,
+                    "status": "pinned-reference" if helper in pinned_text else "post-patch-reference",
                 }
             )
 
-        for executable in external_references(relative, lines, external_features):
-            executable_feature = external_features[executable]
+        executable_counts: dict[str, int] = {}
+        for reference in external_references:
+            name = str(reference["name"])
+            executable_counts[name] = executable_counts.get(name, 0) + 1
+        unknown_executables = sorted(set(executable_counts) - set(external_capabilities))
+        if unknown_executables:
+            fail(f"{relative} has unknown external executable: {', '.join(unknown_executables)}")
+        for reference in external_references:
+            executable = str(reference["name"])
+            capability = external_capabilities[executable]
             invocation_feature = consumer_feature_for(
-                relative, "executable", executable, feature, overrides
+                relative,
+                "executable",
+                executable,
+                feature,
+                reference,
+                overrides,
+                executable_counts[executable],
+                mixed,
             )
             if invocation_feature not in selected:
                 fail(
                     f"{relative} ({invocation_feature}) references {executable}, "
                     "but the invocation feature is not selected"
                 )
-            if executable_feature != "host" and executable_feature not in selected_closures[invocation_feature]:
+            if capability not in selected_capability_set:
                 fail(
                     f"{relative} ({invocation_feature}) requires executable {executable} "
-                    f"({executable_feature}), but the selected feature closure does not include it"
+                    f"({capability}), but the selected runtime capabilities do not include it"
                 )
             executable_evidence.append(
                 {
                     "consumer": relative,
                     "consumerFeature": invocation_feature,
                     "executable": executable,
-                    "executableFeature": executable_feature,
-                    "closure": sorted(selected_closures[invocation_feature]),
+                    "capability": capability,
+                    "reference": reference,
                 }
             )
 
-    output_path = Path(output)
-    output_path.write_text(
+    Path(output).write_text(
         json.dumps(
             {
                 "selectedFeatures": sorted(selected),
+                "selectedCapabilities": sorted(selected_capability_set),
+                "sourceCount": len(all_source_paths),
                 "evidence": evidence,
                 "executableEvidence": executable_evidence,
             },
@@ -371,7 +513,8 @@ def main() -> int:
     )
     print(
         "feature consumer closure passed "
-        f"({len(evidence)} helper references, {len(executable_evidence)} executable references)"
+        f"({len(evidence)} helper references, {len(executable_evidence)} executable references, "
+        f"{len(all_source_paths)} audited sources)"
     )
     return 0
 

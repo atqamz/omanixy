@@ -7,6 +7,7 @@ patcher=${3:?transparent-process patcher path required}
 quickshell=${4:?selected Quickshell executable required}
 menu_patcher=${5:?menu provider patcher path required}
 font_patcher=${6:?font provider patcher path required}
+terminal_patcher=${7:?terminal provider patcher path required}
 python=${PYTHON:-python3}
 test_root=$(mktemp -d)
 trap 'chmod -R u+w "$test_root" 2>/dev/null || true; rm -rf "$test_root"' EXIT
@@ -179,6 +180,22 @@ if "$python" "$font_patcher" "$font_drift_fixture" 2>"$test_root/font-drift-erro
   exit 1
 fi
 grep -Fq 'expected exactly one pinned font provider block' "$test_root/font-drift-error"
+
+terminal_fixture="$test_root/BarWidget.qml"
+cp "$pinned_source/shell/plugins/menu/BarWidget.qml" "$terminal_fixture"
+chmod u+w "$terminal_fixture"
+"$python" "$terminal_patcher" "$terminal_fixture"
+grep -Fqx '      if (button === Qt.RightButton) return' "$terminal_fixture"
+
+terminal_drift_fixture="$test_root/BarWidget-terminal-drift.qml"
+cp "$pinned_source/shell/plugins/menu/BarWidget.qml" "$terminal_drift_fixture"
+chmod u+w "$terminal_drift_fixture"
+sed -i '0,/xdg-terminal-exec/s//xdg-terminal-exec-drift/' "$terminal_drift_fixture"
+if "$python" "$terminal_patcher" "$terminal_drift_fixture" 2>"$test_root/terminal-drift-error"; then
+  printf '%s\n' 'exact terminal provider patch accepted source-shape drift' >&2
+  exit 1
+fi
+grep -Fq 'expected exactly one pinned terminal provider action' "$test_root/terminal-drift-error"
 
 node - "$root" <<'NODE'
 const assert = require("node:assert/strict")

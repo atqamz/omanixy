@@ -18,29 +18,37 @@ let
   contractSource = builtins.fromJSON (builtins.readFile ../../upstream/compatibility-contracts.json);
   omarchyRevision = contractSource.pins.omarchy;
   quickshellRevision = contractSource.pins.quickshell;
-  baselineConfig = builtins.removeAttrs baselineSource [ "featurePlugins" "featureDependencies" "featureOrder" "migrations" ];
-  featureRuntimeInputs = with pkgs; {
-    core = [ bash coreutils findutils fontconfig gawk gnugrep gnused hyprland inotify-tools jq procps systemd util-linux ];
-    network = [ iproute2 iputils iw networkmanager qrencode ];
-    audio = [ pipewire pulseaudio wireplumber ];
-    bluetooth = [ bluez util-linux ];
-    screenshot = [ fontconfig grim hyprland hyprpicker procps slurp wl-clipboard ];
-    clipboard = [ util-linux wl-clipboard wtype xdg-utils ];
-    power = [ power-profiles-daemon upower ];
-    monitor = [ brightnessctl fontconfig glib gtk3 hyprland libnotify procps ];
-    weather = [ curl ];
-    notification = [ libnotify ];
+  baselineConfig = builtins.removeAttrs baselineSource [ "featurePlugins" "featureDependencies" "featureOrder" "migrations" "featureCapabilities" "capabilityDependencies" ];
+  capabilityRuntimeInputs = with pkgs; {
+    "audio-control" = [ pipewire pulseaudio wireplumber ];
+    "audio-default-output" = [ pipewire pulseaudio wireplumber ];
+    "bluetooth-control" = [ bluez ];
+    "clipboard-presentation" = [ procps util-linux wl-clipboard wtype xdg-utils ];
+    "core-runtime" = [ bash coreutils findutils fontconfig gawk gnugrep gnused hyprland inotify-tools jq procps systemd util-linux ];
     launcher = [ desktop-file-utils gtk3 uwsm ];
+    "monitor-control" = [ brightnessctl fontconfig glib gtk3 hyprland libnotify procps ];
+    "network-manager" = [ iproute2 iputils iw networkmanager qrencode ];
+    "notification-send" = [ libnotify ];
+    "power-control" = [ power-profiles-daemon upower ];
+    "screenshot-capture" = [ fontconfig grim hyprland hyprpicker procps slurp ];
+    "text-injection" = [ wtype ];
+    "wayland-clipboard-write" = [ wl-clipboard ];
+    "weather-network" = [ curl ];
   };
-  externalExecutableFeatures = contractSource.externalExecutableFeatures or { };
-  externalFeatureNames = lib.unique (builtins.attrValues externalExecutableFeatures);
+  externalExecutableCapabilities = contractSource.externalExecutableCapabilities or { };
+  helperCapabilities = contractSource.helperCapabilities or { };
   allFeatures = featureSelection.featureNames;
   requestedFeatures = if features == null then allFeatures else features;
   selectedFeatures = featureSelection.select requestedFeatures;
+  requestedPresentationFeatures = lib.filter (feature: feature != "core") selectedFeatures;
+  selectedCapabilities = featureSelection.resolveCapabilities selectedFeatures;
   featureNamesValid = lib.assertMsg
     (featureSelection.validate requestedFeatures
-      && lib.all (feature: builtins.hasAttr feature featureRuntimeInputs) selectedFeatures
-      && lib.all (feature: feature == "host" || builtins.hasAttr feature featureRuntimeInputs) externalFeatureNames)
+      && lib.all (helper: builtins.hasAttr helper helperCapabilities) allCompatibilityHelpers
+      && lib.all (capability: builtins.hasAttr capability capabilityRuntimeInputs) selectedCapabilities
+      && lib.all (capability: builtins.hasAttr capability capabilityRuntimeInputs) (builtins.attrValues externalExecutableCapabilities)
+      && lib.all (capability: builtins.hasAttr capability capabilityRuntimeInputs) (builtins.attrValues helperCapabilities)
+      && !(lib.any (capability: capability == "host") (builtins.attrValues externalExecutableCapabilities)))
     "omanixy features must be a list of known feature names";
 
   quickshell = pkgs.quickshell.overrideAttrs (old: {
@@ -147,7 +155,12 @@ let
             mkdir -p "$out/shell/plugins/services"
             cp -R ${omarchySource}/shell/plugins/services/media "$out/shell/plugins/services/media"
 
-            chmod u+w "$out/shell/services" "$out/shell/services/PluginRegistry.qml" "$out/shell/services/AppLibrary.qml"
+            chmod u+w "$out/shell" "$out/shell/shell.qml" "$out/shell/services" "$out/shell/services/PluginRegistry.qml" "$out/shell/services/AppLibrary.qml" "$out/shell/plugins/menu" "$out/shell/plugins/menu/BarWidget.qml"
+            ${lib.optionalString (!builtins.elem "launcher" selectedFeatures) ''
+            substituteInPlace "$out/shell/shell.qml" \
+              --replace-fail '  property AppLibrary appLibrary: AppLibrary { }' \
+                '  property AppLibrary appLibrary: null'
+            ''}
             install -Dm644 ${./AppLibrarySupport.js} "$out/shell/services/AppLibrarySupport.js"
             ${pkgs.python3}/bin/python3 ${../../scripts/patch-app-library} \
               "$out/shell/services/AppLibrary.qml"
@@ -169,6 +182,8 @@ let
       import "MenuDeleteSupport.js" as MenuDeleteSupport' \
               --replace-fail '    if (!row || row.kind !== "app") return' \
                 '    if (!MenuDeleteSupport.canRequestDelete(row, root.appLibrary)) return'
+            ${pkgs.python3}/bin/python3 ${../../scripts/patch-menu-terminal-provider} \
+              "$out/shell/plugins/menu/BarWidget.qml"
             chmod u+w "$out/shell/plugins/bar" "$out/shell/plugins/bar/Bar.qml"
             chmod u+w "$out/shell/plugins/panels/network/Model.js" "$out/shell/plugins/panels/network/Panel.qml"
             registry_file="$out/shell/services/PluginRegistry.qml"
@@ -259,7 +274,7 @@ let
     };
   };
 
-  runtimeInputs = assert featureNamesValid; lib.unique (lib.concatMap (feature: featureRuntimeInputs.${feature}) selectedFeatures);
+  runtimeInputs = assert featureNamesValid; lib.unique (lib.concatMap (capability: capabilityRuntimeInputs.${capability}) selectedCapabilities);
 
   allCompatibilityHelpers = [
     "omarchy-shell"
@@ -292,36 +307,6 @@ let
     "omarchy-weather-location"
     "omarchy-weather-status"
   ];
-  helperFeatures = {
-    omarchy-audio-input-set-default = "audio";
-    omarchy-audio-output-set-default = "audio";
-    omarchy-audio-output-sink = "audio";
-    omarchy-audio-sink-availability = "audio";
-    omarchy-battery-status = "power";
-    omarchy-bluetooth-device = "bluetooth";
-    omarchy-bluetooth-power = "bluetooth";
-    omarchy-brightness-display = "monitor";
-    omarchy-capture-screenshot = "screenshot";
-    omarchy-clipboard-open = "clipboard";
-    omarchy-clipboard-paste-file = "clipboard";
-    omarchy-clipboard-paste-text = "clipboard";
-    omarchy-display-text-size = "monitor";
-    omarchy-dns = "network";
-    omarchy-hyprland-monitor-scaling = "monitor";
-    omarchy-menu-emoji-insert = "clipboard";
-    omarchy-monitor-state = "monitor";
-    omarchy-network-band = "network";
-    omarchy-network-password = "network";
-    omarchy-network-qr = "network";
-    omarchy-network-status = "network";
-    omarchy-notification-send = "notification";
-    omarchy-powerprofiles-list = "power";
-    omarchy-powerprofiles-set = "power";
-    omarchy-remove-launcher-entry = "launcher";
-    omarchy-system-stats = "core";
-    omarchy-weather-location = "weather";
-    omarchy-weather-status = "weather";
-  };
   featureRoots = [
     { prefix = "shell/Commons/"; feature = "core"; }
     { prefix = "shell/Ui/"; feature = "core"; }
@@ -331,7 +316,7 @@ let
     { prefix = "shell/plugins/panels/bluetooth/"; feature = "bluetooth"; }
     { prefix = "shell/plugins/clipboard/"; feature = "clipboard"; }
     { prefix = "shell/plugins/emojis/"; feature = "clipboard"; }
-    { prefix = "shell/plugins/menu/"; feature = "core"; }
+    { prefix = "shell/plugins/menu/"; feature = "core"; mixed = true; }
     { prefix = "shell/plugins/osd/"; feature = "core"; }
     { prefix = "shell/plugins/services/"; feature = "core"; }
     { prefix = "shell/plugins/panels/clock/"; feature = "core"; }
@@ -343,17 +328,21 @@ let
     { prefix = "shell/services/AppLibrary.qml"; feature = "launcher"; }
     { prefix = "shell/services/AppLibrarySupport.js"; feature = "launcher"; }
     { prefix = "shell/services/AppSearch.js"; feature = "launcher"; }
+    { prefix = "shell/services/hidden-entries.sh"; feature = "launcher"; }
     { prefix = "shell/services/BarWidgetRegistry.qml"; feature = "core"; }
     { prefix = "shell/services/PluginRegistry.qml"; feature = "core"; }
-    { prefix = "default/omarchy/omarchy-menu.jsonc"; feature = "core"; }
+    { prefix = "default/omarchy/omarchy-menu.jsonc"; feature = "core"; mixed = true; }
+    { prefix = "config/omarchy/shell.json"; feature = "core"; }
   ];
   featureSurface = builtins.toJSON {
+    requestedFeatures = requestedPresentationFeatures;
     selectedFeatures = selectedFeatures;
-    dependencies = featureSelection.dependencies;
-    helperFeatures = helperFeatures // {
-      omarchy-shell = "core";
-    };
-    inherit externalExecutableFeatures;
+    selectedCapabilities = selectedCapabilities;
+    runtimeCapabilities = selectedCapabilities;
+    featureCapabilities = baselineSource.featureCapabilities;
+    capabilityDependencies = baselineSource.capabilityDependencies;
+    helperCapabilities = helperCapabilities;
+    inherit externalExecutableCapabilities;
     inherit featureRoots;
     scannerNoise = contractSource.scannerNoise or [ ];
     consumerReferenceNoise = [
@@ -364,24 +353,35 @@ let
       }
     ];
     consumerFeatureOverrides = [
-      { path = "shell/plugins/menu/Menu.qml"; helper = "omarchy-powerprofiles-list"; feature = "power"; }
-      { path = "shell/plugins/menu/Menu.qml"; helper = "omarchy-powerprofiles-set"; feature = "power"; }
-      { path = "shell/plugins/menu/Menu.qml"; executable = "powerprofilesctl"; feature = "power"; }
-      { path = "shell/services/AppLibrary.qml"; helper = "omarchy-remove-launcher-entry"; feature = "launcher"; }
-      { path = "default/omarchy/omarchy-menu.jsonc"; helper = "omarchy-capture-screenshot"; feature = "screenshot"; }
-      { path = "default/omarchy/omarchy-menu.jsonc"; helper = "omarchy-shell"; feature = "clipboard"; }
-      { path = "default/omarchy/omarchy-menu.jsonc"; executable = "grim"; feature = "screenshot"; }
-      { path = "default/omarchy/omarchy-menu.jsonc"; executable = "gtk-launch"; feature = "launcher"; }
-      { path = "default/omarchy/omarchy-menu.jsonc"; executable = "hyprpicker"; feature = "screenshot"; }
-      { path = "default/omarchy/omarchy-menu.jsonc"; executable = "slurp"; feature = "screenshot"; }
-      { path = "default/omarchy/omarchy-menu.jsonc"; executable = "uwsm"; feature = "launcher"; }
-      { path = "default/omarchy/omarchy-menu.jsonc"; executable = "uwsm-app"; feature = "launcher"; }
-      { path = "default/omarchy/omarchy-menu.jsonc"; executable = "wl-copy"; feature = "clipboard"; }
-      { path = "default/omarchy/omarchy-menu.jsonc"; executable = "wtype"; feature = "clipboard"; }
+      { path = "shell/plugins/menu/Menu.qml"; executable = "bash"; shape = "resultProc.command = [\"bash\", \"-c\", \": > \" + Util.shellQuote(activeDoneFile)]"; feature = "core"; }
+      { path = "shell/plugins/menu/Menu.qml"; executable = "bash"; shape = "resultProc.command = [\"bash\", \"-c\", \"printf '%s\\\\n' \" + Util.shellQuote(selection) + \" > \" + Util.shellQuote(activeSelectionFile) + \"; : > \" + Util.shellQuote(activeDoneFile)]"; feature = "core"; }
+      { path = "shell/plugins/menu/Menu.qml"; executable = "bash"; shape = "providerProc.command = [\"bash\", \"-lc\", spec.script]"; feature = "core"; }
+      { path = "shell/plugins/menu/Menu.qml"; executable = "bash"; shape = "guardProc.command = [\"bash\", \"-lc\", script]"; feature = "core"; }
+      { path = "shell/plugins/menu/Menu.qml"; helper = "omarchy-powerprofiles-list"; shape = ''script: "current=$(powerprofilesctl get 2>/dev/null); omarchy-powerprofiles-list 2>/dev/null | while read -r p; do [[ -z $p ]] && continue; printf '%s\\t%s\\t%s\\n' "$p" "$p" "$current"; done",''; feature = "power"; }
+      { path = "shell/plugins/menu/Menu.qml"; helper = "omarchy-powerprofiles-set"; shape = ''actionFor: function(value) { return "omarchy-powerprofiles-set autodetect " + Util.shellQuote(value) }''; feature = "power"; }
+      { path = "shell/plugins/menu/Menu.qml"; executable = "powerprofilesctl"; shape = ''script: "current=$(powerprofilesctl get 2>/dev/null); omarchy-powerprofiles-list 2>/dev/null | while read -r p; do [[ -z $p ]] && continue; printf '%s\\t%s\\t%s\\n' "$p" "$p" "$current"; done",''; feature = "power"; }
+      { path = "shell/services/AppLibrary.qml"; helper = "omarchy-remove-launcher-entry"; shape = ''Util.shellQuote(root.omarchyPath + "/bin/omarchy-remove-launcher-entry") + " " + Util.shellQuote(id) + " " + Util.shellQuote(String(name || id))''; feature = "launcher"; }
+      { path = "default/omarchy/omarchy-menu.jsonc"; helper = "omarchy-capture-screenshot"; id = "trigger.screenshot"; field = "action"; feature = "screenshot"; }
+      { path = "default/omarchy/omarchy-menu.jsonc"; helper = "omarchy-shell"; id = "trigger.emoji"; field = "action"; feature = "clipboard"; }
+      { path = "default/omarchy/omarchy-menu.jsonc"; executable = "grim"; id = "trigger.screenshot"; field = "when"; feature = "screenshot"; }
+      { path = "default/omarchy/omarchy-menu.jsonc"; executable = "gtk-launch"; id = "apps"; field = "when"; feature = "launcher"; }
+      { path = "default/omarchy/omarchy-menu.jsonc"; executable = "hyprpicker"; id = "trigger.screenshot"; field = "when"; feature = "screenshot"; }
+      { path = "default/omarchy/omarchy-menu.jsonc"; executable = "slurp"; id = "trigger.screenshot"; field = "when"; feature = "screenshot"; }
+      { path = "default/omarchy/omarchy-menu.jsonc"; executable = "systemctl"; id = "system.reboot"; field = "action"; feature = "core"; }
+      { path = "default/omarchy/omarchy-menu.jsonc"; executable = "systemctl"; id = "system.shutdown"; field = "action"; feature = "core"; }
+      { path = "default/omarchy/omarchy-menu.jsonc"; executable = "systemctl"; id = "system.suspend"; field = "action"; feature = "core"; }
+      { path = "default/omarchy/omarchy-menu.jsonc"; executable = "timeout"; id = "apps"; field = "when"; feature = "launcher"; }
+      { path = "default/omarchy/omarchy-menu.jsonc"; executable = "timeout"; id = "system.logout"; field = "when"; feature = "launcher"; }
+      { path = "default/omarchy/omarchy-menu.jsonc"; executable = "uwsm"; id = "apps"; field = "when"; feature = "launcher"; }
+      { path = "default/omarchy/omarchy-menu.jsonc"; executable = "uwsm"; id = "system.logout"; field = "action"; feature = "launcher"; }
+      { path = "default/omarchy/omarchy-menu.jsonc"; executable = "uwsm"; id = "system.logout"; field = "when"; feature = "launcher"; }
+      { path = "default/omarchy/omarchy-menu.jsonc"; executable = "uwsm-app"; id = "apps"; field = "when"; feature = "launcher"; }
+      { path = "default/omarchy/omarchy-menu.jsonc"; executable = "wl-copy"; id = "trigger.emoji"; field = "when"; feature = "clipboard"; }
+      { path = "default/omarchy/omarchy-menu.jsonc"; executable = "wtype"; id = "trigger.emoji"; field = "when"; feature = "clipboard"; }
     ];
   };
   compatibilityHelpers = lib.filter
-    (helper: builtins.elem (helperFeatures.${helper} or "core") selectedFeatures)
+    (helper: builtins.elem (helperCapabilities.${helper} or "core-runtime") selectedCapabilities)
     allCompatibilityHelpers;
   helperConsumers = lib.mapAttrs
     (name: contract: {
@@ -481,7 +481,7 @@ pkgs.symlinkJoin {
     ln -s ${theme} "$out/share/omarchy-theme"
   '';
   passthru = {
-    inherit omarchyRevision quickshellRevision nixpkgsRevision omarchySource omarchyCompatibilityRoot compatibilityBin compatibilityProbes quickshell theme supportedSystems safeMenu safeShellConfig selectedFeatures compatibilityHelpers runtimeBlockedPlugins adapterSources adapterSourceHash featureSurface;
+    inherit omarchyRevision quickshellRevision nixpkgsRevision omarchySource omarchyCompatibilityRoot compatibilityBin compatibilityProbes quickshell theme supportedSystems safeMenu safeShellConfig selectedFeatures selectedCapabilities compatibilityHelpers runtimeBlockedPlugins adapterSources adapterSourceHash featureSurface;
     buildProvenance = {
       inherit omarchyRevision quickshellRevision nixpkgsRevision;
     };

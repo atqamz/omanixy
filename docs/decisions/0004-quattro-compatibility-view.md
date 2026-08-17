@@ -26,7 +26,7 @@ definition.
 Its complete `bin/` surface is not copied into the root.
 The root contains only dispatch wrappers for the audited helper names required
 by reachable Quattro consumers.
-The compatibility view carries ten documented persistent source patch sites:
+The compatibility view carries eleven documented persistent source patch sites:
 the registry safety floor for bar widgets, enterprise Wi-Fi filtering through
 the network panel's model, removal of the Custom DNS provider/action/pill,
 hiding the unsupported speed-test action, clock middle-click routing, the
@@ -43,6 +43,11 @@ is not linked through the generic compatibility-helper loop.
 The internal compatibility-bin copy retains an `omarchy-shell` route only for
 dispatcher and source-closure evidence.
 
+Feature selection has two deliberately separate outputs.
+Requested presentation features control plugin reachability, menu presentation,
+and source selection.
+Resolved runtime capabilities control helper links, executable providers, and
+backend packages.
 Feature selection is capability policy, not persisted shell preference.
 The writable `shell.json` contains the baseline permanent disabled-plugin set
 and explicit user choices.
@@ -52,6 +57,8 @@ Omanixy-owned capability metadata records the selected set outside
 `shell.json`, while the registry remains the enforcement boundary.
 Consequently a fresh narrow activation can expand later, and a stale broad
 file cannot revive an unselected runtime.
+Shared capabilities such as Wayland clipboard-write and audio default-output
+do not select the corresponding presentation feature.
 
 `passthru.omarchySource` remains the exact unmodified source identity.
 `passthru.omarchyCompatibilityRoot` identifies the separate compatibility
@@ -68,7 +75,7 @@ User-owned extension menus remain outside the baseline support claim.
 
 ### Persistent source patch inventory
 
-The compatibility view carries exactly these ten pinned-source patch sites.
+The compatibility view carries exactly these eleven pinned-source patch sites.
 Each patch is a presentation reachability guard or a native portability fix,
 not a replacement for an adapter that could provide the same contract.
 
@@ -84,9 +91,10 @@ not a replacement for an adapter that could provide the same contract.
 | `shell/plugins/menu/Menu.qml`, pinned font provider block | Removes the font provider and its unsupported enumeration and mutation commands. | A generic runtime cannot claim Omarchy font management without a separate Nix-native design. | Omanixy omits the provider; `scripts/patch-menu-font-provider` performs an exact source-shape replacement and `test/qml-patch-behavior.sh` proves both removal and drift failure. |
 | `shell/plugins/menu/Menu.qml`, Delete-key handler | Routes Delete through `AppLibrary.canRemove()` and does not invoke removal for system, Nix-store, missing, malformed, symlink, or traversal entries. | Omanixy can safely remove only a user-owned desktop entry, while AppLibrary displays system and Nix-managed entries too. | Omanixy owns the removability guard and the adapter retains a separately tested user-entry contract; `test/qml-patch-behavior.sh`, `test/launcher-delete-contract.sh`, and `test/compat-adapters.sh` cover both sides. |
 | `shell/services/AppLibrary.qml`, user-owned entry scan, `canRemove()`, and the launch dispatch, applied by `scripts/patch-app-library` and two pinned-text substitutions | Adds the `userOwnedEntryIds` scan and the `canRemove()` predicate that back the Menu delete guard, and routes launching through `AppLibrarySupport.launchCommand()`. A desktop ID that fails `^[A-Za-z0-9][A-Za-z0-9_.@+-]*$` yields no command, so the entry does not launch and no shell command is composed from it. | The delete guard needs the ownership of every displayed entry, which only the library that enumerates them can compute; and the launch path interpolates a desktop ID into a shell string, so a helper invoked after interpolation could not undo an unsafe ID. | Omanixy owns the ownership scan and the ID validation; `test/launcher-delete-contract.sh` executes `userOwnedEntryIds` and `canRemove()` in the patched library, and `test/uwsm-integration.sh` executes `AppLibrarySupport.launchCommand()` for the accepted and the rejected desktop ID. The rejected-ID case is silent by design: the library composes no command and shows no error, and the live launch smoke is unclaimed unless `OMANIXY_LIVE_UWSM=1`. |
+| `shell/plugins/menu/BarWidget.qml`, pinned terminal right-click handler | Removes the unsupported `xdg-terminal-exec` invocation while preserving the rest of the bar-menu behavior. | The command is an Omarchy-specific terminal policy surface with no generic NixOS owner in this boundary. | The exact substitution fails on source drift and the patched source is included in the QML patch behavior audit. |
 
 The network model and panel edits are one behavioral patch site family, so the
-inventory has ten sites while documenting every persistent file and symbol.
+inventory has eleven sites while documenting every persistent file and symbol.
 Each source edit uses an exact pinned-text substitution or a fail-closed
 structured transformer and therefore fails the build if the pinned source
 shape changes.

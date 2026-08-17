@@ -56,7 +56,7 @@ immutable compatibility root derived from the source-only flake input.
 The root contains the pinned runtime entrypoint, shared QML libraries, service
 objects, and the selected plugin files required by the supported baseline and
 its reachable panels.
-It applies ten narrow compatibility patch sites:
+It applies eleven narrow compatibility patch sites:
 
 - `shell/services/PluginRegistry.qml` applies the disabled-plugin floor to bar
   widgets so blocked first-party widgets cannot be re-enabled through layout
@@ -75,10 +75,12 @@ It applies ten narrow compatibility patch sites:
 - `shell/plugins/bar/Bar.qml` replaces the Omarchy helper-backed transparent
   foreground path with the native theme color and removes its helper process.
 - `shell/plugins/menu/Menu.qml` removes the pinned power-profile provider when
-  the selected feature closure omits power, so persisted menu state cannot
+  the selected runtime lacks the power-control capability, so persisted menu state cannot
   invoke an absent helper or backend.
 - `shell/plugins/menu/Menu.qml` removes the pinned font provider because the
   generic runtime does not provide Omarchy font enumeration or mutation.
+- `shell/plugins/menu/BarWidget.qml` removes the unsupported terminal-provider
+  right-click action while preserving the remaining menu behavior.
 - `shell/plugins/menu/Menu.qml` routes launcher deletion through a
   user-owned-entry predicate rather than presenting a false system deletion
   affordance.
@@ -134,9 +136,10 @@ The audit is a static discovery guard, not proof of semantic completeness.
 The structured compatibility manifest adds referenced-helper hashes, consumer
 edges, adapter ownership, and focused-test edges, while closure checks make
 those relationships fail closed.
-Its external executable ownership map is consumed by the feature closure and
-runtime capability checks, so a known command added to a selected source also
-requires its owning feature dependency.
+Its external executable capability map is consumed by the feature-consumer
+closure and runtime capability checks, so a known command added to a selected
+source requires its capability to be present in that presentation feature's
+runtime closure.
 Focused adapter tests provide behavioral evidence.
 Live Wayland, Hyprland, and UWSM smoke is separate integration evidence and is
 not claimed by this branch.
