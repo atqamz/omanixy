@@ -162,8 +162,11 @@ def main() -> int:
             if not isinstance(helper_feature, str):
                 fail(f"helper feature identity is invalid: {helper}")
             invocation_feature = consumer_feature_for(relative, helper, feature, overrides)
-            if invocation_feature not in selected_closures:
-                selected_closures[invocation_feature] = closure(invocation_feature, dependencies)
+            if invocation_feature not in selected:
+                fail(
+                    f"{relative} ({invocation_feature}) references {helper}, "
+                    "but the invocation feature is not selected"
+                )
             present_in_pinned = helper in pinned_text
             if helper_feature not in selected_closures[invocation_feature]:
                 fail(

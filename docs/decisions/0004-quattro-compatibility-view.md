@@ -54,7 +54,7 @@ User-owned extension menus remain outside the baseline support claim.
 
 ### Persistent source patch inventory
 
-The compatibility view carries exactly these nine pinned-source patch sites.
+The compatibility view carries exactly these ten pinned-source patch sites.
 Each patch is a presentation reachability guard or a native portability fix,
 not a replacement for an adapter that could provide the same contract.
 
@@ -72,7 +72,7 @@ not a replacement for an adapter that could provide the same contract.
 | `shell/services/AppLibrary.qml`, user-owned entry scan, `canRemove()`, and the launch dispatch, applied by `scripts/patch-app-library` and two pinned-text substitutions | Adds the `userOwnedEntryIds` scan and the `canRemove()` predicate that back the Menu delete guard, and routes launching through `AppLibrarySupport.launchCommand()`. A desktop ID that fails `^[A-Za-z0-9][A-Za-z0-9_.@+-]*$` yields no command, so the entry does not launch and no shell command is composed from it. | The delete guard needs the ownership of every displayed entry, which only the library that enumerates them can compute; and the launch path interpolates a desktop ID into a shell string, so a helper invoked after interpolation could not undo an unsafe ID. | Omanixy owns the ownership scan and the ID validation; `test/launcher-delete-contract.sh` executes `userOwnedEntryIds` and `canRemove()` in the patched library, and `test/uwsm-integration.sh` executes `AppLibrarySupport.launchCommand()` for the accepted and the rejected desktop ID. The rejected-ID case is silent by design: the library composes no command and shows no error, and the live launch smoke is unclaimed unless `OMANIXY_LIVE_UWSM=1`. |
 
 The network model and panel edits are one behavioral patch site family, so the
-inventory has nine sites while documenting every persistent file and symbol.
+inventory has ten sites while documenting every persistent file and symbol.
 Each source edit uses an exact pinned-text substitution or a fail-closed
 structured transformer and therefore fails the build if the pinned source
 shape changes.

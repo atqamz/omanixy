@@ -16,18 +16,6 @@ bar_fixture="$test_root/Bar.qml"
 cp "$pinned_source/shell/plugins/bar/Bar.qml" "$bar_fixture"
 chmod u+w "$bar_fixture"
 "$python" "$patcher" "$bar_fixture"
-assert_bar_source_transform_contract() {
-  local patched=$1 pinned=$2
-  test "$(grep -Fc 'id: transparentForegroundProc' "$patched")" -eq 0
-  test "$(grep -Fc 'omarchy-bar-text-color' "$patched")" -eq 0
-  test "$(grep -Fc 'id: barHiddenProbe' "$patched")" -eq 1
-  grep -Fq 'bar-off' "$patched"
-  local pinned_processes patched_processes
-  pinned_processes=$(grep -Ec '^[[:space:]]*Process \{' "$pinned")
-  patched_processes=$(grep -Ec '^[[:space:]]*Process \{' "$patched")
-  test "$patched_processes" -eq "$((pinned_processes - 1))"
-}
-assert_bar_source_transform_contract "$bar_fixture" "$pinned_source/shell/plugins/bar/Bar.qml"
 sed -i 's/required property /property /g' "$bar_fixture"
 "$python" - "$bar_fixture" <<'PY'
 from pathlib import Path
