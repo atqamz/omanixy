@@ -317,3 +317,54 @@ notification daemon, or start an idle manager.
 
 Only the final layer may promote the complete issue #4 architecture or close
 the issue.
+
+## Layer 2 implementation note
+
+`4-02-security-pam` implements the `security.pam-password` ledger entry only,
+as `programs.omanixy.security.pam.password.enable` in the NixOS module.
+Disabled by default, it declares exactly one
+`security.pam.services."omarchy-lock-password".text`: a single explicit
+`auth required ${config.security.pam.package}/lib/security/pam_unix.so` line,
+using the public `security.pam.package` option rather than the
+`internal = true` `pam_unixModulePath` option, matching how nixpkgs itself
+resolves the module's absolute store path since NixOS has no FHS
+`/lib/security/`.
+
+The pinned Quickshell `PamContext` (`shell/plugins/lock/Service.qml`) calls
+only `pam_start_confdir`/`pam_start`, then `pam_authenticate` once, then
+`pam_end`; it never calls `pam_acct_mgmt`, `pam_open_session`,
+`pam_close_session`, `pam_chauthtok`, or `pam_setcred`.
+The generated service therefore carries only the `auth` phase; `account`,
+`session`, and `password` rules are dead weight this ABI never consumes.
+
+Two of the pinned Arch stack's modules are deliberately not carried over:
+
+- `pam_faillock` is not adopted here. Lockout policy is a cross-cutting
+  failure and recovery decision - it changes what "locked out" means for the
+  whole session, not just this one service - and belongs to the layer 8
+  failure and recovery matrix with its own explicit tests, not as an implicit
+  side effect of declaring the password capability.
+- `pam_systemd_home` is not adopted. It serves systemd-homed accounts; this
+  target is not systemd-homed, so including it would be a dead module and a
+  false capability signal in the generated file.
+
+`nullok` and `pam_permit.so` remain rejected outright: neither is an
+acceptable authentication-success path for a screen lock.
+
+The Home Manager module and the NixOS module stay structurally independent:
+Home Manager declares no PAM service, and the NixOS module declares no Home
+Manager or desktop-session option, so a standalone `homeManagerConfiguration`
+evaluation is unaffected by this option's existence.
+A future layer that needs the NixOS module to communicate a capability (for
+example, "password PAM is available") to Home Manager should use Home
+Manager's `osConfig` (populated only when Home Manager is composed via
+`home-manager.nixosModules.home-manager` inside a NixOS system, and absent
+otherwise) rather than a new capability file or a hidden global; this is a
+design note for a later layer, not code added here.
+
+This layer promotes `security.pam-password` from `blocked`/`blocked` to its
+already-declared target of `adapted`/`experimental`, and no other
+`security.*` ledger entry.
+`experimental`, not `supported`, because only the generated artifact is
+hermetically proven; no live PAM conversation, prompt, cancel, or lockout
+test has been run.

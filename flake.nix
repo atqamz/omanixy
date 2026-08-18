@@ -176,6 +176,18 @@
               }
             ];
           };
+          pamPasswordNixosConfiguration = nixpkgs.lib.nixosSystem {
+            inherit system;
+            modules = [
+              self.nixosModules.default
+              {
+                nixpkgs.hostPlatform = system;
+                system.stateVersion = "26.11";
+                programs.omanixy.security.pam.password.enable = true;
+              }
+            ];
+          };
+          pamPasswordServiceFile = "${pamPasswordNixosConfiguration.config.environment.etc."pam.d/omarchy-lock-password".source}";
           service = homeConfiguration.config.systemd.user.services.omanixy-shell;
           activationScript = pkgs.writeShellScript "omanixy-shell-state-activation" homeConfiguration.config.home.activation.omanixyShellState.data;
           clipboardActivationScript = pkgs.writeShellScript "omanixy-shell-clipboard-state-activation" clipboardHomeConfiguration.config.home.activation.omanixyShellState.data;
@@ -382,6 +394,21 @@
           '';
           nixos-evaluation = pkgs.runCommand "omanixy-nixos-evaluation" { } ''
             test "${nixosConfiguration.config.system.stateVersion}" = 26.11
+            touch "$out"
+          '';
+          security-pam = pkgs.runCommand "omanixy-security-pam"
+            {
+              disabledHasPasswordService = if builtins.hasAttr "pam.d/omarchy-lock-password" nixosConfiguration.config.environment.etc then "true" else "false";
+              disabledHasFingerprintService = if builtins.hasAttr "pam.d/omarchy-lock-fingerprint" nixosConfiguration.config.environment.etc then "true" else "false";
+              enabledHasFingerprintService = if builtins.hasAttr "pam.d/omarchy-lock-fingerprint" pamPasswordNixosConfiguration.config.environment.etc then "true" else "false";
+              enabledPolkitEnabled = if pamPasswordNixosConfiguration.config.security.polkit.enable then "true" else "false";
+              disabledPolkitEnabled = if nixosConfiguration.config.security.polkit.enable then "true" else "false";
+              serviceFile = pamPasswordServiceFile;
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.ripgrep ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-pam.sh} ${./.} "$serviceFile" \
+              "$disabledHasPasswordService" "$disabledHasFingerprintService" \
+              "$enabledHasFingerprintService" "$enabledPolkitEnabled" "$disabledPolkitEnabled"
             touch "$out"
           '';
           quattro-contract-audit = pkgs.runCommand "omanixy-quattro-contract-audit"

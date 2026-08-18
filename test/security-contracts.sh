@@ -39,7 +39,17 @@ for item in security:
     assert item["target"]["support"] in support_states
     assert item["evidence"]["available"]
     assert item["evidence"]["required_before_promotion"]
-    assert item["classification"] != item["target"]["classification"] or item["support"] != item["target"]["support"]
+    promoted = (
+        item["classification"] == item["target"]["classification"]
+        and item["support"] == item["target"]["support"]
+    )
+    if promoted:
+        assert item.get("promoted_at_layer") is not None
+    else:
+        assert "promoted_at_layer" not in item
+
+promoted_ids = {item["id"] for item in security if "promoted_at_layer" in item}
+assert promoted_ids == {"security.pam-password"}
 
 lock = next(item for item in security if item["id"] == "security.lock")
 assert lock["classification"] == "blocked"
@@ -98,9 +108,24 @@ for plugin in lock polkit notifications; do
 done
 test ! -e "$compatibility_root/shell/plugins/services/idle"
 
+# Layer 2 owns exactly one declarative PAM capability, in exactly one place:
+# the NixOS security module. Home Manager and the runtime package must never
+# declare a PAM service, and fingerprint/polkit/idle/notification ownership
+# remain out of scope until their own stack layers.
 if rg -n 'security\.pam\.services|/etc/pam\.d/omarchy-lock|omarchy-lock-(password|fingerprint)' \
-  "$repo/modules" "$repo/packages"; then
-  printf '%s\n' 'layer 1 contains a runtime PAM declaration' >&2
+  "$repo/modules/home" "$repo/packages"; then
+  printf '%s\n' 'PAM declaration found outside the layer-2 NixOS security module' >&2
+  exit 1
+fi
+
+if rg -n 'omarchy-lock-fingerprint|pam_fprintd' "$repo/modules"; then
+  printf '%s\n' 'fingerprint PAM capability is out of scope before layer 4' >&2
+  exit 1
+fi
+
+if rg -n 'security\.polkit|IdleMonitor|NotificationServer|org\.freedesktop\.Notifications' \
+  "$repo/modules/nixos"; then
+  printf '%s\n' 'polkit/idle/notification ownership is out of scope for the layer-2 PAM module' >&2
   exit 1
 fi
 
