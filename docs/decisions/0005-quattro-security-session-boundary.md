@@ -357,13 +357,30 @@ Two of the pinned Arch stack's modules are deliberately not carried over:
 `nullok` and `pam_permit.so` remain rejected outright: neither is an
 acceptable authentication-success path for a screen lock.
 
-`security.pam.services.<name>.text` is typed `nullOr lines`, so ordinary
-same-priority definitions merge by newline concatenation; an unrelated normal
-module that also defined this service's `text` would silently extend the
-authentication stack. This layer's `config` sets the service text via
-`lib.mkForce`, so while the option is enabled Omanixy owns the entire text of
-`omarchy-lock-password` atomically and a competing normal-priority definition
-is discarded rather than merged.
+`security.pam.services.<name>` has an independently configurable `enable`
+(default `true`, filtered out of `/etc/pam.d` generation entirely when
+`false`) alongside a `text` typed `nullOr lines`, and `lines` merges ordinary
+same-priority definitions by newline concatenation. An unrelated normal
+module could otherwise disable the service outright, or extend its
+authentication stack, while the Omanixy capability still reported `true`.
+This layer's `config` sets both `enable` and `text` via `lib.mkForce`, so
+while the option is enabled Omanixy owns the service's enabled state and its
+entire text atomically, and a competing normal-priority definition of either
+field is discarded rather than merged or honored.
+
+`lib.mkForce` alone is not sufficient against an equally strong competing
+definition: nixpkgs' `lines` merge type combines multiple definitions at the
+same priority by concatenation rather than raising a conflict, so a second
+`lib.mkForce` on `text` from another module would silently extend the
+authentication stack even though Omanixy's own `mkForce` is present. This
+layer adds an `assertions` entry that checks the *final resolved*
+`security.pam.services."omarchy-lock-password"` matches the exact
+Omanixy-owned contract (`enable == true` and `text` equal to the one auth
+line) whenever the option is enabled, so an equal-or-stronger override fails
+the build closed instead of silently composing. NixOS only runs assertion
+checking when `config.system.build.toplevel` is evaluated, so every fixture
+this layer uses to test this invariant forces that specific attribute rather
+than reading `environment.etc` directly.
 
 `pam_unix.so` shells out to a setuid `unix_chkpwd` helper to read the shadow
 database; nixpkgs's own `security/pam.nix` unconditionally registers
@@ -371,13 +388,16 @@ database; nixpkgs's own `security/pam.nix` unconditionally registers
 `linux-pam` package) independent of which PAM services are enabled, so this
 layer neither vendors nor duplicates that privileged helper.
 
-A build fixture
-(`pamPasswordAdversarialNixosConfiguration` in `flake.nix`, checked by
-`security-pam-composition`) proves the generated file is byte-identical
-whether or not such a competing definition is present. A consumer who wants a
-different policy for this service must disable this option rather than add to
-it; this layer adds no imperative conflict resolution and does not delete or
-mutate any other file.
+Build fixtures in `flake.nix`, checked by `security-pam-composition` and
+`security-pam-capability`, prove: the generated file is byte-identical
+whether or not an unrelated normal-priority `text` definition is present; the
+generated file is byte-identical and the service stays enabled when an
+unrelated normal-priority `enable = false` is present; and a second,
+equal-priority `lib.mkForce` on `text` fails `config.system.build.toplevel`'s
+evaluation closed rather than silently composing. A consumer who wants a
+different policy for this service must disable this option rather than add
+to it; this layer adds no `extraConfig` escape hatch, no imperative conflict
+resolution, and does not delete or mutate any other file.
 
 The Home Manager module and the NixOS module stay structurally independent:
 Home Manager declares no PAM service, and the NixOS module declares no Home

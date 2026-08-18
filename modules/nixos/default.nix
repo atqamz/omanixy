@@ -2,6 +2,9 @@
 
 let
   cfg = config.programs.omanixy.security.pam.password;
+  passwordPamText = ''
+    auth required ${config.security.pam.package}/lib/security/pam_unix.so
+  '';
 in
 {
   options.programs.omanixy.security.pam.password = {
@@ -25,21 +28,50 @@ in
         generated declaratively by `security.pam.services` like any other
         NixOS PAM service.
 
-        `security.pam.services.<name>.text` is typed `nullOr lines`, so
-        ordinary same-priority definitions merge by newline concatenation.
-        While this option is enabled, Omanixy owns the entire text of the
-        `omarchy-lock-password` service via `lib.mkForce`: an unrelated
-        normal-priority definition of the same service cannot silently
-        extend this authentication stack. A consumer who wants a different
-        policy for this service must disable this option rather than add to
-        it.
+        The `security.pam.services.<name>` service submodule has an
+        independently configurable `enable` (default `true`, filtered out of
+        `/etc/pam.d` generation when false) as well as a `text` typed
+        `nullOr lines`, which merges same-priority definitions by newline
+        concatenation. While this option is enabled, Omanixy owns both the
+        `enable` state and the entire text of the `omarchy-lock-password`
+        service via `lib.mkForce`, so this capability being reported `true`
+        always implies the service is actually present with exactly this
+        text: an unrelated normal-priority definition cannot disable the
+        service or silently extend its authentication stack, and an
+        assertion fails the build closed if some other module contests
+        ownership at an equal-or-stronger priority. A consumer who wants a
+        different policy for this service must disable this option rather
+        than add to it.
       '';
     };
   };
 
   config = lib.mkIf cfg.enable {
-    security.pam.services."omarchy-lock-password".text = lib.mkForce ''
-      auth required ${config.security.pam.package}/lib/security/pam_unix.so
-    '';
+    security.pam.services."omarchy-lock-password" = {
+      enable = lib.mkForce true;
+      text = lib.mkForce passwordPamText;
+    };
+
+    assertions = [
+      {
+        assertion =
+          config.security.pam.services."omarchy-lock-password".enable == true
+          && config.security.pam.services."omarchy-lock-password".text == passwordPamText;
+        message = ''
+          programs.omanixy.security.pam.password.enable is true, but the
+          resolved security.pam.services."omarchy-lock-password" service does
+          not match the Omanixy-owned contract (enable = true; text = the
+          single auth-only pam_unix.so line). Another module is defining this
+          service's enable or text at an equal-or-stronger override priority
+          (for example, a second lib.mkForce): nixpkgs' `lines` type can
+          combine same-priority text definitions by concatenation instead of
+          raising a conflict, so ownership must be verified explicitly rather
+          than assumed from mkForce alone. Disable
+          programs.omanixy.security.pam.password if this service needs a
+          different policy; this option does not provide an extraConfig
+          escape hatch.
+        '';
+      }
+    ];
   };
 }
