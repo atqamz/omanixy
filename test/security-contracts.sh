@@ -49,12 +49,13 @@ for item in security:
         assert "promoted_at_layer" not in item
 
 promoted_ids = {item["id"] for item in security if "promoted_at_layer" in item}
-assert promoted_ids == {"security.pam-password"}
+assert promoted_ids == {"security.pam-password", "security.lock"}
 
 lock = next(item for item in security if item["id"] == "security.lock")
-assert lock["classification"] == "blocked"
-assert lock["support"] == "blocked"
+assert lock["classification"] == "adapted"
+assert lock["support"] == "experimental"
 assert lock["target"] == {"classification": "adapted", "support": "experimental"}
+assert lock["promoted_at_layer"] == "3/8"
 
 notification_client = next(item for item in items if item["id"] == "notification.client")
 notification_daemon = next(item for item in security if item["id"] == "security.notification-daemon")

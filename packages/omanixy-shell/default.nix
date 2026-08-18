@@ -5,6 +5,7 @@
 , nixpkgsRevision
 , supportedSystems
 , features ? null
+, security ? null
 }:
 
 assert lib.assertOneOf "omanixy supported system" pkgs.stdenv.hostPlatform.system supportedSystems;
@@ -35,6 +36,9 @@ let
     "wayland-clipboard-write" = [ wl-clipboard ];
     "weather-network" = [ curl ];
   };
+  lockEnabled = security != null && (security.lock or false);
+  managedEnabledSecurityPlugins = lib.optionals lockEnabled [ "omarchy.lock" ];
+  managedSecurityPluginIds = builtins.toJSON managedEnabledSecurityPlugins;
   externalExecutableCapabilities = contractSource.externalExecutableCapabilities or { };
   helperCapabilities = contractSource.helperCapabilities or { };
   allFeatures = featureSelection.featureNames;
@@ -105,7 +109,7 @@ let
   omittedFeaturePlugins = lib.concatLists (map
     (feature: baselineSource.featurePlugins.${feature} or [ ])
     (lib.filter (feature: !builtins.elem feature selectedFeatures) (builtins.attrNames baselineSource.featurePlugins)));
-  runtimeBlockedPlugins = lib.unique (baselineConfig.disabledPlugins ++ omittedFeaturePlugins);
+  runtimeBlockedPlugins = lib.subtractLists managedEnabledSecurityPlugins (lib.unique (baselineConfig.disabledPlugins ++ omittedFeaturePlugins));
   blockedPluginIds = builtins.toJSON runtimeBlockedPlugins;
   safeMenuSource = builtins.fromJSON (builtins.readFile ./safe-menu.jsonc);
   safeMenuFeature = {
@@ -154,6 +158,15 @@ let
             done
             mkdir -p "$out/shell/plugins/services"
             cp -R ${omarchySource}/shell/plugins/services/media "$out/shell/plugins/services/media"
+            ${lib.optionalString lockEnabled ''
+            mkdir -p "$out/shell/plugins/lock"
+            install -Dm644 ${omarchySource}/shell/plugins/lock/manifest.json "$out/shell/plugins/lock/manifest.json"
+            install -Dm644 ${omarchySource}/shell/plugins/lock/LockView.qml "$out/shell/plugins/lock/LockView.qml"
+            install -Dm644 ${omarchySource}/shell/plugins/lock/Service.qml "$out/shell/plugins/lock/Service.qml"
+            chmod u+w "$out/shell/plugins/lock/Service.qml"
+            ${pkgs.python3}/bin/python3 ${../../scripts/patch-lock-service} \
+              "$out/shell/plugins/lock/Service.qml"
+            ''}
 
             chmod u+w "$out/shell" "$out/shell/shell.qml" "$out/shell/services" "$out/shell/services/PluginRegistry.qml" "$out/shell/services/AppLibrary.qml" "$out/shell/plugins/menu" "$out/shell/plugins/menu/BarWidget.qml"
             ${lib.optionalString (!builtins.elem "launcher" selectedFeatures) ''
@@ -190,10 +203,21 @@ let
             substituteInPlace "$registry_file" \
               --replace-fail '  property bool scanning: false' \
                 '  property bool scanning: false
-        readonly property var omanixyBlockedPlugins: ${blockedPluginIds}' \
+        readonly property var omanixyBlockedPlugins: ${blockedPluginIds}
+        readonly property var omanixyManagedSecurityPlugins: ${managedSecurityPluginIds}' \
               --replace-fail '    if (manifest) {' \
-                '    if (isDisabled(config, key) || omanixyBlockedPlugins.indexOf(Util.canonicalWidgetId(String(key))) !== -1) return false
-          if (manifest) {'
+                '    if (omanixyManagedSecurityPlugins.indexOf(Util.canonicalWidgetId(String(key))) !== -1) return true
+        if (isDisabled(config, key) || omanixyBlockedPlugins.indexOf(Util.canonicalWidgetId(String(key))) !== -1) return false
+          if (manifest) {' \
+              --replace-fail '    lastEnableError = ""' \
+                '    lastEnableError = ""
+        if (omanixyManagedSecurityPlugins.indexOf(key) !== -1) {
+          if (!value) {
+            lastEnableError = "managed by Omanixy/Nix configuration"
+            return false
+          }
+          return true
+        }'
             substituteInPlace "$out/shell/plugins/panels/network/Model.js" \
               --replace-fail 'function isProtected(security, openSecurity) {' \
                 'function isEnterpriseSecurity(security, wpa2Eap, wpaEap) {
@@ -270,7 +294,7 @@ let
             done
     '';
     passthru = {
-      inherit omarchySource safeMenu safeShellConfig selectedFeatures compatibilityHelpers runtimeBlockedPlugins;
+      inherit omarchySource safeMenu safeShellConfig selectedFeatures compatibilityHelpers runtimeBlockedPlugins lockEnabled managedEnabledSecurityPlugins;
     };
   };
 
@@ -402,6 +426,7 @@ let
     ./adapters/display.bash
     ./adapters/notification.bash
     ./adapters/clipboard.bash
+    ./adapters/lock.bash
     ./compat-adapter.bash
   ];
   adapterSourceText = builtins.concatStringsSep "\n" (map builtins.readFile adapterSources);
@@ -438,6 +463,9 @@ let
       for helper in ${lib.concatStringsSep " " compatibilityHelpers}; do
         ln -s ${compatAdapter}/bin/omanixy-compat-adapter "$out/bin/$helper"
       done
+      ${lib.optionalString lockEnabled ''
+      ln -s ${compatAdapter}/bin/omanixy-compat-adapter "$out/bin/omarchy-hyprland-session-locked"
+      ''}
       ${pkgs.python3}/bin/python3 ${../../scripts/generate-postpatch-runtime-surface} \
         ${omarchyCompatibilityRoot} "$out" "$probes" ${quickshell}/bin/quickshell ${fontconfigFile} ${pkgs.bash}/bin/bash ${lib.escapeShellArg (builtins.toJSON helperConsumers)} ${lib.escapeShellArg featureSurface}
     '';
@@ -478,10 +506,13 @@ pkgs.symlinkJoin {
       fi
       ln -s ${compatibilityBin}/bin/$helper "$out/bin/$helper"
     done
+    ${lib.optionalString lockEnabled ''
+    ln -s ${compatibilityBin}/bin/omarchy-hyprland-session-locked "$out/bin/omarchy-hyprland-session-locked"
+    ''}
     ln -s ${theme} "$out/share/omarchy-theme"
   '';
   passthru = {
-    inherit omarchyRevision quickshellRevision nixpkgsRevision omarchySource omarchyCompatibilityRoot compatibilityBin compatibilityProbes quickshell theme supportedSystems safeMenu safeShellConfig selectedFeatures selectedCapabilities compatibilityHelpers runtimeBlockedPlugins adapterSources adapterSourceHash featureSurface;
+    inherit omarchyRevision quickshellRevision nixpkgsRevision omarchySource omarchyCompatibilityRoot compatibilityBin compatibilityProbes quickshell theme supportedSystems safeMenu safeShellConfig selectedFeatures selectedCapabilities compatibilityHelpers runtimeBlockedPlugins adapterSources adapterSourceHash featureSurface lockEnabled managedEnabledSecurityPlugins;
     buildProvenance = {
       inherit omarchyRevision quickshellRevision nixpkgsRevision;
     };

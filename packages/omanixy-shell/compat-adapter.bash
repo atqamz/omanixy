@@ -43,5 +43,6 @@ case "$compatibility_command" in
   omarchy-menu-emoji-insert) emoji_insert "$@" ;;
   omarchy-capture-screenshot) screenshot "$@" ;;
   omarchy-remove-launcher-entry) remove_launcher_entry "$@" ;;
+  omarchy-hyprland-session-locked) hyprland_session_locked "$@" ;;
   *) fail "$compatibility_command: unsupported compatibility command" 127 ;;
 esac

@@ -1,0 +1,77 @@
+#!/usr/bin/env python3
+"""Narrow post-patches to the pinned Service.qml for the password-only native lock.
+
+Neuters fingerprint reachability (no fprintd, no fingerprint PAM conversation, no
+retry loop can arm) and converts the stranded-lock and DPMS Process commands from
+bash -c string shapes to direct argv, reusing the exact Hyprland DPMS dispatch
+already validated in packages/omanixy-shell/adapters/display.bash.
+"""
+
+from pathlib import Path
+import sys
+
+
+def block(lines: list[str]) -> str:
+    return "\n".join(lines) + "\n"
+
+
+def replace_once(text: str, old: str, new: str, label: str) -> str:
+    count = text.count(old)
+    if count != 1:
+        raise SystemExit(f"{label}: expected one pinned block, found {count}")
+    return text.replace(old, new, 1)
+
+
+def main() -> int:
+    if len(sys.argv) != 2:
+        print(f"usage: {sys.argv[0]} SERVICE_QML", file=sys.stderr)
+        return 2
+    path = Path(sys.argv[1])
+    text = path.read_text()
+
+    refresh_old = block([
+        "  function refreshFingerprintStatus() {",
+        "    if (!fingerprintCheckProc.running) fingerprintCheckProc.running = true",
+        "  }",
+    ])
+    refresh_new = block([
+        "  function refreshFingerprintStatus() {",
+        "    root.fingerprintConfigured = false",
+        "  }",
+    ])
+    text = replace_once(text, refresh_old, refresh_new, "fingerprint status refresh")
+
+    fingerprint_check_proc = block([
+        "  Process {",
+        "    id: fingerprintCheckProc",
+        '    command: ["bash", "-c", "if [[ -f /etc/pam.d/omarchy-lock-fingerprint ]] '
+        '&& command -v fprintd-list >/dev/null 2>&1 && fprintd-list \\"$USER\\" 2>/dev/null | grep -qi finger; then echo yes; else echo no; fi"]',
+        "    stdout: StdioCollector { id: fingerprintCheckStdout; waitForEnd: true }",
+        "    onExited: {",
+        '      root.fingerprintConfigured = String(fingerprintCheckStdout.text || "").trim() === "yes"',
+        "      if (root.lockRequested && root.fingerprintConfigured) root.startFingerprint()",
+        "      else if (!root.fingerprintConfigured && fingerprintPam.active) fingerprintPam.abort()",
+        "    }",
+        "  }",
+        "",
+    ])
+    text = replace_once(text, fingerprint_check_proc, "", "fingerprint check process")
+
+    stranded_old = '    command: ["bash", "-c", "omarchy-hyprland-session-locked"]'
+    stranded_new = '    command: ["omarchy-hyprland-session-locked"]'
+    text = replace_once(text, stranded_old, stranded_new, "stranded-lock helper invocation")
+
+    wake_old = '    command: ["bash", "-c", "omarchy-system-wake"]'
+    wake_new = '    command: ["hyprctl", "dispatch", "hl.dsp.dpms({ action = \\"enable\\" })"]'
+    text = replace_once(text, wake_old, wake_new, "wake DPMS invocation")
+
+    blank_old = '    command: ["bash", "-c", "omarchy-brightness-keyboard off; omarchy-brightness-display off"]'
+    blank_new = '    command: ["hyprctl", "dispatch", "hl.dsp.dpms({ action = \\"disable\\" })"]'
+    text = replace_once(text, blank_old, blank_new, "blank DPMS invocation")
+
+    path.write_text(text)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -416,3 +416,124 @@ already-declared target of `adapted`/`experimental`, and no other
 `experimental`, not `supported`, because only the generated artifact is
 hermetically proven; no live PAM conversation, prompt, cancel, or lockout
 test has been run.
+
+## Layer 3 implementation note
+
+`4-03-security-lock` implements the `security.lock` ledger entry only, as
+`programs.omanixy.security.lock.enable` in the Home Manager module
+(`modules/home/default.nix`). Disabled by default, and kept structurally
+separate from `programs.omanixy.features`: it is a dedicated `security.lock`
+option, never a member of `selectedFeatures`/`selectedCapabilities`, matching
+the independent-dimension model this ADR already records.
+
+### `osConfig` PAM handshake
+
+Home Manager's `osConfig` special argument (`osConfig ? null`, populated only
+when Home Manager is composed via `home-manager.nixosModules.home-manager`
+inside a NixOS system, per the layer 2 design note above) is now read, not
+just anticipated. Two `assertions` entries enforce the promised handshake:
+
+- `!cfg.security.lock.enable || osConfig != null` - a standalone Home Manager
+  evaluation with the lock enabled fails closed, since there is no NixOS
+  system to provision the PAM service the lock authenticates against.
+- `!cfg.security.lock.enable || osConfig == null || (osConfig.programs.omanixy.security.pam.password.enable or false) == true` -
+  an integrated evaluation with the lock enabled but the layer 2 PAM
+  capability disabled also fails closed.
+
+The resulting matrix - standalone/lock-off, standalone/lock-on,
+integrated/pam-off/lock-off, integrated/pam-on/lock-off,
+integrated/pam-off/lock-on, integrated/pam-on/lock-on - passes everywhere
+except the two lock-on cases lacking a working PAM service. Only
+integrated/pam-on/lock-on passes with the lock enabled. `security-lock`
+proves this with real `nixosSystem`/`homeManagerConfiguration` evaluations
+forced to `config.system.build.toplevel`/`activationPackage.drvPath`, not a
+description of intended behavior.
+
+### No shell.json ownership change
+
+The lock capability does not add, remove, or reorder any `shell.json` key,
+and does not gain a new mutation path. `home.activation.omanixyShellState`
+is unchanged by `cfg.security.lock.enable`; the capability only selects which
+runtime derivation is built (`omanixyRuntimeFor cfg.features (if
+cfg.security.lock.enable then { lock = true; } else null)`), which affects
+package contents, not the user's config file. `security-lock-shell-json`
+proves this directly: it extracts the same `omanixyShellState.data` fragment
+from a lock-disabled and a lock-enabled (integrated, PAM-on) configuration
+and asserts byte-identical `shell.json` output across five starting states -
+absent, the canonical seed, the seed with `omarchy.lock` manually removed
+from `disabledPlugins`, a historical store-linked v1 config, and a broken
+store symlink. `disabledPlugins` continues to list `omarchy.lock` by default,
+unrelated to whether the Nix-side capability is enabled.
+
+Instead, enabling the capability adds a Nix-owned runtime override layer.
+`PluginRegistry.qml`'s `isEnabled`/`setEnabled` now consult an injected
+`omanixyManagedSecurityPlugins` list (empty when the capability is disabled,
+`["omarchy.lock"]` when enabled): a managed-enabled plugin reports enabled
+regardless of the user's `disabledPlugins` entry, and a `setEnabled(id,
+false)` attempt against a managed-enabled plugin is rejected - either with a
+deterministic "managed by Omanixy/Nix configuration" error, or a truthful
+idempotent no-op, never a silent write to the user's file. The user's
+`disabledPlugins` list itself is never edited by this override; the override
+lives entirely in the runtime read path.
+
+### Password-only lock, fingerprint still unreachable
+
+`scripts/patch-lock-service` patches the pinned `Service.qml` (only present
+in the compat root when the lock capability is enabled) so that
+`fingerprintConfigured` can never become `true`: the refresh path is forced
+to `false` unconditionally, and the entire `fingerprintCheckProc` `Process`
+block - the only code path that ever shelled out to `fprintd-list` - is
+removed outright. No fingerprint PAM conversation, no `fprintd` process, and
+no retry-loop activation are reachable; no fingerprint package enters the
+runtime closure. `WlSessionLock`/`WlSessionLockSurface` topology, the
+`omarchy-lock-password` PAM service name, the `PamContext` conversation, and
+the single-attempt-per-submit flow are preserved exactly, matching the
+"Lock and session-lock protocol" findings above and the layer 2 PAM
+boundary.
+
+### Stranded-lock ABI and DPMS
+
+The same patch script converts the stranded-lock recovery `Process` from a
+`bash -c "omarchy-hyprland-session-locked"` string into direct argv
+(`["omarchy-hyprland-session-locked"]`), and converts the wake/blank
+`Process` commands from the keyboard-backlight/wake helpers into bounded
+Hyprland DPMS dispatches (`hyprctl dispatch 'hl.dsp.dpms({ action = "..." })'`
+via direct argv), matching the existing `omarchy-brightness-display` adapter
+convention rather than porting keyboard-backlight or clamshell logic.
+
+`omarchy-hyprland-session-locked` is a new narrow adapter
+(`packages/omanixy-shell/adapters/lock.bash`) implementing the exit-code ABI
+this ADR's "Lock and session-lock protocol" section describes: it reads
+Hyprland monitor JSON and each monitor's `solitaryBlockedBy`, exiting `0`
+when a monitor is still `LOCK`-blocked, `1` when a monitor is readable
+(unlocked), and `2` when the state is indeterminate or the backend is
+unavailable - a fail-closed default the retry loop in `Service.qml` treats
+as "not yet resolved," not as "unlocked." `security-lock` exercises this
+exit-code contract hermetically against a fake `hyprctl` for all three
+states plus a malformed-output case, and separately against the real
+packaged executable at `$lock_runtime/bin/omarchy-hyprland-session-locked`.
+It is deliberately not registered in `upstream/compatibility-contracts.json`;
+that ledger's helper set is exact-matched against
+`test/compat-adapters.sh`'s executed test cases by
+`test/compatibility-test-matrix.sh`, and this helper's fake-backend coverage
+lives in `test/security-lock.sh` instead, outside that cross-check.
+
+### Conditional packaging
+
+`shell/plugins/lock/{Service.qml,LockView.qml,manifest.json}` are copied into
+the compat root only when the lock capability is enabled; a lock-disabled
+build has no `shell/plugins/lock` directory at all, matching the layer 2
+precedent for `polkit`/`notifications`/`idle`.
+
+### Scope
+
+This layer promotes `security.lock` from `blocked`/`blocked` to its
+already-declared target of `adapted`/`experimental`, and no other
+`security.*` ledger entry; `security.pam-fingerprint`,
+`security.polkit-agent`, `security.idle`, `security.notification-daemon`, and
+`security.recovery` remain `blocked`. `experimental`, not `supported`,
+because every proof in this layer is hermetic and fake-backend: no real
+authentication, generation switch, logout, reboot, suspend, Hyprland
+process, or live Quickshell session has been exercised. Omanixy still owns no
+lock keybinding, and the native lock still runs in-process inside the
+existing `omanixy-shell` user service with no new systemd unit.

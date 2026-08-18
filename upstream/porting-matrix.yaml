@@ -888,11 +888,12 @@ items:
       - The compatibility root has a narrow bin view containing only audited helper links; the complete upstream bin tree is not exposed.
 
   - id: security.lock
-    classification: blocked
-    support: blocked
+    classification: adapted
+    support: experimental
     maturity: audited
     owner: atqamz/omanixy#4
     planned_stack_layer: 3/8
+    promoted_at_layer: 3/8
     audit_layer: 1/8
     target:
       classification: adapted
@@ -961,6 +962,13 @@ items:
         - pinned static source audit
         - Quickshell PAM and WlSessionLock API audit
         - hermetic runtime reachability assertions
+        - declarative programs.omanixy.security.lock.enable Home Manager option, disabled by default, structurally separate from programs.omanixy.features
+        - hermetic osConfig-based PASS/FAIL assertion matrix proving the HM-to-NixOS PAM handshake fails closed for standalone Home Manager and for integrated PAM-disabled configurations, and passes only when PAM is enabled
+        - hermetic proof the fingerprint enrollment probe, its PAM conversation, and its retry loop are removed from the patched Service.qml, with fingerprintConfigured forced false
+        - hermetic proof the stranded-lock helper is invoked as direct argv rather than through bash -c
+        - hermetic proof wake and blank are bounded Hyprland DPMS dispatches, not the keyboard-backlight or clamshell helpers
+        - hermetic proof the lock source tree is packaged only when the security capability is enabled, and never mutates the user-owned shell.json
+        - hermetic proof a Nix-managed-enabled security plugin overrides an attempted user disable in PluginRegistry.qml with a deterministic error, while leaving the override list empty when the capability is off
       required_before_promotion:
         - crash and restart with an ext-session-lock held
         - stranded lock detection and recovery
@@ -970,9 +978,12 @@ items:
     tests:
       - test/quattro-contract-audit.sh
       - test/security-contracts.sh
+      - test/security-lock.sh
+      - test/security-lock-shell-json.sh
     notes:
       - The initial native topology is in-process because it preserves the pinned service and recovery model; it remains experimental because third-party QML shares the process trust boundary.
       - Omanixy does not enable the lock plugin, install a lock agent, or write PAM configuration in layer 1.
+      - Layer 3 makes the native lock reachable only when programs.omanixy.security.lock.enable is explicitly set to true; it remains off by default, password-only (fingerprint stays structurally unreachable), and still owns no keybinding to trigger it. All evidence in this layer is hermetic and fake-backend; no live authentication, generation switch, or real session lock has been exercised.
 
   - id: security.pam-password
     classification: adapted

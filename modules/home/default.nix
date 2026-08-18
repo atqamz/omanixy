@@ -2,12 +2,13 @@
 , lib
 , omanixyRuntimeFor
 , pkgs
+, osConfig ? null
 , ...
 }:
 
 let
   cfg = config.programs.omanixy;
-  runtime = omanixyRuntimeFor cfg.features;
+  runtime = omanixyRuntimeFor cfg.features (if cfg.security.lock.enable then { lock = true; } else null);
   coreutils = "${pkgs.coreutils}/bin";
   baselineSource = builtins.fromJSON (builtins.readFile ../../upstream/shell-baseline.json);
   featureSelection = import ../../lib/feature-selection.nix { inherit lib; baseline = baselineSource; };
@@ -95,6 +96,31 @@ in
         .local/state/omanixy and is not shell configuration.
       '';
     };
+
+    security.lock.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Enable the experimental, password-only native Quickshell session
+        lock (shell/plugins/lock). This is not the stable default: Omanixy
+        does not own screen locking unless this is explicitly turned on.
+
+        Only password authentication via PAM is supported by this option;
+        fingerprint authentication can never be configured or activated
+        through it. Omanixy binds no keybinding to trigger the lock and
+        provides no fallback lock mechanism, so the consumer must wire their
+        own trigger (for example a Hyprland keybind invoking the shell's
+        `lock` IPC target).
+
+        Enabling this option on a standalone Home Manager installation
+        (without a paired NixOS configuration) always fails evaluation,
+        because there is no way to provision the PAM service the lock
+        authenticates against. On an integrated NixOS + Home Manager
+        installation, this option additionally requires
+        `programs.omanixy.security.pam.password.enable` to be `true` in the
+        NixOS configuration.
+      '';
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -107,6 +133,38 @@ in
         assertion = builtins.isList configuredDisabledPlugins
           && builtins.all builtins.isString configuredDisabledPlugins;
         message = "programs.omanixy.shell.config.disabledPlugins must be a list of strings";
+      }
+      {
+        assertion = !cfg.security.lock.enable || osConfig != null;
+        message = ''
+          programs.omanixy.security.lock.enable is true, but this Home
+          Manager configuration is standalone (no NixOS osConfig is
+          available). The native lock authenticates via a
+          NixOS-provisioned PAM service
+          (programs.omanixy.security.pam.password.enable), which a
+          standalone Home Manager installation has no way to provision.
+          Import this Home Manager configuration through the standard
+          NixOS Home Manager integration module, inside a NixOS
+          configuration that also enables
+          programs.omanixy.security.pam.password, or leave
+          programs.omanixy.security.lock.enable at its default (false).
+        '';
+      }
+      {
+        assertion = !cfg.security.lock.enable || osConfig == null
+          || (osConfig.programs.omanixy.security.pam.password.enable or false) == true;
+        message = ''
+          programs.omanixy.security.lock.enable is true, but the paired
+          NixOS configuration does not enable
+          programs.omanixy.security.pam.password.enable. The native lock's
+          PamContext authenticates against the password PAM service that
+          only that NixOS option provisions; without it, every unlock
+          attempt fails closed. Enable
+          programs.omanixy.security.pam.password.enable in the NixOS
+          configuration that imports this Home Manager configuration, or
+          leave programs.omanixy.security.lock.enable at its default
+          (false).
+        '';
       }
     ];
 
