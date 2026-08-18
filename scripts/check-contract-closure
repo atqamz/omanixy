@@ -1,0 +1,421 @@
+#!/usr/bin/env python3
+"""Check pinned evidence, post-patch reachability, and runtime identity."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+
+def die(message: str) -> None:
+    print(f"contract closure: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def read_json(path: Path) -> dict:
+    try:
+        value = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as error:
+        die(f"cannot read {path}: {error}")
+    if not isinstance(value, dict):
+        die(f"{path} is not a JSON object")
+    return value
+
+
+def names(snapshot: dict) -> set[str]:
+    values: set[str] = set()
+    for key in ("direct_omarchy_helpers", "absolute_helper_paths"):
+        for entry in snapshot.get(key, []):
+            if isinstance(entry, dict) and isinstance(entry.get("name"), str):
+                values.add(entry["name"])
+    return values
+
+
+def scanner_noise_records(root: Path, manifest: dict) -> set[tuple[str, int, str]]:
+    entries = manifest.get("scannerNoise", [])
+    if not isinstance(entries, list):
+        die("manifest scannerNoise is not a list")
+    result: set[tuple[str, int, str]] = set()
+    identities: set[tuple[str, str]] = set()
+    for entry in entries:
+        if (
+            not isinstance(entry, dict)
+            or not isinstance(entry.get("path"), str)
+            or not isinstance(entry.get("helper"), str)
+            or not isinstance(entry.get("exactLine"), str)
+            or not isinstance(entry.get("reason"), str)
+            or not entry["reason"]
+        ):
+            die("manifest scannerNoise evidence is invalid")
+        identity = (entry["path"], entry["helper"])
+        if identity in identities:
+            die(f"duplicate scanner noise evidence: {entry['path']}: {entry['helper']}")
+        identities.add(identity)
+        source = root / entry["path"]
+        if not source.is_file():
+            die(f"scanner noise source is missing: {entry['path']}")
+        active_lines = [
+            (index, line)
+            for index, line in enumerate(source.read_text(encoding="utf-8").splitlines(), start=1)
+            if not line.lstrip().startswith("//")
+        ]
+        matching_lines = [
+            (index, line)
+            for index, line in active_lines
+            if entry["helper"] in line
+        ]
+        if [line for _, line in matching_lines] == [entry["exactLine"]]:
+            result.add((entry["path"], matching_lines[0][0], entry["helper"]))
+        else:
+            die(f"scanner noise evidence drifted: {entry['path']}: {entry['helper']}")
+    return result
+
+
+def snapshot_records(snapshot: dict) -> set[tuple[str, int, str]]:
+    records: set[tuple[str, int, str]] = set()
+    for key in ("direct_omarchy_helpers", "absolute_helper_paths"):
+        for entry in snapshot.get(key, []):
+            if (
+                isinstance(entry, dict)
+                and isinstance(entry.get("path"), str)
+                and isinstance(entry.get("line"), int)
+                and isinstance(entry.get("name"), str)
+            ):
+                records.add((entry["path"], entry["line"], entry["name"]))
+    return records
+
+
+def adapter_hash(repo: Path, manifest: dict) -> str:
+    sources = manifest.get("adapterSources")
+    if not isinstance(sources, list) or not sources or any(not isinstance(source, str) for source in sources):
+        die("manifest adapterSources identity is invalid")
+    try:
+        source_text = b"\n".join((repo / source).read_bytes() for source in sources)
+    except OSError as error:
+        die(f"adapter source is unavailable: {error}")
+    return hashlib.sha256(source_text).hexdigest()
+
+
+def main() -> int:
+    if len(sys.argv) != 12:
+        print(
+            f"usage: {sys.argv[0]} REPO PINNED_SOURCE COMPAT_ROOT COMPAT_BIN COMPAT_PROBES RUNTIME MANIFEST SNAPSHOT TEST ADAPTER AUDITOR",
+            file=sys.stderr,
+        )
+        return 2
+
+    repo, source, root, compatibility_bin, compatibility_probes, runtime, manifest_path, snapshot_path, test_path, adapter_path, auditor_path = map(Path, sys.argv[1:])
+    if compatibility_probes == compatibility_bin:
+        die("consumer probe scaffolding must live outside the runtime helper path")
+    manifest = read_json(manifest_path)
+    matrix_reference = manifest.get("testMatrix")
+    if not isinstance(matrix_reference, str):
+        die("manifest test-matrix identity is invalid")
+    matrix = read_json(Path(matrix_reference) if Path(matrix_reference).is_absolute() else repo / matrix_reference)
+    required_cases = matrix.get("requiredCases")
+    matrix_helpers = matrix.get("helpers")
+    if (
+        matrix.get("schema") != 2
+        or not isinstance(required_cases, list)
+        or required_cases != ["valid", "invalidArgs", "missingBackend", "backendFailure", "stdout", "exitStatus"]
+        or not isinstance(matrix_helpers, dict)
+    ):
+        die("manifest test-matrix schema is invalid")
+    full_snapshot = read_json(snapshot_path)
+    helpers = manifest.get("helpers")
+    native = manifest.get("native")
+    if not isinstance(helpers, dict) or not isinstance(native, dict):
+        die("manifest helpers/native sections are invalid")
+    adapter_manifest_path = manifest.get("adapter")
+    adapter_expected_hash = manifest.get("adapterHash")
+    if not isinstance(adapter_manifest_path, str) or not isinstance(adapter_expected_hash, str):
+        die("manifest adapter identity is invalid")
+    if adapter_path.name != Path(adapter_manifest_path).name and not adapter_path.name.endswith("-" + Path(adapter_manifest_path).name):
+        die(f"manifest adapter path does not match the checked dispatcher: {adapter_path}")
+    if adapter_hash(repo, manifest) != adapter_expected_hash:
+        die("concatenated adapter implementation drifted")
+    if not adapter_path.is_file() or adapter_path.read_bytes() != (repo / adapter_manifest_path).read_bytes():
+        die("checked dispatcher is not the manifest dispatcher")
+
+    pinned = manifest.get("pins")
+    if not isinstance(pinned, dict) or any(not isinstance(value, str) for value in pinned.values()):
+        die("manifest pin set is invalid")
+
+    full_names = names(full_snapshot)
+    declared = set(helpers) | set(native)
+    noise_records = scanner_noise_records(root, manifest)
+    noise_names = {name for _, _, name in noise_records}
+    missing_contracts = sorted((set(helpers) - full_names) - {"omarchy-shell"})
+    if missing_contracts:
+        die(f"ledger entries lack pinned-source evidence: {', '.join(missing_contracts)}")
+
+    actual_bin = {
+        path.name
+        for path in (compatibility_bin / "bin").iterdir()
+        if path.is_symlink() and path.name in helpers
+    }
+    if actual_bin != set(helpers):
+        die("runtime compatibility bin does not equal the adapted-helper ledger")
+    runtime_surface = read_json(compatibility_bin / "runtime-surface.json")
+    if set(runtime_surface) != actual_bin:
+        die("generated runtime surface does not equal the executable helper surface")
+    probe_surface = read_json(compatibility_probes / "probe-surface.json")
+    if probe_surface.get("compatibilityBin") != str(compatibility_bin):
+        die("consumer probes were generated against a different runtime helper path")
+    expected_probe_helpers = sorted(actual_bin - {"omarchy-shell"})
+    if probe_surface.get("helpers") != expected_probe_helpers:
+        die("consumer probes do not cover the executable helper surface")
+    probe_plan = []
+
+    for helper, contract in sorted(helpers.items()):
+        if not isinstance(contract, dict):
+            die(f"helper {helper} is not an object")
+        reference = contract.get("reference")
+        expected_hash = contract.get("hash")
+        if not isinstance(reference, str) or not isinstance(expected_hash, str):
+            die(f"helper {helper} has no pinned implementation identity")
+        reference_path = source / reference
+        if not reference_path.is_file():
+            die(f"pinned helper reference is missing: {reference}")
+        if hashlib.sha256(reference_path.read_bytes()).hexdigest() != expected_hash:
+            die(f"pinned helper reference drifted: {reference}")
+
+        consumers = contract.get("consumer")
+        post_patch_consumers = contract.get("postPatchConsumer")
+        if not isinstance(consumers, list) or not consumers:
+            die(f"helper {helper} has no pinned consumer evidence")
+        if not isinstance(post_patch_consumers, list) or not post_patch_consumers:
+            die(f"helper {helper} has no post-patch consumer evidence")
+        for consumer in consumers:
+            if not isinstance(consumer, str) or not (source / consumer).exists():
+                die(f"helper {helper} has a missing pinned consumer path: {consumer}")
+        surface = runtime_surface.get(helper)
+        if not isinstance(surface, dict):
+            die(f"helper {helper} has no generated runtime surface entry")
+        helper_path = compatibility_bin / "bin" / helper
+        dispatcher_path = compatibility_bin / "bin" / "omanixy-compat-adapter"
+        if not helper_path.is_symlink() or not dispatcher_path.is_symlink():
+            die(f"helper {helper} does not use the packaged compatibility dispatcher")
+        if surface.get("helperTarget") != str(helper_path.resolve()):
+            die(f"helper {helper} packaged target identity drifted")
+        if surface.get("dispatcherTarget") != str(dispatcher_path.resolve()):
+            die(f"helper {helper} dispatcher identity drifted")
+        if surface.get("helperTargetSha256") != hashlib.sha256(helper_path.resolve().read_bytes()).hexdigest():
+            die(f"helper {helper} packaged target content drifted")
+        if surface.get("dispatcherTargetSha256") != hashlib.sha256(dispatcher_path.resolve().read_bytes()).hexdigest():
+            die(f"helper {helper} dispatcher content drifted")
+        consumer = surface.get("consumer")
+        consumer_probe = surface.get("consumerProbe")
+        if not isinstance(consumer, str) or not consumer:
+            die(f"helper {helper} has no generated consumer mapping")
+        if not (root / consumer).exists():
+            die(f"helper {helper} has a missing generated consumer")
+        if not isinstance(consumer_probe, dict):
+            die(f"helper {helper} has no executable generated consumer probe")
+        if helper == "omarchy-shell":
+            if (
+                consumer_probe.get("helper") != helper
+                or consumer_probe.get("invocation") != "reference-only"
+                or consumer_probe.get("evidence") != "test/ipc-wrapper.sh"
+            ):
+                die("omarchy-shell must use reference-only IPC evidence")
+        else:
+            executable = consumer_probe.get("executable")
+            probe_helper = consumer_probe.get("helper")
+            if (
+                probe_helper != helper
+                or consumer_probe.get("invocation") != "generated-post-patch-consumer"
+                or consumer_probe.get("marker") != "dispatcher-command-identity-success-only-v1"
+            ):
+                die(f"helper {helper} has a disconnected generated consumer probe")
+            probe_path = compatibility_probes / executable
+            if not probe_path.is_file():
+                die(f"helper {helper} has no packaged consumer executable")
+            if (compatibility_bin / executable).exists():
+                die(f"helper {helper} consumer probe leaked into the runtime helper path")
+        expected_consumer_hash = surface.get("consumerSourceSha256")
+        if not isinstance(expected_consumer_hash, str) or hashlib.sha256((root / consumer).read_bytes()).hexdigest() != expected_consumer_hash:
+            die(f"helper {helper} generated consumer identity drifted")
+        consumer_sources = surface.get("consumerSources")
+        if not isinstance(consumer_sources, list) or not consumer_sources:
+            die(f"helper {helper} has no generated consumer source evidence")
+        for evidence in consumer_sources:
+            if not isinstance(evidence, dict):
+                die(f"helper {helper} has invalid generated consumer source evidence")
+            evidence_path = evidence.get("path")
+            evidence_hash = evidence.get("sha256")
+            if (
+                not isinstance(evidence_path, str)
+                or Path(evidence_path).is_absolute()
+                or not isinstance(evidence_hash, str)
+            ):
+                die(f"helper {helper} has invalid generated consumer source identity")
+            evidence_file = root / evidence_path
+            try:
+                evidence_file.resolve().relative_to(root.resolve())
+            except ValueError:
+                die(f"helper {helper} generated consumer source escapes the compatibility root")
+            if not evidence_file.is_file() or hashlib.sha256(evidence_file.read_bytes()).hexdigest() != evidence_hash:
+                die(f"helper {helper} generated consumer source drifted: {evidence_path}")
+        if any(not isinstance(consumer, str) or not (root / consumer).exists() for consumer in post_patch_consumers):
+            die(f"helper {helper} has a missing declared post-patch consumer")
+        if helper not in actual_bin:
+            die(f"helper {helper} is absent from the executable post-patch helper surface")
+        if helper != "omarchy-shell":
+            probe_plan.append((helper, probe_path))
+        if contract.get("reachable") is not True:
+            die(f"helper {helper} is not explicitly classified as post-patch reachable")
+        compatibility = contract.get("compatibility")
+        if not isinstance(compatibility, dict):
+            die(f"helper {helper} has no compatibility deviation model")
+        required_fields = {"args", "stdout", "stderr", "sideEffects", "failureSemantics", "exitStatus", "missingBackend", "timeout", "idempotence"}
+        if not required_fields.issubset(compatibility):
+            die(f"helper {helper} has an incomplete compatibility deviation model")
+        matrix_entry = matrix_helpers.get(helper)
+        if not isinstance(matrix_entry, dict) or not isinstance(matrix_entry.get("tests"), dict):
+            die(f"helper {helper} has no test-matrix entry")
+        tests = matrix_entry["tests"]
+        for case in required_cases:
+            case_entry = tests.get(case)
+            if not isinstance(case_entry, dict):
+                die(f"helper {helper} has no declared {case} test-matrix case")
+            status = case_entry.get("status")
+            if status == "not-applicable":
+                if not isinstance(case_entry.get("reason"), str) or not case_entry["reason"].strip():
+                    die(f"helper {helper} has an unjustified not-applicable {case} test-matrix case")
+            elif status != "required":
+                die(f"helper {helper} has an invalid {case} test-matrix status")
+        if set(matrix_helpers) != set(helpers):
+            die("test-matrix helper set does not equal the compatibility ledger")
+        if helper != "omarchy-shell" and not isinstance(contract.get("pinnedBehavior"), str):
+            die(f"helper {helper} does not state its pinned observable behavior")
+        if helper != "omarchy-shell" and not isinstance(contract.get("intentionalDeviation"), str):
+            die(f"helper {helper} does not state its Omanixy deviation")
+
+    for capability, contract in sorted(native.items()):
+        if not isinstance(contract, dict):
+            die(f"native entry {capability} is not an object")
+        reference = contract.get("reference")
+        expected_hash = contract.get("hash")
+        if not isinstance(reference, str) or not isinstance(expected_hash, str):
+            die(f"native entry {capability} has no implementation identity")
+        reference_path = source / reference
+        if not reference_path.is_file():
+            die(f"native reference is missing: {reference}")
+        if hashlib.sha256(reference_path.read_bytes()).hexdigest() != expected_hash:
+            die(f"native reference drifted: {reference}")
+        consumers = contract.get("consumer")
+        if not isinstance(consumers, list) or not consumers:
+            die(f"native entry {capability} has no consumer evidence")
+        for consumer in consumers:
+            if not isinstance(consumer, str) or not (source / consumer).exists():
+                die(f"native entry {capability} has a missing consumer path: {consumer}")
+        evidence = contract.get("evidence")
+        if not isinstance(evidence, str) or not evidence:
+            die(f"native entry {capability} has no native capability evidence")
+        provider = contract.get("provider")
+        probe = contract.get("probe")
+        if not isinstance(provider, str) or not provider:
+            die(f"native entry {capability} has no normalized provider")
+        if not isinstance(probe, str) or not (repo / probe).is_file():
+            die(f"native entry {capability} has no executable package probe")
+        probe_result = contract.get("probeResult")
+        if not isinstance(probe_result, str) or not probe_result:
+            die(f"native entry {capability} has no normalized probe result")
+        try:
+            runtime_path = ""
+            for line in (runtime / "bin/omanixy-shell-runtime").read_text().splitlines():
+                if line.startswith('export PATH="'):
+                    runtime_path = line.split('"', 2)[1]
+                    break
+            if not runtime_path:
+                die("selected runtime has no executable PATH")
+            native_env = dict(os.environ)
+            native_env["PATH"] = runtime_path
+            selected_uwsm_app = shutil.which("uwsm-app", path=runtime_path)
+            if not selected_uwsm_app:
+                die("selected runtime has no uwsm-app")
+            result = subprocess.run(
+                ["bash", str(repo / probe), selected_uwsm_app],
+                check=True,
+                capture_output=True,
+                text=True,
+                env=native_env,
+            )
+        except (OSError, subprocess.CalledProcessError) as error:
+            die(f"native probe failed for {capability}: {error}")
+        if probe_result not in result.stdout.splitlines():
+            die(f"native probe result mismatch for {capability}")
+
+    if not (repo / "test/ipc-wrapper.sh").is_file():
+        die("omarchy-shell has no IPC behavioral test evidence")
+
+    root_snapshot = subprocess.run(
+        [sys.executable, str(auditor_path), str(root)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    reachable_records = snapshot_records(json.loads(root_snapshot.stdout)) - noise_records
+    reachable = {name for _, _, name in reachable_records}
+    unknown = sorted(reachable - declared)
+    if unknown:
+        die(f"reachable contracts lack ledger disposition: {', '.join(unknown)}")
+    omitted_reachable = sorted((full_names - declared - noise_names) & reachable)
+    if omitted_reachable:
+        die(f"omitted pinned contracts are reachable: {', '.join(omitted_reachable)}")
+    for omitted in manifest.get("omittedReachability", []):
+        if not isinstance(omitted, str):
+            die("omitted reachability contains a non-string entry")
+        if omitted in reachable:
+            die(f"omitted contract is reachable: {omitted}")
+
+    for helper, contract in helpers.items():
+        if contract.get("reachable") is True and helper not in actual_bin:
+            die(f"reachable ledger helper is absent from runtime helper surface: {helper}")
+
+    result = subprocess.run(
+        ["bash", str(test_path), str(repo), str(root), str(compatibility_bin / "bin")],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        die(f"runtime helper matrix failed: {result.stderr.strip()}")
+    runtime_probes = {
+        fields[1]
+        for line in result.stdout.splitlines()
+        if (fields := line.split("\t")) and len(fields) >= 3 and fields[0] == "CASE" and fields[2] == "valid"
+    }
+    for helper, contract in sorted(helpers.items()):
+        if contract.get("reachable") is True and helper != "omarchy-shell" and helper not in runtime_probes:
+            die(f"helper {helper} has no executable post-patch consumer probe")
+
+    for helper, probe_path in probe_plan:
+        probe_result = subprocess.run(
+            [str(probe_path)],
+            env=os.environ.copy(),
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        if probe_result.returncode == 127:
+            die(f"helper {helper} generated consumer probe did not dispatch")
+        if not probe_result.stdout.startswith(f"CONSUMER_PROBE\t{helper}\n"):
+            die(f"helper {helper} generated consumer probe did not identify its consumer")
+        if f"CONSUMER_REACHED\t{helper}\n" not in probe_result.stdout:
+            die(
+                f"helper {helper} generated consumer probe did not execute its consumer: "
+                f"stdout={probe_result.stdout!r} stderr={probe_result.stderr!r}"
+            )
+
+    print(f"contract closure passed: {len(helpers)} adapted, {len(native)} native, {len(full_names - declared - noise_names)} omitted")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

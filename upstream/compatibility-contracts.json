@@ -1,0 +1,1062 @@
+{
+  "schema": 2,
+  "pins": {
+    "omarchy": "f0020448ca87329199de7cb12f2015ebc4a3e5e7",
+    "quickshell": "28771c7c74b42e20afca0b1b63980cb46515537c",
+    "nixpkgs": "241313f4e8e508cb9b13278c2b0fa25b9ca27163"
+  },
+  "externalExecutableCapabilities": {
+    "awk": "core-runtime",
+    "bash": "core-runtime",
+    "bluetoothctl": "bluetooth-control",
+    "brightnessctl": "monitor-control",
+    "cat": "core-runtime",
+    "curl": "weather-network",
+    "date": "core-runtime",
+    "fc-match": "core-runtime",
+    "find": "core-runtime",
+    "grep": "clipboard-presentation",
+    "grim": "screenshot-capture",
+    "gtk-launch": "launcher",
+    "hyprctl": "core-runtime",
+    "hyprpicker": "screenshot-capture",
+    "inotifywait": "core-runtime",
+    "ip": "network-manager",
+    "iw": "network-manager",
+    "jq": "core-runtime",
+    "mkdir": "core-runtime",
+    "mktemp": "core-runtime",
+    "mv": "core-runtime",
+    "nmcli": "network-manager",
+    "notify-send": "notification-send",
+    "pactl": "audio-control",
+    "pkill": "core-runtime",
+    "powerprofilesctl": "power-control",
+    "rm": "core-runtime",
+    "setpriv": "clipboard-presentation",
+    "sha256sum": "core-runtime",
+    "slurp": "screenshot-capture",
+    "sort": "core-runtime",
+    "systemctl": "core-runtime",
+    "timeout": "core-runtime",
+    "top": "core-runtime",
+    "upower": "power-control",
+    "uwsm": "launcher",
+    "uwsm-app": "launcher",
+    "wl-copy": "wayland-clipboard-write",
+    "wl-paste": "clipboard-presentation",
+    "wtype": "text-injection"
+  },
+  "helperCapabilities": {
+    "omarchy-audio-input-set-default": "audio-control",
+    "omarchy-audio-output-set-default": "audio-default-output",
+    "omarchy-audio-output-sink": "audio-control",
+    "omarchy-audio-sink-availability": "audio-control",
+    "omarchy-battery-status": "power-control",
+    "omarchy-bluetooth-device": "bluetooth-control",
+    "omarchy-bluetooth-power": "bluetooth-control",
+    "omarchy-brightness-display": "monitor-control",
+    "omarchy-capture-screenshot": "screenshot-capture",
+    "omarchy-clipboard-open": "clipboard-presentation",
+    "omarchy-clipboard-paste-file": "clipboard-presentation",
+    "omarchy-clipboard-paste-text": "clipboard-presentation",
+    "omarchy-display-text-size": "monitor-control",
+    "omarchy-dns": "network-manager",
+    "omarchy-hyprland-monitor-scaling": "monitor-control",
+    "omarchy-menu-emoji-insert": "clipboard-presentation",
+    "omarchy-monitor-state": "monitor-control",
+    "omarchy-network-band": "network-manager",
+    "omarchy-network-password": "network-manager",
+    "omarchy-network-qr": "network-manager",
+    "omarchy-network-status": "network-manager",
+    "omarchy-notification-send": "notification-send",
+    "omarchy-powerprofiles-list": "power-control",
+    "omarchy-powerprofiles-set": "power-control",
+    "omarchy-remove-launcher-entry": "launcher",
+    "omarchy-shell": "core-runtime",
+    "omarchy-system-stats": "core-runtime",
+    "omarchy-weather-location": "weather-network",
+    "omarchy-weather-status": "weather-network"
+  },
+  "adapter": "packages/omanixy-shell/compat-adapter.bash",
+  "adapterHash": "bca6a4515cc66f2db2e093e927c09b83ef39f2e8a1b54af50267c715a2161eb9",
+  "adapterSources": [
+    "packages/omanixy-shell/adapters/common.bash",
+    "packages/omanixy-shell/adapters/weather.bash",
+    "packages/omanixy-shell/adapters/audio.bash",
+    "packages/omanixy-shell/adapters/network.bash",
+    "packages/omanixy-shell/adapters/power.bash",
+    "packages/omanixy-shell/adapters/display.bash",
+    "packages/omanixy-shell/adapters/notification.bash",
+    "packages/omanixy-shell/adapters/clipboard.bash",
+    "packages/omanixy-shell/compat-adapter.bash"
+  ],
+  "behavioralTests": "test/compat-adapters.sh",
+  "helpers": {
+    "omarchy-shell": {
+      "feature": "core",
+      "consumer": [
+        "shell/"
+      ],
+      "reference": "bin/omarchy-shell",
+      "hash": "e942a8df84d806c99233c21b0cd041ab95f6ff5eb10b61de3beb9be131330bf4",
+      "pinnedConsumer": [
+        "shell/"
+      ],
+      "postPatchConsumer": [
+        "shell/"
+      ],
+      "reachable": true,
+      "status": "adapted",
+      "compatibility": {
+        "args": "pinned-reachable-subset",
+        "stdout": "adapted",
+        "stderr": "adapted",
+        "exitStatus": "adapted",
+        "sideEffects": "adapted",
+        "failureSemantics": "hardened",
+        "missingBackend": "hardened",
+        "timeout": "hardened",
+        "idempotence": "tested"
+      },
+      "pinnedObservable": "reference-hash-plus-pinned-consumer",
+      "pinnedBehavior": "Accepts [-q] <target> <method> [args...], injects {} for shell summon/toggle, forwards stdout IPC output, and returns status 1 for unavailable, timeout, or IPC target errors; -q makes failures best-effort.",
+      "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
+    },
+    "omarchy-audio-input-set-default": {
+      "feature": "audio",
+      "consumer": [
+        "shell/plugins/panels/audio/"
+      ],
+      "reference": "bin/omarchy-audio-input-set-default",
+      "hash": "d167daf0d5914ee8955cf70400b8c7b933089f4d0537b8cc90cdd4407ce23e50",
+      "pinnedConsumer": [
+        "shell/plugins/panels/audio/"
+      ],
+      "postPatchConsumer": [
+        "shell/plugins/panels/audio/"
+      ],
+      "reachable": true,
+      "status": "adapted",
+      "compatibility": {
+        "args": "pinned-reachable-subset",
+        "stdout": "adapted",
+        "stderr": "adapted",
+        "exitStatus": "adapted",
+        "sideEffects": "adapted",
+        "failureSemantics": "hardened",
+        "missingBackend": "hardened",
+        "timeout": "hardened",
+        "idempotence": "tested"
+      },
+      "pinnedObservable": "reference-hash-plus-pinned-consumer",
+      "pinnedBehavior": "Accepts <node-id> <source-name>, performs best-effort wpctl and pactl default changes and source-stream moves, emits no success stdout, and returns status 1 for missing arguments.",
+      "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
+    },
+    "omarchy-audio-output-set-default": {
+      "feature": "audio",
+      "consumer": [
+        "shell/plugins/panels/audio/",
+        "shell/plugins/panels/bluetooth/"
+      ],
+      "reference": "bin/omarchy-audio-output-set-default",
+      "hash": "db099ca6ba307b982e2f7966987934afe1b22b69463de51d373b5972c632695b",
+      "pinnedConsumer": [
+        "shell/plugins/panels/audio/",
+        "shell/plugins/panels/bluetooth/"
+      ],
+      "postPatchConsumer": [
+        "shell/plugins/panels/audio/",
+        "shell/plugins/panels/bluetooth/"
+      ],
+      "reachable": true,
+      "status": "adapted",
+      "compatibility": {
+        "args": "pinned-reachable-subset",
+        "stdout": "adapted",
+        "stderr": "adapted",
+        "exitStatus": "adapted",
+        "sideEffects": "adapted",
+        "failureSemantics": "hardened",
+        "missingBackend": "hardened",
+        "timeout": "hardened",
+        "idempotence": "tested"
+      },
+      "pinnedObservable": "reference-hash-plus-pinned-consumer",
+      "pinnedBehavior": "wpctl, pactl, and stream movement failures are best-effort; invalid arguments exit 1",
+      "intentionalDeviation": "Omanixy validates exact node metadata, hard-fails backend errors, and rolls back default and stream changes; exit status 2 for invalid arguments."
+    },
+    "omarchy-audio-output-sink": {
+      "feature": "audio",
+      "consumer": [
+        "shell/plugins/panels/audio/"
+      ],
+      "reference": "bin/omarchy-audio-output-sink",
+      "hash": "79015698ed87a73289b0df8bd96f7d5e48989eef2392d6b7dd0f52401e3da79e",
+      "pinnedConsumer": [
+        "shell/plugins/panels/audio/"
+      ],
+      "postPatchConsumer": [
+        "shell/plugins/panels/audio/"
+      ],
+      "reachable": true,
+      "status": "adapted",
+      "compatibility": {
+        "args": "pinned-reachable-subset",
+        "stdout": "adapted",
+        "stderr": "adapted",
+        "exitStatus": "adapted",
+        "sideEffects": "adapted",
+        "failureSemantics": "hardened",
+        "missingBackend": "hardened",
+        "timeout": "hardened",
+        "idempotence": "tested"
+      },
+      "pinnedObservable": "reference-hash-plus-pinned-consumer",
+      "pinnedBehavior": "Accepts optional [sink-name], resolves a DSP or EasyEffects sink to its physical downstream sink when possible, prints one sink name with a trailing newline, and falls back to the requested or default sink.",
+      "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
+    },
+    "omarchy-audio-sink-availability": {
+      "feature": "audio",
+      "consumer": [
+        "shell/plugins/panels/audio/"
+      ],
+      "reference": "bin/omarchy-audio-sink-availability",
+      "hash": "1ec6f5df1bb2e57f1ff154391c6bfe2c373f6c2196c718ec2571faa677fbafad",
+      "pinnedConsumer": [
+        "shell/plugins/panels/audio/"
+      ],
+      "postPatchConsumer": [
+        "shell/plugins/panels/audio/"
+      ],
+      "reachable": true,
+      "status": "adapted",
+      "compatibility": {
+        "args": "pinned-reachable-subset",
+        "stdout": "adapted",
+        "stderr": "adapted",
+        "exitStatus": "adapted",
+        "sideEffects": "adapted",
+        "failureSemantics": "hardened",
+        "missingBackend": "hardened",
+        "timeout": "hardened",
+        "idempotence": "tested"
+      },
+      "pinnedObservable": "reference-hash-plus-pinned-consumer",
+      "pinnedBehavior": "Accepts no arguments, prints one tab-separated sink-name and availability flag per sink, and treats fronted DSP sinks as unavailable.",
+      "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
+    },
+    "omarchy-battery-status": {
+      "feature": "power",
+      "consumer": [
+        "shell/plugins/panels/power/"
+      ],
+      "reference": "bin/omarchy-battery-status",
+      "hash": "b30b0757a914c7f628ef92801b081e26e21d485dec41dc5a53ab0a86eab84a95",
+      "pinnedConsumer": [
+        "shell/plugins/panels/power/"
+      ],
+      "postPatchConsumer": [
+        "shell/plugins/panels/power/"
+      ],
+      "reachable": true,
+      "status": "adapted",
+      "compatibility": {
+        "args": "pinned-reachable-subset",
+        "stdout": "adapted",
+        "stderr": "adapted",
+        "exitStatus": "adapted",
+        "sideEffects": "adapted",
+        "failureSemantics": "hardened",
+        "missingBackend": "hardened",
+        "timeout": "hardened",
+        "idempotence": "tested"
+      },
+      "pinnedObservable": "reference-hash-plus-pinned-consumer",
+      "pinnedBehavior": "Accepts no arguments or --shell, prints formatted battery telemetry for the panel, prints no battery result when no battery is found, and returns status 2 for other arguments.",
+      "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
+    },
+    "omarchy-bluetooth-device": {
+      "feature": "bluetooth",
+      "consumer": [
+        "shell/plugins/panels/bluetooth/"
+      ],
+      "reference": "bin/omarchy-bluetooth-device",
+      "hash": "1c5ec57682b4d9ee4a72c05c918cfb626e442e1354498d9727bd42529c3ddf48",
+      "pinnedConsumer": [
+        "shell/plugins/panels/bluetooth/"
+      ],
+      "postPatchConsumer": [
+        "shell/plugins/panels/bluetooth/"
+      ],
+      "reachable": true,
+      "status": "adapted",
+      "compatibility": {
+        "args": "pinned-reachable-subset",
+        "stdout": "adapted",
+        "stderr": "adapted",
+        "exitStatus": "adapted",
+        "sideEffects": "adapted",
+        "failureSemantics": "hardened",
+        "missingBackend": "hardened",
+        "timeout": "hardened",
+        "idempotence": "tested"
+      },
+      "pinnedObservable": "reference-hash-plus-pinned-consumer",
+      "pinnedBehavior": "Accepts pair, connect, disconnect, or forget plus a MAC address, performs bounded bluetoothctl actions with best-effort backend failures, emits no success stdout, and returns status 1 for invalid arguments.",
+      "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
+    },
+    "omarchy-bluetooth-power": {
+      "feature": "bluetooth",
+      "consumer": [
+        "shell/plugins/panels/bluetooth/"
+      ],
+      "reference": "bin/omarchy-bluetooth-power",
+      "hash": "0db21bcd53f3ddf4f8276dac85b6f46189f6025a193ca7c606515789069a49ae",
+      "pinnedConsumer": [
+        "shell/plugins/panels/bluetooth/"
+      ],
+      "postPatchConsumer": [
+        "shell/plugins/panels/bluetooth/"
+      ],
+      "reachable": true,
+      "status": "adapted",
+      "compatibility": {
+        "args": "pinned-reachable-subset",
+        "stdout": "adapted",
+        "stderr": "adapted",
+        "exitStatus": "adapted",
+        "sideEffects": "adapted",
+        "failureSemantics": "hardened",
+        "missingBackend": "hardened",
+        "timeout": "hardened",
+        "idempotence": "tested"
+      },
+      "pinnedObservable": "reference-hash-plus-pinned-consumer",
+      "pinnedBehavior": "Accepts on, off, toggle, or is-on, uses persistent rfkill state with bounded BlueZ waits, emits no success stdout, and returns status 1 for invalid arguments or a failed power-on.",
+      "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
+    },
+    "omarchy-brightness-display": {
+      "feature": "monitor",
+      "consumer": [
+        "shell/plugins/panels/monitor/"
+      ],
+      "reference": "bin/omarchy-brightness-display",
+      "hash": "b3d1478822876a0a2dbacf067c458f998dc6980656292965e4daafa176fbaf4a",
+      "pinnedConsumer": [
+        "shell/plugins/panels/monitor/"
+      ],
+      "postPatchConsumer": [
+        "shell/plugins/panels/monitor/"
+      ],
+      "reachable": true,
+      "status": "adapted",
+      "compatibility": {
+        "args": "pinned-reachable-subset",
+        "stdout": "adapted",
+        "stderr": "adapted",
+        "exitStatus": "adapted",
+        "sideEffects": "adapted",
+        "failureSemantics": "hardened",
+        "missingBackend": "hardened",
+        "timeout": "hardened",
+        "idempotence": "tested"
+      },
+      "pinnedObservable": "reference-hash-plus-pinned-consumer",
+      "pinnedBehavior": "Accepts --no-osd, --monitor name, and a brightness step, percentage, off, or on action, prints brightness where the selected backend reports it, and returns status 1 for invalid or unavailable display actions.",
+      "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
+    },
+    "omarchy-capture-screenshot": {
+      "feature": "screenshot",
+      "consumer": [
+        "default/omarchy/omarchy-menu.jsonc",
+        "shell/plugins/"
+      ],
+      "reference": "bin/omarchy-capture-screenshot",
+      "hash": "7e372db03be6cd44c5c20d9e012266d46d8dd9bcafae61df6b696298cefffb1d",
+      "pinnedConsumer": [
+        "default/omarchy/omarchy-menu.jsonc",
+        "shell/plugins/"
+      ],
+      "postPatchConsumer": [
+        "default/omarchy/omarchy-menu.jsonc",
+        "shell/plugins/"
+      ],
+      "reachable": true,
+      "status": "adapted",
+      "compatibility": {
+        "args": "pinned-reachable-subset",
+        "stdout": "adapted",
+        "stderr": "adapted",
+        "exitStatus": "adapted",
+        "sideEffects": "adapted",
+        "failureSemantics": "hardened",
+        "missingBackend": "hardened",
+        "timeout": "hardened",
+        "idempotence": "tested"
+      },
+      "pinnedObservable": "reference-hash-plus-pinned-consumer",
+      "pinnedBehavior": "The pinned default menu reaches the no-argument smart-selection form; the upstream helper also accepts mode, processing, and --editor=<name> in any position, but those additional forms are not reached by the supported Quattro baseline.",
+      "intentionalDeviation": "Omanixy implements and directly tests the editor form, while the supported shell-facing contract remains the pinned no-argument action and uses a bounded picker and cursor-freeze implementation."
+    },
+    "omarchy-clipboard-open": {
+      "feature": "clipboard",
+      "consumer": [
+        "shell/plugins/clipboard/"
+      ],
+      "reference": "bin/omarchy-clipboard-open",
+      "hash": "b1955040a79d4bafad750cc996e7f0ec69236ac268a0562b364a4ebeb9832b13",
+      "pinnedConsumer": [
+        "shell/plugins/clipboard/"
+      ],
+      "postPatchConsumer": [
+        "shell/plugins/clipboard/"
+      ],
+      "reachable": true,
+      "status": "adapted",
+      "compatibility": {
+        "args": "pinned-reachable-subset",
+        "stdout": "adapted",
+        "stderr": "adapted",
+        "exitStatus": "adapted",
+        "sideEffects": "adapted",
+        "failureSemantics": "hardened",
+        "missingBackend": "hardened",
+        "timeout": "hardened",
+        "idempotence": "tested"
+      },
+      "pinnedObservable": "reference-hash-plus-pinned-consumer",
+      "pinnedBehavior": "Accepts --history-index <index>, opens the selected user clipboard-history entry with xdg-open, emits no success stdout, and returns the backend failure status.",
+      "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
+    },
+    "omarchy-clipboard-paste-file": {
+      "feature": "clipboard",
+      "consumer": [
+        "shell/plugins/clipboard/"
+      ],
+      "reference": "bin/omarchy-clipboard-paste-file",
+      "hash": "8cdd99e7ecc36bce348b2b0d8eca12d95a4ccf2ac49c8360bba0708564741fa3",
+      "pinnedConsumer": [
+        "shell/plugins/clipboard/"
+      ],
+      "postPatchConsumer": [
+        "shell/plugins/clipboard/"
+      ],
+      "reachable": true,
+      "status": "adapted",
+      "compatibility": {
+        "args": "pinned-reachable-subset",
+        "stdout": "adapted",
+        "stderr": "adapted",
+        "exitStatus": "adapted",
+        "sideEffects": "adapted",
+        "failureSemantics": "hardened",
+        "missingBackend": "hardened",
+        "timeout": "hardened",
+        "idempotence": "tested"
+      },
+      "pinnedObservable": "reference-hash-plus-pinned-consumer",
+      "pinnedBehavior": "Accepts optional --copy-only followed by <mime-type> <path>, copies the file to the Wayland clipboard, and types or pastes it unless copy-only is selected.",
+      "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
+    },
+    "omarchy-clipboard-paste-text": {
+      "feature": "clipboard",
+      "consumer": [
+        "shell/plugins/clipboard/"
+      ],
+      "reference": "bin/omarchy-clipboard-paste-text",
+      "hash": "e5fe2591b606542a5173c051e7d128887b19ecc4b39db4db3fd3d265be93b609",
+      "pinnedConsumer": [
+        "shell/plugins/clipboard/"
+      ],
+      "postPatchConsumer": [
+        "shell/plugins/clipboard/"
+      ],
+      "reachable": true,
+      "status": "adapted",
+      "compatibility": {
+        "args": "pinned-reachable-subset",
+        "stdout": "adapted",
+        "stderr": "adapted",
+        "exitStatus": "adapted",
+        "sideEffects": "adapted",
+        "failureSemantics": "hardened",
+        "missingBackend": "hardened",
+        "timeout": "hardened",
+        "idempotence": "tested"
+      },
+      "pinnedObservable": "reference-hash-plus-pinned-consumer",
+      "pinnedBehavior": "Accepts optional --shift-insert, --copy-only, and --history-index <index> or text, copies text to the Wayland clipboard, and types or pastes it unless copy-only is selected.",
+      "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
+    },
+    "omarchy-display-text-size": {
+      "feature": "monitor",
+      "consumer": [
+        "shell/plugins/panels/monitor/"
+      ],
+      "reference": "bin/omarchy-display-text-size",
+      "hash": "0910664386badaf9253ee9ca5405e877ffa142583b7ef9d5bdca75b4e6e9ab1e",
+      "pinnedConsumer": [
+        "shell/plugins/panels/monitor/"
+      ],
+      "postPatchConsumer": [
+        "shell/plugins/panels/monitor/"
+      ],
+      "reachable": true,
+      "status": "adapted",
+      "compatibility": {
+        "args": "pinned-reachable-subset",
+        "stdout": "adapted",
+        "stderr": "adapted",
+        "exitStatus": "adapted",
+        "sideEffects": "adapted",
+        "failureSemantics": "hardened",
+        "missingBackend": "hardened",
+        "timeout": "hardened",
+        "idempotence": "tested"
+      },
+      "pinnedObservable": "reference-hash-plus-pinned-consumer",
+      "pinnedBehavior": "gsettings mutations and terminal updates are best-effort; invalid arguments exit 1",
+      "intentionalDeviation": "Omanixy validates files and GTK state, rolls back on mutation failure, and hard-fails failures; exit status 2 for invalid arguments."
+    },
+    "omarchy-dns": {
+      "feature": "network",
+      "consumer": [
+        "shell/plugins/panels/network/"
+      ],
+      "reference": "bin/omarchy-dns",
+      "hash": "455b9f5750680255016427d4ce0bae71f36d6e83391122d72f45bc922247c6e2",
+      "pinnedConsumer": [
+        "shell/plugins/panels/network/"
+      ],
+      "postPatchConsumer": [
+        "shell/plugins/panels/network/"
+      ],
+      "reachable": true,
+      "status": "adapted",
+      "compatibility": {
+        "args": "pinned-reachable-subset",
+        "stdout": "adapted",
+        "stderr": "adapted",
+        "exitStatus": "adapted",
+        "sideEffects": "adapted",
+        "failureSemantics": "hardened",
+        "missingBackend": "hardened",
+        "timeout": "hardened",
+        "idempotence": "tested"
+      },
+      "pinnedObservable": "reference-hash-plus-pinned-consumer",
+      "pinnedBehavior": "Accepts optional Cloudflare, Google, DHCP, or Custom, prints the current provider when queried, and mutates the active NetworkManager connection for supported providers.",
+      "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
+    },
+    "omarchy-hyprland-monitor-scaling": {
+      "feature": "monitor",
+      "consumer": [
+        "shell/plugins/panels/monitor/"
+      ],
+      "reference": "bin/omarchy-hyprland-monitor-scaling",
+      "hash": "e6331e469809f08e877ee6886749b1fe0e63b52282ee1a17e801985ccb415d19",
+      "pinnedConsumer": [
+        "shell/plugins/panels/monitor/"
+      ],
+      "postPatchConsumer": [
+        "shell/plugins/panels/monitor/"
+      ],
+      "reachable": true,
+      "status": "adapted",
+      "compatibility": {
+        "args": "pinned-reachable-subset",
+        "stdout": "adapted",
+        "stderr": "adapted",
+        "exitStatus": "adapted",
+        "sideEffects": "adapted",
+        "failureSemantics": "hardened",
+        "missingBackend": "hardened",
+        "timeout": "hardened",
+        "idempotence": "tested"
+      },
+      "pinnedObservable": "reference-hash-plus-pinned-consumer",
+      "pinnedBehavior": "Accepts no argument, up, down, or a numeric scale, prints monitor state when queried, and applies the requested Hyprland monitor scaling.",
+      "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
+    },
+    "omarchy-menu-emoji-insert": {
+      "feature": "clipboard",
+      "consumer": [
+        "shell/plugins/emojis/"
+      ],
+      "reference": "bin/omarchy-menu-emoji-insert",
+      "hash": "2059fe5263a1174d6a8319b69781e498f7b5e934f2f6e45826426304c12bce15",
+      "pinnedConsumer": [
+        "shell/plugins/emojis/"
+      ],
+      "postPatchConsumer": [
+        "shell/plugins/emojis/"
+      ],
+      "reachable": true,
+      "status": "adapted",
+      "compatibility": {
+        "args": "pinned-reachable-subset",
+        "stdout": "adapted",
+        "stderr": "adapted",
+        "exitStatus": "adapted",
+        "sideEffects": "adapted",
+        "failureSemantics": "hardened",
+        "missingBackend": "hardened",
+        "timeout": "hardened",
+        "idempotence": "tested"
+      },
+      "pinnedObservable": "reference-hash-plus-pinned-consumer",
+      "pinnedBehavior": "Accepts an emoji string, copies it to the Wayland clipboard, and best-effort synthesizes the supported paste action without requiring success stdout.",
+      "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
+    },
+    "omarchy-monitor-state": {
+      "feature": "monitor",
+      "consumer": [
+        "shell/plugins/panels/monitor/"
+      ],
+      "reference": "bin/omarchy-monitor-state",
+      "hash": "d8d01d655c3eb104370bd6fe1e48173d1d2dc4cd6b502e64de155c63a5f24173",
+      "pinnedConsumer": [
+        "shell/plugins/panels/monitor/"
+      ],
+      "postPatchConsumer": [
+        "shell/plugins/panels/monitor/"
+      ],
+      "reachable": true,
+      "status": "adapted",
+      "compatibility": {
+        "args": "pinned-reachable-subset",
+        "stdout": "adapted",
+        "stderr": "adapted",
+        "exitStatus": "adapted",
+        "sideEffects": "adapted",
+        "failureSemantics": "hardened",
+        "missingBackend": "hardened",
+        "timeout": "hardened",
+        "idempotence": "tested"
+      },
+      "pinnedObservable": "reference-hash-plus-pinned-consumer",
+      "pinnedBehavior": "Accepts no arguments and prints the monitor panel state as the shell-consumed structured text contract.",
+      "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
+    },
+    "omarchy-network-band": {
+      "feature": "network",
+      "consumer": [
+        "shell/plugins/panels/network/"
+      ],
+      "reference": "bin/omarchy-network-band",
+      "hash": "abf0c226420da90a2abe9679ebccc8d919bafca07332a6a67d9d96364ca80264",
+      "pinnedConsumer": [
+        "shell/plugins/panels/network/"
+      ],
+      "postPatchConsumer": [
+        "shell/plugins/panels/network/"
+      ],
+      "reachable": true,
+      "status": "adapted",
+      "compatibility": {
+        "args": "pinned-reachable-subset",
+        "stdout": "adapted",
+        "stderr": "adapted",
+        "exitStatus": "adapted",
+        "sideEffects": "adapted",
+        "failureSemantics": "hardened",
+        "missingBackend": "hardened",
+        "timeout": "hardened",
+        "idempotence": "tested"
+      },
+      "pinnedObservable": "reference-hash-plus-pinned-consumer",
+      "pinnedBehavior": "Accepts optional auto, 2.4, 5, or 6, prints the active band when queried, and mutates the active NetworkManager connection when pinning a band.",
+      "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
+    },
+    "omarchy-network-password": {
+      "feature": "network",
+      "consumer": [
+        "shell/plugins/panels/wifiqr/"
+      ],
+      "reference": "bin/omarchy-network-password",
+      "hash": "139bb7135ef7ba056f6b28cb4c7f9467121245f235379dd237ec76d0832aa455",
+      "pinnedConsumer": [
+        "shell/plugins/panels/wifiqr/"
+      ],
+      "postPatchConsumer": [
+        "shell/plugins/panels/wifiqr/"
+      ],
+      "reachable": true,
+      "status": "adapted",
+      "compatibility": {
+        "args": "pinned-reachable-subset",
+        "stdout": "adapted",
+        "stderr": "adapted",
+        "exitStatus": "adapted",
+        "sideEffects": "adapted",
+        "failureSemantics": "hardened",
+        "missingBackend": "hardened",
+        "timeout": "hardened",
+        "idempotence": "tested"
+      },
+      "pinnedObservable": "reference-hash-plus-pinned-consumer",
+      "pinnedBehavior": "Accepts <interface>, prints exactly the active non-enterprise Wi-Fi password on stdout with a trailing newline, and rejects missing or enterprise credentials.",
+      "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
+    },
+    "omarchy-network-qr": {
+      "feature": "network",
+      "consumer": [
+        "shell/plugins/panels/wifiqr/"
+      ],
+      "reference": "bin/omarchy-network-qr",
+      "hash": "b9c016ad8ca3cf4b346b10349c80c6fb9d9c048e8a538268348cde75e42855b5",
+      "pinnedConsumer": [
+        "shell/plugins/panels/wifiqr/"
+      ],
+      "postPatchConsumer": [
+        "shell/plugins/panels/wifiqr/"
+      ],
+      "reachable": true,
+      "status": "adapted",
+      "compatibility": {
+        "args": "pinned-reachable-subset",
+        "stdout": "adapted",
+        "stderr": "adapted",
+        "exitStatus": "adapted",
+        "sideEffects": "adapted",
+        "failureSemantics": "hardened",
+        "missingBackend": "hardened",
+        "timeout": "hardened",
+        "idempotence": "tested"
+      },
+      "pinnedObservable": "reference-hash-plus-pinned-consumer",
+      "pinnedBehavior": "Accepts optional --meta and interface, prints optional metadata followed by the Wi-Fi QR matrix, and rejects enterprise or unavailable connections.",
+      "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
+    },
+    "omarchy-network-status": {
+      "feature": "network",
+      "consumer": [
+        "shell/plugins/panels/network/"
+      ],
+      "reference": "bin/omarchy-network-status",
+      "hash": "be6f0fb3ddedc20a57e09169553c51c8c84d3e64981e19eb54765b849dae9e2d",
+      "pinnedConsumer": [
+        "shell/plugins/panels/network/"
+      ],
+      "postPatchConsumer": [
+        "shell/plugins/panels/network/"
+      ],
+      "reachable": true,
+      "status": "adapted",
+      "compatibility": {
+        "args": "pinned-reachable-subset",
+        "stdout": "adapted",
+        "stderr": "adapted",
+        "exitStatus": "adapted",
+        "sideEffects": "adapted",
+        "failureSemantics": "hardened",
+        "missingBackend": "hardened",
+        "timeout": "hardened",
+        "idempotence": "tested"
+      },
+      "pinnedObservable": "reference-hash-plus-pinned-consumer",
+      "pinnedBehavior": "Accepts no arguments or --verbose, prints tab-separated disconnected, ethernet, or Wi-Fi status and optional ping samples, and returns status 2 for other arguments.",
+      "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
+    },
+    "omarchy-notification-send": {
+      "feature": "notification",
+      "consumer": [
+        "shell/plugins/panels/weather/"
+      ],
+      "reference": "bin/omarchy-notification-send",
+      "hash": "0a3e4f2ad84cdb83d9b1aefe1d6c33f793b434ac51cb455df29b587507070ed5",
+      "pinnedConsumer": [
+        "shell/plugins/panels/weather/"
+      ],
+      "postPatchConsumer": [
+        "shell/plugins/panels/weather/"
+      ],
+      "reachable": true,
+      "status": "adapted",
+      "compatibility": {
+        "args": "pinned-reachable-subset",
+        "stdout": "adapted",
+        "stderr": "adapted",
+        "exitStatus": "adapted",
+        "sideEffects": "adapted",
+        "failureSemantics": "hardened",
+        "missingBackend": "hardened",
+        "timeout": "hardened",
+        "idempotence": "tested"
+      },
+      "pinnedObservable": "reference-hash-plus-pinned-consumer",
+      "pinnedBehavior": "Accepts notification options, a headline, optional description, and notify-send options, forwards them to notify-send, and optionally prints its replacement ID for -p.",
+      "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
+    },
+    "omarchy-powerprofiles-list": {
+      "feature": "power",
+      "consumer": [
+        "shell/plugins/menu/",
+        "shell/plugins/panels/power/"
+      ],
+      "reference": "bin/omarchy-powerprofiles-list",
+      "hash": "96e092490970348feaf229c3ad925b191885f34f6299659536b3914bb5925483",
+      "pinnedConsumer": [
+        "shell/plugins/menu/",
+        "shell/plugins/panels/power/"
+      ],
+      "postPatchConsumer": [
+        "shell/plugins/menu/",
+        "shell/plugins/panels/power/"
+      ],
+      "reachable": true,
+      "status": "adapted",
+      "compatibility": {
+        "args": "pinned-reachable-subset",
+        "stdout": "adapted",
+        "stderr": "adapted",
+        "exitStatus": "adapted",
+        "sideEffects": "adapted",
+        "failureSemantics": "hardened",
+        "missingBackend": "hardened",
+        "timeout": "hardened",
+        "idempotence": "tested"
+      },
+      "pinnedObservable": "reference-hash-plus-pinned-consumer",
+      "pinnedBehavior": "Accepts no arguments or --active-state and prints available profile names, optionally with tab-separated active flags; other arguments return status 1.",
+      "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
+    },
+    "omarchy-powerprofiles-set": {
+      "feature": "power",
+      "consumer": [
+        "shell/plugins/menu/",
+        "shell/plugins/panels/power/"
+      ],
+      "reference": "bin/omarchy-powerprofiles-set",
+      "hash": "95314eb9affa61677dfb45f9826bf1ca7534d843574c302f1277e853c8830148",
+      "pinnedConsumer": [
+        "shell/plugins/menu/",
+        "shell/plugins/panels/power/"
+      ],
+      "postPatchConsumer": [
+        "shell/plugins/menu/",
+        "shell/plugins/panels/power/"
+      ],
+      "reachable": true,
+      "status": "adapted",
+      "compatibility": {
+        "args": "pinned-reachable-subset",
+        "stdout": "adapted",
+        "stderr": "adapted",
+        "exitStatus": "adapted",
+        "sideEffects": "adapted",
+        "failureSemantics": "hardened",
+        "missingBackend": "hardened",
+        "timeout": "hardened",
+        "idempotence": "tested"
+      },
+      "pinnedObservable": "reference-hash-plus-pinned-consumer",
+      "pinnedBehavior": "Accepts optional autodetect, ac, or battery plus an optional profile, selects an available profile through powerprofilesctl, and persists explicit choices under XDG state.",
+      "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
+    },
+    "omarchy-remove-launcher-entry": {
+      "feature": "launcher",
+      "consumer": [
+        "shell/services/AppLibrary.qml"
+      ],
+      "reference": "bin/omarchy-remove-launcher-entry",
+      "hash": "27df870c2a99d7355fa4fe655c5484129a63536368ee5908d347c9149db91112",
+      "pinnedConsumer": [
+        "shell/services/AppLibrary.qml"
+      ],
+      "postPatchConsumer": [
+        "shell/services/AppLibrary.qml"
+      ],
+      "reachable": true,
+      "status": "adapted",
+      "compatibility": {
+        "args": "narrowed-user-owned-subset",
+        "stdout": "adapted",
+        "stderr": "adapted",
+        "exitStatus": "adapted",
+        "sideEffects": "adapted",
+        "failureSemantics": "hardened",
+        "missingBackend": "hardened",
+        "timeout": "hardened",
+        "idempotence": "tested"
+      },
+      "pinnedObservable": "reference-hash-plus-pinned-consumer",
+      "pinnedBehavior": "Pinned helper supports package-backed removal paths; user desktop-entry removal is the supported shell-facing subset.",
+      "intentionalDeviation": "Omanixy refuses system, Nix/store, symlink, malformed, and traversal targets and only removes regular user XDG desktop entries."
+    },
+    "omarchy-system-stats": {
+      "feature": "core",
+      "consumer": [
+        "shell/plugins/"
+      ],
+      "reference": "bin/omarchy-system-stats",
+      "hash": "d5e9729679ec56c47240193c34c235f56392ac55034042994ed790c5bc8572ba",
+      "pinnedConsumer": [
+        "shell/plugins/"
+      ],
+      "postPatchConsumer": [
+        "shell/plugins/"
+      ],
+      "reachable": true,
+      "status": "adapted",
+      "compatibility": {
+        "args": "pinned-reachable-subset",
+        "stdout": "adapted",
+        "stderr": "adapted",
+        "exitStatus": "adapted",
+        "sideEffects": "adapted",
+        "failureSemantics": "hardened",
+        "missingBackend": "hardened",
+        "timeout": "hardened",
+        "idempotence": "tested"
+      },
+      "pinnedObservable": "reference-hash-plus-pinned-consumer",
+      "pinnedBehavior": "Accepts no arguments or --bar-widget, prints tab-separated CPU and memory statistics, and prints the bar-widget telemetry form for --bar-widget; other arguments return status 1.",
+      "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
+    },
+    "omarchy-weather-location": {
+      "feature": "weather",
+      "consumer": [
+        "shell/plugins/panels/weather/"
+      ],
+      "reference": "bin/omarchy-weather-location",
+      "hash": "22c19c46c2fe9767c29ebc38b8a0639380bc72d6300339b2000426e9e75fd209",
+      "pinnedConsumer": [
+        "shell/plugins/panels/weather/"
+      ],
+      "postPatchConsumer": [
+        "shell/plugins/panels/weather/"
+      ],
+      "reachable": true,
+      "status": "adapted",
+      "compatibility": {
+        "args": "pinned-reachable-subset",
+        "stdout": "adapted",
+        "stderr": "adapted",
+        "exitStatus": "adapted",
+        "sideEffects": "adapted",
+        "failureSemantics": "hardened",
+        "missingBackend": "hardened",
+        "timeout": "hardened",
+        "idempotence": "tested"
+      },
+      "pinnedObservable": "reference-hash-plus-pinned-consumer",
+      "pinnedBehavior": "Accepts no arguments, --set <name> [lat,lon], or --clear, prints the stored or detected location when queried, and persists or removes the JSON weather state.",
+      "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
+    },
+    "omarchy-weather-status": {
+      "feature": "weather",
+      "consumer": [
+        "shell/plugins/panels/weather/"
+      ],
+      "reference": "bin/omarchy-weather-status",
+      "hash": "f65f305f924318383c1cf029004e82ada3dbc7c49a57d015d7795c2a8b571746",
+      "pinnedConsumer": [
+        "shell/plugins/panels/weather/"
+      ],
+      "postPatchConsumer": [
+        "shell/plugins/panels/weather/"
+      ],
+      "reachable": true,
+      "status": "adapted",
+      "compatibility": {
+        "args": "pinned-reachable-subset",
+        "stdout": "adapted",
+        "stderr": "adapted",
+        "exitStatus": "adapted",
+        "sideEffects": "adapted",
+        "failureSemantics": "hardened",
+        "missingBackend": "hardened",
+        "timeout": "hardened",
+        "idempotence": "tested"
+      },
+      "pinnedObservable": "reference-hash-plus-pinned-consumer",
+      "pinnedBehavior": "Accepts no arguments, reads the weather location, queries wttr.in, and prints <Place> · Temp <temperature> · Wind <wind> with a trailing newline; unavailable or empty service output returns status 1.",
+      "intentionalDeviation": "Omanixy keeps this helper adapted with bounded backend validation and failure handling; the deviation is not claimed as exact upstream ABI."
+    }
+  },
+  "native": {
+    "uwsm-app": {
+      "consumer": [
+        "shell/services/AppLibrary.qml"
+      ],
+      "reference": "shell/services/AppLibrary.qml",
+      "hash": "68dd83a2141e9a8eda01a9ec5e2fbaaecf5d02d969178512cc6fec118fa23a31",
+      "provider": "packaged-uwsm",
+      "probe": "test/native-uwsm-probe.sh",
+      "probeResult": "NATIVE_PROBE=uwsm-app",
+      "evidence": "UWSM client owns app-graphical.slice session scoping"
+    }
+  },
+  "unlistedSourceDisposition": {
+    "classification": "omitted",
+    "reachable": false,
+    "reason": "Only the explicitly listed compatibility boundary is copied into the immutable root."
+  },
+  "scannerNoise": [
+    {
+      "path": "shell/plugins/menu/MenuModel.js",
+      "helper": "omarchy-channel-current",
+      "exactLine": "  \"omarchy-channel-current\",",
+      "reason": "guard reader name in a static batch list, not an executed helper"
+    },
+    {
+      "path": "shell/plugins/menu/MenuModel.js",
+      "helper": "omarchy-default-agent",
+      "exactLine": "  \"omarchy-default-agent\",",
+      "reason": "guard reader name in a static batch list, not an executed helper"
+    },
+    {
+      "path": "shell/plugins/menu/MenuModel.js",
+      "helper": "omarchy-default-browser",
+      "exactLine": "  \"omarchy-default-browser\",",
+      "reason": "guard reader name in a static batch list, not an executed helper"
+    },
+    {
+      "path": "shell/plugins/menu/MenuModel.js",
+      "helper": "omarchy-default-editor",
+      "exactLine": "  \"omarchy-default-editor\",",
+      "reason": "guard reader name in a static batch list, not an executed helper"
+    },
+    {
+      "path": "shell/plugins/menu/MenuModel.js",
+      "helper": "omarchy-default-terminal",
+      "exactLine": "  \"omarchy-default-terminal\",",
+      "reason": "guard reader name in a static batch list, not an executed helper"
+    },
+    {
+      "path": "shell/plugins/menu/MenuModel.js",
+      "helper": "omarchy-pkg-present",
+      "exactLine": "    + 'omarchy-pkg-present() { local p; for p in \"$@\"; do __omarchy_pkg_has \"$p\" || return 1; done; return 0; }\\n'",
+      "reason": "shell function definition embedded in the guard prelude, not a shell-facing helper"
+    },
+    {
+      "path": "shell/plugins/menu/MenuModel.js",
+      "helper": "omarchy-pkg-missing",
+      "exactLine": "    + 'omarchy-pkg-missing() { local p; for p in \"$@\"; do __omarchy_pkg_has \"$p\" || return 0; done; return 1; }\\n'",
+      "reason": "shell function definition embedded in the guard prelude, not a shell-facing helper"
+    },
+    {
+      "path": "shell/plugins/menu/MenuModel.js",
+      "helper": "omarchy-cmd-present",
+      "exactLine": "    + 'omarchy-cmd-present() { local c; for c in \"$@\"; do command -v \"$c\" &>/dev/null || return 1; done; return 0; }\\n'",
+      "reason": "shell function definition embedded in the guard prelude, not a shell-facing helper"
+    },
+    {
+      "path": "shell/plugins/menu/MenuModel.js",
+      "helper": "omarchy-cmd-missing",
+      "exactLine": "    + 'omarchy-cmd-missing() { local c; for c in \"$@\"; do command -v \"$c\" &>/dev/null || return 0; done; return 1; }\\n'",
+      "reason": "shell function definition embedded in the guard prelude, not a shell-facing helper"
+    }
+  ],
+  "omittedReachability": [
+    "omarchy-update",
+    "omarchy-agent",
+    "omarchy-lock",
+    "omarchy-polkit",
+    "omarchy-notification-daemon",
+    "omarchy-network-speedtest"
+  ],
+  "testMatrix": "upstream/compatibility-test-matrix.json"
+}

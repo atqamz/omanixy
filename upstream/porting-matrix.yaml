@@ -1,6 +1,7 @@
 items:
   - id: shell.runtime
     classification: adapted
+    maturity: validated
     upstream:
       project: basecamp/omarchy
       revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
@@ -8,22 +9,38 @@ items:
         - path: shell/shell.qml
           role: runtime entrypoint
           consumption: runtime
-        - path: shell/
-          role: runtime shell tree and first-party plugin discovery
+        - path: shell/Commons/
+          role: shared Quattro presentation components
+          consumption: runtime
+        - path: shell/Ui/
+          role: shared Quattro presentation components
+          consumption: runtime
+        - path: shell/services/
+          role: runtime services and app discovery
+          consumption: runtime
+        - path: shell/plugins/
+          role: audited supported first-party plugin subset
           consumption: runtime
         - path: config/omarchy/shell.json
-          role: upstream default shell configuration
-          consumption: runtime-fallback-and-migration
+          role: upstream default configuration input for user-state migration
+          consumption: reference-and-migration
         - path: themes/tokyo-night/
           role: Tokyo Night source for the baseline theme seed
           consumption: build-time
         - path: bin/omarchy-launch-shell
           role: upstream reference only
           consumption: reference-only
-    omanixy:
-      implementation: systemd --user service
-      service: omanixy-shell.service
-      module: modules/home/default.nix
+    ownership:
+      presentation: omarchy
+      adapter: omanixy
+      backend: host session
+    dependencies:
+      runtime:
+        - quickshell
+      host:
+        - Wayland
+        - Hyprland
+        - D-Bus user session
     tests:
       - test/config-ownership.sh
       - test/ipc-wrapper.sh
@@ -33,3 +50,923 @@ items:
     notes:
       - Systemd owns restart, logging, and graphical-session lifecycle.
       - The upstream Bash supervisor is not copied.
+      - The compatibility root copies only the audited supported plugin subset and supplies a safe fallback shell configuration.
+      - Its registry patch applies the disabled-plugin floor to bar widgets as well as panels and services.
+      - Its clock patch routes the unsupported timezone middle-click action to the supported clock panel.
+
+  - id: shell.ipc
+    classification: adapted
+    maturity: validated
+    upstream:
+      project: basecamp/omarchy
+      revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
+      paths:
+        - path: shell/shell.qml
+          role: IpcHandler targets and plugin routing
+          consumption: runtime
+        - path: shell/README.md
+          role: documented IPC contract
+          consumption: reference
+    ownership:
+      presentation: omarchy
+      adapter: omanixy
+      backend: Quickshell IPC
+    dependencies:
+      runtime:
+        - quickshell
+      host:
+        - Wayland
+        - XDG_RUNTIME_DIR
+    tests:
+      - test/ipc-wrapper.sh
+    notes:
+      - The omanixy-shell client is a narrow compatibility entry point for Quattro IPC calls.
+      - It never starts or supervises the shell.
+
+  - id: bar.workspaces
+    classification: exact
+    maturity: validated
+    upstream:
+      project: basecamp/omarchy
+      revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
+      paths:
+        - path: shell/plugins/bar/
+          role: Quattro bar presentation
+          consumption: runtime
+        - path: shell/plugins/panels/workspaces/
+          role: workspace presentation
+          consumption: runtime
+    native_quickshell:
+      project: quickshell-mirror/quickshell
+      revision: 28771c7c74b42e20afca0b1b63980cb46515537c
+      modules:
+        - Quickshell.Hyprland
+    requirement: Workspaces expose Hyprland state and focus actions.
+    ownership:
+      presentation: omarchy
+      adapter: none
+      backend: host Hyprland
+    dependencies:
+      host:
+        - Hyprland
+    tests:
+      - test/runtime-closure.sh
+    notes:
+      - Workspace state and focus remain native Quickshell and Hyprland contracts.
+
+  - id: launcher.apps
+    classification: adapted
+    maturity: validated
+    upstream:
+      project: basecamp/omarchy
+      revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
+      paths:
+        - path: shell/services/AppLibrary.qml
+          role: desktop entry discovery, launch, and removal
+          consumption: runtime
+    native_quickshell:
+      project: quickshell-mirror/quickshell
+      revision: 28771c7c74b42e20afca0b1b63980cb46515537c
+      modules:
+        - DesktopEntries
+    requirement: Discover desktop entries, launch them through the session, and remove user-owned launcher entries.
+    ownership:
+      presentation: omarchy
+      adapter: omanixy
+      backend: host desktop entries
+    dependencies:
+      runtime:
+        - gtk3
+        - desktop-file-utils
+      host:
+        - user desktop entry database
+    helper: omarchy-remove-launcher-entry
+    tests:
+      - test/compat-adapters.sh
+      - test/safe-menu-contract.sh
+      - test/launcher-delete-contract.sh
+    notes:
+      - Launching uses the pinned UWSM client and gtk-launch inside the session-scoped app-graphical.slice.
+      - AppLibrary exposes deletion only for a regular desktop file owned by the user's XDG applications directory; system, Nix-store, missing, malformed, symlink, and traversal entries remain unavailable.
+      - Menu Delete is reachable for confirmed user-owned entries and inert for every unsupported entry; Omanixy never performs package removal.
+      - Removal rejects missing, system-owned, symlink, and traversal targets and does not implement package removal.
+
+  - id: menu.baseline
+    classification: adapted
+    maturity: validated
+    upstream:
+      project: basecamp/omarchy
+      revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
+      paths:
+        - path: shell/plugins/menu/Menu.qml
+          role: menu presentation and command execution
+          consumption: runtime
+        - path: default/omarchy/omarchy-menu.jsonc
+          role: upstream menu data reference
+          consumption: audited-reference
+    requirement: Every actionable row in the Omanixy baseline resolves to a native capability or audited adapter.
+    ownership:
+      presentation: omarchy
+      adapter: omanixy compatibility root
+      backend: host session
+    dependencies:
+      runtime:
+        - systemd
+      host:
+        - user session
+    helper:
+      - omarchy-shell
+      - omarchy-capture-screenshot
+    tests:
+      - test/quattro-contract-audit.sh
+      - test/safe-menu-contract.sh
+    notes:
+      - The compatibility root supplies a deterministic safe menu instead of the distro-specific upstream default.
+      - User extension menus remain user-owned and are not claimed as supported Omanixy defaults.
+
+  - id: tray
+    classification: exact
+    maturity: validated
+    upstream:
+      project: basecamp/omarchy
+      revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
+      paths:
+        - path: shell/plugins/bar/widgets/Tray.qml
+          role: system tray presentation
+          consumption: runtime
+    native_quickshell:
+      project: quickshell-mirror/quickshell
+      revision: 28771c7c74b42e20afca0b1b63980cb46515537c
+      modules:
+        - Quickshell.Services.SystemTray
+    requirement: Render and operate StatusNotifier tray items through Quickshell.
+    ownership:
+      presentation: omarchy
+      adapter: none
+      backend: host StatusNotifier services
+    dependencies:
+      host:
+        - D-Bus session bus
+        - StatusNotifier items
+    tests:
+      - test/runtime-closure.sh
+    notes:
+      - Omanixy does not start a second tray daemon.
+
+  - id: media.mpris
+    classification: exact
+    maturity: validated
+    upstream:
+      project: basecamp/omarchy
+      revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
+      paths:
+        - path: shell/plugins/services/media/Service.qml
+          role: MPRIS state and playback actions
+          consumption: runtime
+        - path: shell/plugins/services/media/manifest.json
+          role: service registration
+          consumption: runtime
+    native_quickshell:
+      project: quickshell-mirror/quickshell
+      revision: 28771c7c74b42e20afca0b1b63980cb46515537c
+      modules:
+        - Quickshell.Services.Mpris
+        - Quickshell.Services.Pipewire
+    requirement: Select an MPRIS player and perform the actions exposed by the Quattro media service.
+    ownership:
+      presentation: omarchy
+      adapter: none
+      backend: host MPRIS and PipeWire
+    dependencies:
+      host:
+        - D-Bus session bus
+        - MPRIS players
+        - PipeWire
+    tests:
+      - test/runtime-closure.sh
+    notes:
+      - The media plugin is enabled in the new-install baseline because its reachable behavior is native.
+
+  - id: audio.native-state
+    classification: exact
+    maturity: validated
+    upstream:
+      project: basecamp/omarchy
+      revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
+      paths:
+        - path: shell/plugins/panels/audio/Panel.qml
+          role: PipeWire and MPRIS state presentation
+          consumption: runtime
+    native_quickshell:
+      project: quickshell-mirror/quickshell
+      revision: 28771c7c74b42e20afca0b1b63980cb46515537c
+      modules:
+        - Quickshell.Services.Pipewire
+        - Quickshell.Services.Mpris
+    requirement: Show and control the native PipeWire state already represented by the panel.
+    ownership:
+      presentation: omarchy
+      adapter: none
+      backend: host PipeWire and WirePlumber
+    dependencies:
+      host:
+        - PipeWire
+        - WirePlumber
+        - D-Bus session bus
+    tests:
+      - test/runtime-closure.sh
+
+  - id: audio.default-device
+    classification: adapted
+    maturity: validated
+    upstream:
+      project: basecamp/omarchy
+      revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
+      paths:
+        - path: shell/plugins/panels/audio/Panel.qml
+          role: default sink and source actions
+          consumption: runtime
+    requirement: Change the selected PipeWire default sink or source and report available sinks.
+    ownership:
+      presentation: omarchy
+      adapter: omanixy
+      backend: host PipeWire and WirePlumber
+    dependencies:
+      runtime:
+        - pipewire
+        - wireplumber
+      host:
+        - PipeWire
+        - WirePlumber
+    helper:
+      - omarchy-audio-output-set-default
+      - omarchy-audio-input-set-default
+      - omarchy-audio-output-sink
+      - omarchy-audio-sink-availability
+    tests:
+      - test/compat-adapters.sh
+    notes:
+      - Default selection uses wpctl; node names and sink availability come from pw-dump metadata.
+      - Defaults are also updated through pactl and active application streams are moved, excluding EasyEffects filter-chain streams as pinned upstream does.
+      - Output sink resolution follows EasyEffects/DSP virtual sinks to the physical sink used for effective loudness.
+      - The pinned helper makes backend mutations best-effort and returns status 1 for invalid arguments; Omanixy intentionally validates metadata, hard-fails backend errors, rolls back partial changes, and returns status 2 for invalid arguments.
+
+  - id: network.native
+    classification: exact
+    maturity: validated
+    upstream:
+      project: basecamp/omarchy
+      revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
+      paths:
+        - path: shell/plugins/panels/network/Panel.qml
+          role: NetworkManager-backed Wi-Fi presentation
+          consumption: runtime
+    native_quickshell:
+      project: quickshell-mirror/quickshell
+      revision: 28771c7c74b42e20afca0b1b63980cb46515537c
+      modules:
+        - Quickshell.Networking
+    requirement: Discover NetworkManager devices and Wi-Fi networks through the native Quickshell model.
+    ownership:
+      presentation: omarchy
+      adapter: none
+      backend: host NetworkManager
+    dependencies:
+      host:
+        - NetworkManager
+        - D-Bus system bus
+    tests:
+      - test/runtime-closure.sh
+    notes:
+      - Omanixy does not enable or start NetworkManager.
+
+  - id: network.status-band-dns
+    classification: adapted
+    maturity: validated
+    upstream:
+      project: basecamp/omarchy
+      revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
+      paths:
+        - path: shell/plugins/panels/network/Panel.qml
+          role: status, band, and DNS helper consumers
+          consumption: runtime
+        - path: default/omarchy/omarchy-menu.jsonc
+          role: DNS menu reference
+          consumption: audited-reference
+    requirement: Provide bounded NetworkManager and iw queries plus connection-scoped DNS selection without writing NixOS-owned files.
+    ownership:
+      presentation: omarchy
+      adapter: omanixy
+      backend: host NetworkManager
+    dependencies:
+      runtime:
+        - iproute2
+        - iw
+        - jq
+        - networkmanager
+      host:
+        - NetworkManager
+    helper:
+      - omarchy-network-status
+      - omarchy-network-band
+      - omarchy-dns
+    tests:
+      - test/compat-adapters.sh
+    notes:
+      - DNS adaptation uses nmcli connection properties and never writes /etc/NetworkManager or systemd-resolved configuration.
+      - The upstream Custom DNS pill is hidden in the compatibility view because its terminal launcher depends on an omitted Omarchy presentation wrapper; DHCP, Cloudflare, and Google remain supported.
+      - Enterprise Wi-Fi rows are omitted from the compatibility view because the pinned enterprise profile mutation is outside the audited password contract.
+      - Omanixy does not start a second NetworkManager instance.
+
+  - id: network.qr
+    classification: adapted
+    maturity: validated
+    upstream:
+      project: basecamp/omarchy
+      revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
+      paths:
+        - path: shell/plugins/panels/network/Panel.qml
+          role: network panel QR action
+          consumption: runtime
+        - path: shell/plugins/panels/wifiqr/Panel.qml
+          role: QR matrix consumer
+          consumption: runtime
+        - path: bin/omarchy-network-qr
+          role: reference contract
+          consumption: audited-reference
+    requirement: Read the active non-enterprise NetworkManager connection, emit the metadata plus QR matrix consumed by the Quattro share panel, and reveal its password only on explicit user action.
+    ownership:
+      presentation: omarchy
+      adapter: omanixy
+      backend: host NetworkManager
+    dependencies:
+      runtime:
+        - networkmanager
+        - qrencode
+      host:
+        - NetworkManager
+    helper:
+      - omarchy-network-qr
+      - omarchy-network-password
+    tests:
+      - test/compat-adapters.sh
+    notes:
+      - Credentials are read through nmcli stdout and never passed as process arguments.
+      - Enterprise Wi-Fi sharing is rejected rather than emitting an unusable password QR.
+      - Password output is a private stdout contract for the wifiqr panel and is never exposed in menu output or process arguments.
+
+  - id: network.speedtest
+    classification: omitted
+    maturity: validated
+    upstream:
+      project: basecamp/omarchy
+      revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
+      paths:
+        - path: shell/plugins/panels/network/Panel.qml
+          role: speed-test action
+          consumption: runtime
+        - path: shell/plugins/panels/speedtest/Panel.qml
+          role: speed-test result consumer
+          consumption: runtime
+        - path: bin/omarchy-network-speedtest
+          role: reference contract
+          consumption: audited-reference
+    requirement: Do not expose a third-party benchmark or report interface-counter deltas as a precise speed test without a separately reviewed design.
+    ownership:
+      presentation: omarchy
+      adapter: none
+      backend: not supported
+    dependencies:
+      runtime: []
+      host: []
+    tests:
+      - test/runtime-closure.sh
+    notes:
+      - The pinned network panel speed-test action is hidden and the speed-test plugin is not copied into the compatibility root.
+      - No third-party endpoint, token, background worker, or fabricated sample is retained in the issue #3 runtime.
+
+  - id: bluetooth.native-state
+    classification: exact
+    maturity: validated
+    upstream:
+      project: basecamp/omarchy
+      revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
+      paths:
+        - path: shell/plugins/panels/bluetooth/Panel.qml
+          role: BlueZ adapter and device state
+          consumption: runtime
+    native_quickshell:
+      project: quickshell-mirror/quickshell
+      revision: 28771c7c74b42e20afca0b1b63980cb46515537c
+      modules:
+        - Quickshell.Bluetooth
+        - Quickshell.Services.Pipewire
+    requirement: Show BlueZ adapter and device state through the native Quickshell model.
+    ownership:
+      presentation: omarchy
+      adapter: none
+      backend: host BlueZ
+    dependencies:
+      host:
+        - BlueZ
+        - D-Bus system bus
+    tests:
+      - test/runtime-closure.sh
+
+  - id: bluetooth.actions
+    classification: adapted
+    maturity: validated
+    upstream:
+      project: basecamp/omarchy
+      revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
+      paths:
+        - path: shell/plugins/panels/bluetooth/Panel.qml
+          role: pair, connect, disconnect, forget, and power actions
+          consumption: runtime
+    requirement: Perform bounded BlueZ device and adapter operations for the actions Quattro invokes.
+    ownership:
+      presentation: omarchy
+      adapter: omanixy
+      backend: host BlueZ
+    dependencies:
+      runtime:
+        - bluez
+      host:
+        - BlueZ
+    helper:
+      - omarchy-bluetooth-device
+      - omarchy-bluetooth-power
+    tests:
+      - test/compat-adapters.sh
+    notes:
+      - Power changes use host rfkill soft block or unblock semantics, preserving the pinned observable behavior without owning BlueZ daemon lifecycle or host boot policy.
+
+  - id: power.native
+    classification: exact
+    maturity: validated
+    upstream:
+      project: basecamp/omarchy
+      revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
+      paths:
+        - path: shell/plugins/panels/power/Panel.qml
+          role: power panel presentation
+          consumption: runtime
+    native_quickshell:
+      project: quickshell-mirror/quickshell
+      revision: 28771c7c74b42e20afca0b1b63980cb46515537c
+      modules:
+        - Quickshell.Services.UPower
+    requirement: Display UPower battery state and use power-profiles-daemon state exposed by Quickshell.
+    ownership:
+      presentation: omarchy
+      adapter: none
+      backend: host UPower and power-profiles-daemon
+    dependencies:
+      host:
+        - UPower
+        - power-profiles-daemon
+        - D-Bus system bus
+    tests:
+      - test/runtime-closure.sh
+    notes:
+      - The low-battery automation service remains omitted and is distinct from this panel.
+
+  - id: power.supplemental
+    classification: adapted
+    maturity: validated
+    upstream:
+      project: basecamp/omarchy
+      revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
+      paths:
+        - path: shell/plugins/panels/power/Panel.qml
+          role: supplemental battery, profile, and system stats commands
+          consumption: runtime
+    requirement: Return the shell-compatible telemetry and profile output still consumed by the unchanged panel.
+    ownership:
+      presentation: omarchy
+      adapter: omanixy
+      backend: host sysfs, UPower, and power-profiles-daemon
+    dependencies:
+      runtime:
+        - jq
+        - power-profiles-daemon
+        - upower
+      host:
+        - UPower
+        - power-profiles-daemon
+    helper:
+      - omarchy-battery-status
+      - omarchy-powerprofiles-list
+      - omarchy-powerprofiles-set
+      - omarchy-system-stats
+    tests:
+      - test/compat-adapters.sh
+    notes:
+      - The validated scope is the no-argument invocation consumed by the pinned power panel; the upstream --bar-widget telemetry form remains omitted from the compatibility helper.
+      - Memory values interpret /proc/meminfo kB as KiB and label the converted values GiB; CPU is a bounded delta over two /proc/stat samples.
+
+  - id: monitor.display
+    classification: adapted
+    maturity: validated
+    upstream:
+      project: basecamp/omarchy
+      revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
+      paths:
+        - path: shell/plugins/panels/monitor/Panel.qml
+          role: monitor state, brightness, scaling, and text-size consumers
+          consumption: runtime
+    requirement: Preserve the monitor panel's internal display state and bounded Hyprland and brightness actions.
+    ownership:
+      presentation: omarchy
+      adapter: omanixy
+      backend: host Hyprland and brightness device
+    dependencies:
+      runtime:
+        - brightnessctl
+        - jq
+      host:
+        - Hyprland
+        - kernel backlight or display brightness device
+    helper:
+      - omarchy-monitor-state
+      - omarchy-brightness-display
+      - omarchy-hyprland-monitor-scaling
+      - omarchy-display-text-size
+    tests:
+      - test/compat-adapters.sh
+    notes:
+      - Scaling captures and preserves the current width, height, and refresh rate instead of selecting a synthetic preferred mode.
+      - Text-size changes update the Quattro base size, GTK text scaling, and supported terminal font settings atomically where those backends exist.
+      - The adapter also preserves the pinned up/down monitor-scaling forms and cleans fractional requests against the current mode dimensions.
+      - DDC and hardware-specific external-display behavior is not claimed by the brightness adapter.
+      - The pinned text-size helper makes selected gsettings mutations best-effort and returns status 1 for invalid arguments; Omanixy intentionally hard-fails unavailable backends, rolls back partial mutations, and returns status 2 for invalid arguments.
+
+  - id: screenshot
+    classification: adapted
+    maturity: validated
+    upstream:
+      project: basecamp/omarchy
+      revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
+      paths:
+        - path: default/omarchy/omarchy-menu.jsonc
+          role: no-argument screenshot action
+          consumption: audited-reference
+    requirement: Capture the pinned no-argument smart selection screenshot over frozen Wayland content, copy it to the clipboard, and report cancellation without a false output path. The upstream --editor form is outside the supported Quattro shell-facing subset because no pinned baseline consumer reaches it.
+    ownership:
+      presentation: omarchy
+      adapter: omanixy
+      backend: host Wayland
+    dependencies:
+      runtime:
+        - grim
+        - hyprland
+        - hyprpicker
+        - jq
+        - slurp
+        - procps
+        - wl-clipboard
+      host:
+        - Wayland
+    helper: omarchy-capture-screenshot
+    tests:
+      - test/compat-adapters.sh
+      - test/safe-menu-contract.sh
+    notes:
+      - Smart selection, region, window, fullscreen, clipboard, and save forms are bounded adaptations; the direct `--editor=<name>` form is implemented and tested but is not reached by the pinned default menu. OCR, QR, and screen recording remain omitted.
+      - After a successful `slurp` capture, the adapter preserves the pinned best-effort clipboard copy and notification behavior; editor-action notification is covered only by the direct adapter test.
+      - A capture succeeds when the file was saved even if the optional clipboard copy fails; the helper reports that diagnostic on stderr, matching the pinned helper's best-effort clipboard behavior.
+
+  - id: clipboard
+    classification: adapted
+    maturity: validated
+    upstream:
+      project: basecamp/omarchy
+      revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
+      paths:
+        - path: shell/plugins/clipboard/Clipboard.qml
+          role: clipboard history action consumers
+          consumption: runtime
+        - path: shell/plugins/clipboard/capture.sh
+          role: clipboard capture process
+          consumption: runtime
+    requirement: Read the user-owned clipboard history and copy or paste selected text and files through Wayland.
+    ownership:
+      presentation: omarchy
+      adapter: omanixy
+      backend: host Wayland clipboard
+    dependencies:
+      runtime:
+        - wl-clipboard
+        - wtype
+        - jq
+        - xdg-utils
+      host:
+        - Wayland
+    helper:
+      - omarchy-clipboard-paste-text
+      - omarchy-clipboard-paste-file
+      - omarchy-clipboard-open
+    tests:
+      - test/compat-adapters.sh
+    notes:
+      - The history path remains user-owned under XDG_STATE_HOME.
+      - Opening an entry uses xdg-open and does not import Omarchy browser or editor policy.
+
+  - id: emoji
+    classification: adapted
+    maturity: validated
+    upstream:
+      project: basecamp/omarchy
+      revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
+      paths:
+        - path: shell/plugins/emojis/Emojis.qml
+          role: emoji data and insertion consumer
+          consumption: runtime
+    requirement: Copy a selected emoji to the Wayland clipboard and synthesize the supported paste action.
+    ownership:
+      presentation: omarchy
+      adapter: omanixy
+      backend: host Wayland clipboard
+    dependencies:
+      runtime:
+        - wl-clipboard
+        - wtype
+      host:
+        - Wayland
+    helper: omarchy-menu-emoji-insert
+    tests:
+      - test/compat-adapters.sh
+    notes:
+      - Empty selection remains a successful no-op and wtype failure remains best effort, matching the pinned helper.
+      - The adapter reports clipboard setup, ownership cleanup, and wl-copy failures because insertion cannot be claimed when the selected emoji was not made available to the paste action.
+
+  - id: weather
+    classification: adapted
+    maturity: validated
+    upstream:
+      project: basecamp/omarchy
+      revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
+      paths:
+        - path: shell/plugins/panels/weather/
+          role: weather state, location, and forecast consumers
+          consumption: runtime
+    requirement: Preserve the weather location state shape and provide bounded wttr.in weather queries.
+    ownership:
+      presentation: omarchy
+      adapter: omanixy
+      backend: user state and public weather endpoint
+    dependencies:
+      runtime:
+        - curl
+        - jq
+      optional:
+        - network access to wttr.in
+      host: []
+    helper:
+      - omarchy-weather-location
+      - omarchy-weather-status
+      - omarchy-notification-send
+    tests:
+      - test/compat-adapters.sh
+    notes:
+      - Missing or malformed location state fails safely and does not invent credentials.
+      - Notification sending is a client call to the host notification service, not daemon ownership.
+
+  - id: notification.client
+    classification: adapted
+    maturity: validated
+    upstream:
+      project: basecamp/omarchy
+      revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
+      paths:
+        - path: shell/plugins/panels/weather/BarWidget.qml
+          role: weather right-click notification client
+          consumption: runtime
+        - path: bin/omarchy-notification-send
+          role: pinned notification client contract
+          consumption: audited-reference
+    requirement: Send supported weather and pinned notification-client requests through the host notification client.
+    ownership:
+      presentation: omarchy
+      adapter: omanixy
+      backend: host notification service
+    dependencies:
+      runtime:
+        - libnotify
+      host:
+        - notification daemon
+    helper: omarchy-notification-send
+    tests:
+      - test/compat-adapters.sh
+    notes:
+      - This adapter does not install, configure, or supervise a notification daemon.
+      - The supported client subset is the weather consumer plus app name, glyph, urgency, image, exec hint, replacement id, persistence, and notify-send options covered by the focused adapter matrix; this is not a claim of broad Omarchy notification ABI compatibility.
+
+  - id: background.theme-workflow
+    classification: omitted
+    maturity: validated
+    upstream:
+      project: basecamp/omarchy
+      revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
+      paths:
+        - path: shell/plugins/background/
+          role: wallpaper and theme workflow
+          consumption: audited-reference
+        - path: default/omarchy/omarchy-menu.jsonc
+          role: theme and background actions
+          consumption: audited-reference
+    requirement: Do not claim Omarchy theme, wallpaper, or font management without a separate Nix-native design.
+    ownership:
+      presentation: omarchy
+      adapter: none
+      backend: not supported
+    dependencies:
+      runtime: []
+      host: []
+    tests:
+      - test/safe-menu-contract.sh
+    notes:
+      - The immutable compatibility menu excludes these actions.
+
+  - id: nightlight
+    classification: omitted
+    maturity: validated
+    upstream:
+      project: basecamp/omarchy
+      revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
+      paths:
+        - path: shell/plugins/services/nightlight/
+          role: hyprsunset lifecycle and temperature control
+          consumption: audited-reference
+    requirement: Do not let QML opportunistically create a second hyprsunset owner.
+    ownership:
+      presentation: omarchy
+      adapter: none
+      backend: host session policy
+    dependencies:
+      host:
+        - Hyprland
+    tests:
+      - test/quattro-contract-audit.sh
+    notes:
+      - The plugin remains disabled until one declarative Home Manager owner is designed and validated.
+
+  - id: system-update
+    classification: omitted
+    maturity: validated
+    upstream:
+      project: basecamp/omarchy
+      revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
+      paths:
+        - path: shell/plugins/bar/widgets/SystemUpdate.qml
+          role: Omarchy updater presentation
+          consumption: audited-reference
+        - path: default/omarchy/omarchy-menu.jsonc
+          role: updater menu actions
+          consumption: audited-reference
+    requirement: Do not map Omarchy update behavior to Nix flake or system activation commands.
+    ownership:
+      presentation: omarchy
+      adapter: none
+      backend: not supported
+    dependencies:
+      runtime: []
+      host: []
+    tests:
+      - test/safe-menu-contract.sh
+    notes:
+      - The updater is absent from the Omanixy baseline and remains separate from future Nix update design.
+
+  - id: agents
+    classification: omitted
+    maturity: validated
+    upstream:
+      project: basecamp/omarchy
+      revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
+      paths:
+        - path: shell/plugins/agents/
+          role: Omarchy agent usage state and collectors
+          consumption: audited-reference
+    requirement: Do not couple the shell to personal agent infrastructure or model routes.
+    ownership:
+      presentation: omarchy
+      adapter: none
+      backend: not supported
+    dependencies:
+      runtime: []
+      host: []
+    tests:
+      - test/quattro-contract-audit.sh
+    notes:
+      - Hand, dotagents, Universe, and personal state are intentionally absent.
+
+  - id: arch-package-management
+    classification: omitted
+    maturity: validated
+    upstream:
+      project: basecamp/omarchy
+      revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
+      paths:
+        - path: default/omarchy/omarchy-menu.jsonc
+          role: package install, removal, and update actions
+          consumption: audited-reference
+        - path: bin/
+          role: Omarchy command implementation reference
+          consumption: audited-reference
+    requirement: Do not emulate pacman, yay, paru, AUR, Arch ownership, or the complete Omarchy CLI.
+    ownership:
+      presentation: omarchy
+      adapter: none
+      backend: NixOS and user policy
+    dependencies:
+      runtime: []
+      host: []
+    tests:
+      - test/runtime-closure.sh
+      - test/safe-menu-contract.sh
+    notes:
+      - The compatibility root has a narrow bin view containing only audited helper links; the complete upstream bin tree is not exposed.
+
+  - id: security.lock
+    classification: blocked
+    maturity: validated
+    owner: atqamz/omanixy#4
+    upstream:
+      project: basecamp/omarchy
+      revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
+      paths:
+        - path: shell/plugins/lock/
+          role: native Quattro lock and recovery behavior
+          consumption: audited-reference
+    requirement: Inventory lock behavior without implementing session security.
+    ownership:
+      presentation: omarchy
+      adapter: "issue #4"
+      backend: host session security
+    dependencies:
+      host:
+        - Wayland session lock protocol
+        - PAM policy
+    tests:
+      - test/quattro-contract-audit.sh
+    notes:
+      - Omanixy does not enable the lock plugin, install a lock agent, or write PAM configuration.
+
+  - id: security.pam-fingerprint-polkit
+    classification: blocked
+    maturity: validated
+    owner: atqamz/omanixy#4
+    upstream:
+      project: basecamp/omarchy
+      revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
+      paths:
+        - path: shell/plugins/polkit/
+          role: polkit agent behavior
+          consumption: audited-reference
+        - path: shell/plugins/lock/
+          role: PAM and fingerprint-adjacent references
+          consumption: audited-reference
+        - path: default/omarchy/omarchy-menu.jsonc
+          role: security setup actions
+          consumption: audited-reference
+    requirement: Inventory PAM, fingerprint, and polkit contracts for issue #4 without owning them here.
+    ownership:
+      presentation: omarchy
+      adapter: "issue #4"
+      backend: host security policy
+    dependencies:
+      host:
+        - PAM
+        - polkit
+    tests:
+      - test/quattro-contract-audit.sh
+    notes:
+      - No PAM files, polkit agent, passwordless sudo, or fingerprint setup are implemented in this issue.
+
+  - id: security.idle-notifications
+    classification: blocked
+    maturity: validated
+    owner: atqamz/omanixy#4
+    upstream:
+      project: basecamp/omarchy
+      revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
+      paths:
+        - path: shell/plugins/services/idle/
+          role: idle and DPMS security lifecycle
+          consumption: audited-reference
+        - path: shell/plugins/notifications/
+          role: notification daemon integration
+          consumption: audited-reference
+    requirement: Inventory idle-lock and notification ownership without enabling competing agents.
+    ownership:
+      presentation: omarchy
+      adapter: "issue #4"
+      backend: host session security
+    dependencies:
+      host:
+        - idle protocol
+        - notification daemon
+    tests:
+      - test/quattro-contract-audit.sh
+    notes:
+      - The weather notification adapter is a client only and does not change this ownership boundary.

@@ -1,0 +1,439 @@
+"""Discover literal executable invocations from supported Quattro sources."""
+
+from __future__ import annotations
+
+import ast
+import re
+import shlex
+from collections import Counter
+
+
+SHELL_BUILTINS = {
+    "!",
+    ":",
+    "[",
+    "[[",
+    "]",
+    "]]",
+    "break",
+    "case",
+    "continue",
+    "declare",
+    "do",
+    "done",
+    "echo",
+    "elif",
+    "else",
+    "esac",
+    "exit",
+    "export",
+    "false",
+    "fi",
+    "for",
+    "function",
+    "getopts",
+    "hash",
+    "help",
+    "if",
+    "jobs",
+    "kill",
+    "let",
+    "local",
+    "mapfile",
+    "popd",
+    "printf",
+    "pushd",
+    "read",
+    "readarray",
+    "readonly",
+    "return",
+    "set",
+    "shift",
+    "source",
+    "test",
+    "then",
+    "time",
+    "trap",
+    "true",
+    "type",
+    "typeset",
+    "unset",
+    "until",
+    "umask",
+    "unalias",
+    "ulimit",
+    "wait",
+    "while",
+}
+
+SHELL_COMMAND_RE = re.compile(
+    r"(?:^\s*|[;&|!)]\s*|<\s*<\()((?:/[A-Za-z0-9_.+-]+)+|[A-Za-z][A-Za-z0-9_.+-]*)"
+)
+COMMAND_SUBSHELL_RE = re.compile(r"\$\(([^()]*)\)")
+PROCESS_SUBSHELL_RE = re.compile(r"<\s*<\(([^()]*)\)")
+BACKTICK_SUBSHELL_RE = re.compile(r"`([^`]*)`")
+DYNAMIC_EXECUTABLE = "__dynamic-executable__"
+ARRAY_COMMAND_RE = re.compile(
+    r"(?:(?:\b[A-Za-z_][A-Za-z0-9_]*\.)?command\s*[:=]|"
+    r"(?:Quickshell|Util)\.exec(?:Detached)?\s*\()\s*"
+    r"\[((?:\\.|[^\"'\]]|\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*')*)\]",
+    re.DOTALL,
+)
+DYNAMIC_COMMAND_RE = re.compile(r"\bcommand\s*:\s+(?![\"'\[])[^\n,}]+")
+DYNAMIC_SCRIPT_RE = re.compile(r"\bscript\s*:\s+(?![\"'\[])[^\n,}]+")
+DYNAMIC_ASSIGNMENT_RE = re.compile(
+    r"\b[A-Za-z_][A-Za-z0-9_]*\.command\s*=\s+(?![\"'\[])[^\n;]+"
+)
+DYNAMIC_CALL_RE = re.compile(
+    r"\b(?:Quickshell|Util)\.exec(?:Detached)?\(\s*(?![\"'\[])[^\)\n]+\)"
+)
+DYNAMIC_RUN_RE = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]*\.run\(\s*(?![\"'\[])[^\)\n]+\)")
+SHELL_PAYLOAD_RE = re.compile(
+    r"\b(?:command|script)\s*:\s*([\"'])(.*?)(?<!\\)\1",
+    re.DOTALL,
+)
+SHELL_STRING_RE = re.compile(
+    r"(?:\b[A-Za-z_][A-Za-z0-9_]*\.run|(?:Quickshell|Util)\.exec(?:Detached)?)\(\s*"
+    r"([\"'])(.*?)(?<!\\)\1",
+    re.DOTALL,
+)
+
+
+def _next_command(words: list[str], start: int) -> list[str]:
+    result: list[str] = []
+    for word in words[start:]:
+        if word.startswith("-"):
+            continue
+        if word.startswith("$") or "=" in word and word.split("=", 1)[0].isidentifier():
+            continue
+        if word in SHELL_BUILTINS:
+            continue
+        result.append(word)
+        break
+    return result
+
+
+def shell_executables(value: str) -> list[str]:
+    """Return literal command names from a shell command string."""
+
+    value = _strip_shell_comment(value)
+    if not value.strip() or value.lstrip().startswith("#!"):
+        return []
+
+    commands: list[str] = []
+    for match in COMMAND_SUBSHELL_RE.finditer(value):
+        commands.extend(shell_executables(match.group(1)))
+    for match in PROCESS_SUBSHELL_RE.finditer(value):
+        commands.extend(shell_executables(match.group(1)))
+    for match in BACKTICK_SUBSHELL_RE.finditer(value):
+        commands.extend(shell_executables(match.group(1)))
+    if value.count("`") % 2:
+        commands.append(DYNAMIC_EXECUTABLE)
+    parts: list[str] = []
+    part_start = 0
+    quote: str | None = None
+    escaped = False
+    for index, char in enumerate(value):
+        if quote:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+            continue
+        if char in {"'", '"'}:
+            quote = char
+        elif char in ";&|\n":
+            parts.append(value[part_start:index])
+            part_start = index + 1
+    parts.append(value[part_start:])
+    for part in parts:
+        try:
+            words = shlex.split(part, comments=False, posix=True)
+        except ValueError:
+            words = re.findall(r"[A-Za-z][A-Za-z0-9_.+-]*", part)
+        while words and words[0] in {"if", "then", "else"}:
+            words.pop(0)
+        if not words:
+            continue
+        first = words[0]
+        if first in SHELL_BUILTINS:
+            if first in {"!", "time", "do", "then", "else"}:
+                commands.extend(_next_command(words, 1))
+            elif first in {"for", "while", "until"}:
+                if "do" in words:
+                    commands.extend(_next_command(words, words.index("do") + 1))
+            elif first == "case":
+                if ")" in words:
+                    commands.extend(_next_command(words, words.index(")") + 1))
+            elif first == "function" and "{" in words:
+                commands.extend(shell_executables(" ".join(words[words.index("{") + 1 :])))
+            elif first == "source":
+                commands.append(DYNAMIC_EXECUTABLE)
+            continue
+        if first in {"command", "builtin", "exec"}:
+            commands.extend(_next_command(words, 1))
+            for index, word in enumerate(words[1:], 1):
+                if word.rsplit("/", 1)[-1] in {"bash", "dash", "sh", "zsh"}:
+                    for option_index, option in enumerate(words[index + 1 :], index + 1):
+                        if option.startswith("-") and "c" in option:
+                            payload = " ".join(words[option_index + 1 :])
+                            if payload.startswith("$"):
+                                commands.append(DYNAMIC_EXECUTABLE)
+                            else:
+                                commands.extend(shell_executables(payload))
+                            break
+                    break
+        elif first.rsplit("/", 1)[-1] in {"bash", "dash", "sh", "zsh"}:
+            commands.append(first)
+            for index, word in enumerate(words[1:], 1):
+                if word.startswith("-") and "c" in word:
+                    payload = " ".join(words[index + 1 :])
+                    if payload.startswith("$"):
+                        commands.append(DYNAMIC_EXECUTABLE)
+                    else:
+                        commands.extend(shell_executables(payload))
+                    break
+        elif first == "timeout":
+            commands.append(first)
+            commands.extend(_next_command(words, 2))
+            for index, word in enumerate(words[2:], 2):
+                if word.rsplit("/", 1)[-1] in {"bash", "dash", "sh", "zsh"}:
+                    for option_index, option in enumerate(words[index + 1 :], index + 1):
+                        if option.startswith("-") and "c" in option:
+                            payload = " ".join(words[option_index + 1 :])
+                            if payload.startswith("$"):
+                                commands.append(DYNAMIC_EXECUTABLE)
+                            else:
+                                commands.extend(shell_executables(payload))
+                            break
+                    break
+        elif first == "env":
+            commands.append(first)
+            commands.extend(_next_command(words, 1))
+            for index, word in enumerate(words[1:], 1):
+                if word.rsplit("/", 1)[-1] in {"bash", "dash", "sh", "zsh"}:
+                    for option_index, option in enumerate(words[index + 1 :], index + 1):
+                        if option.startswith("-") and "c" in option:
+                            payload = " ".join(words[option_index + 1 :])
+                            if payload.startswith("$"):
+                                commands.append(DYNAMIC_EXECUTABLE)
+                            else:
+                                commands.extend(shell_executables(payload))
+                            break
+                    break
+        elif first.startswith("$") or "=" in first and first.split("=", 1)[0].isidentifier():
+            if "$(" not in first:
+                commands.extend(_next_command(words, 1))
+        elif (
+            first not in SHELL_BUILTINS
+            and not first.startswith(("-", "#", "{"))
+            and not first.endswith((")", "}"))
+            and (first.startswith("/") or re.fullmatch(r"[A-Za-z][A-Za-z0-9_.+-]*", first))
+        ):
+            commands.append(first)
+    return list(dict.fromkeys(commands))
+
+
+def _strip_shell_comment(value: str) -> str:
+    quote: str | None = None
+    escaped = False
+    for index, char in enumerate(value):
+        if quote:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+        elif char in {"'", '"'}:
+            quote = char
+        elif char == "#" and (index == 0 or value[index - 1].isspace()):
+            return value[:index]
+    return value
+
+
+def source_executables(path: str, text: str, pinned_text: str = "") -> list[dict[str, object]]:
+    """Discover command names and source-line identity from a supported file."""
+
+    references: list[dict[str, object]] = []
+    dynamic_name = DYNAMIC_EXECUTABLE
+    pinned_lines = pinned_text.splitlines()
+    pinned_shape_counts = Counter(" ".join(line.split()) for line in pinned_lines)
+    shell_functions = {
+        match.group(1)
+        for match in re.finditer(
+            r"^\s*(?:function\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*\)\s*\{",
+            text,
+            re.MULTILINE,
+        )
+    }
+
+    allowed_dynamic_shapes = {
+            ("shell/plugins/panels/network/Panel.qml", 'command: ["bash", "-c", root.dnsCommand("")]'),
+            ("shell/plugins/panels/network/Panel.qml", 'actionProc.command = ["bash", "-c", root.dnsCommand(provider)]'),
+            ("shell/plugins/menu/Menu.qml", 'providerProc.command = ["bash", "-lc", spec.script]'),
+            ("shell/plugins/menu/Menu.qml", 'guardProc.command = ["bash", "-lc", script]'),
+            ("shell/plugins/menu/Menu.qml", 'resultProc.command = ["bash", "-c", ": > " + Util.shellQuote(activeDoneFile)]'),
+            ("shell/plugins/menu/Menu.qml", 'resultProc.command = ["bash", "-c", "printf \'%s\\\\n\' " + Util.shellQuote(selection) + " > " + Util.shellQuote(activeSelectionFile) + "; : > " + Util.shellQuote(activeDoneFile)]'),
+            ("shell/plugins/menu/Menu.qml", 'Util.execDetached(command)'),
+            ("shell/plugins/panels/network/Panel.qml", 'enterpriseConnect.command = ["bash", "-c", Model.enterpriseConnectScript, "nmcli-eap", ssid, identity]'),
+            ("shell/services/AppLibrary.qml", 'command: ["bash", "-c", root.userOwnedEntryScanCommand()]'),
+            ("shell/services/AppLibrary.qml", 'command: ["bash", "-c", root.hiddenEntryScanCommand()]'),
+            ("shell/services/AppLibrary.qml", 'command: ["bash", "-c", root.iconIndexScanCommand()]'),
+            ("shell/services/PluginRegistry.qml", 'scanProcess.command = ["bash", "-c", script, registry.firstPartyDir, registry.pluginsDir]'),
+            ("shell/plugins/bar/Bar.qml", 'command: ["bash", "-lc", String(customRoot.setting("exec", ""))]'),
+            ("shell/plugins/bar/Bar.qml", 'customProc.command = ["bash", "-lc", String(customRoot.setting("exec", ""))]'),
+            ("shell/plugins/bar/Bar.qml", 'transparentForegroundProc.command = ['),
+            ("shell/Ui/MultiSelect.qml", 'optionsProcess.command = cmd'),
+            ("shell/services/AppLibrary.qml", 'if (command) Util.execDetached(command)'),
+            ("shell/services/AppLibrary.qml", 'Util.execDetached(command)'),
+            ("shell/services/AppLibrary.qml", 'removeProcess.command = ['),
+            ("shell/plugins/bar/Bar.qml", 'if (command) root.run(command)'),
+            ("shell/plugins/bar/Bar.qml", 'Util.execDetached(command)'),
+            ("shell/Commons/Util.qml", 'Quickshell.execDetached(["bash", "-lc", command])'),
+            ("shell/plugins/clipboard/Clipboard.qml", 'Quickshell.execDetached([root.omarchyPath + "/bin/omarchy-clipboard-paste-file", row.mime, row.path])'),
+            ("shell/plugins/clipboard/Clipboard.qml", 'Quickshell.execDetached([root.omarchyPath + "/bin/omarchy-clipboard-paste-text", "--shift-insert", "--history-index", String(row.historyIndex)])'),
+            ("shell/plugins/clipboard/Clipboard.qml", 'Quickshell.execDetached([root.omarchyPath + "/bin/omarchy-clipboard-paste-file", "--copy-only", row.mime, row.path])'),
+            ("shell/plugins/clipboard/Clipboard.qml", 'Quickshell.execDetached([root.omarchyPath + "/bin/omarchy-clipboard-paste-text", "--copy-only", "--history-index", String(row.historyIndex)])'),
+            ("shell/plugins/clipboard/Clipboard.qml", 'Quickshell.execDetached([root.omarchyPath + "/bin/omarchy-clipboard-open", "--history-index", String(row.historyIndex)])'),
+            ("shell/plugins/clipboard/Clipboard.qml", 'command: [root.captureScript]'),
+            ("shell/plugins/clipboard/Clipboard.qml", 'command: ["setpriv", "--pdeathsig", "TERM", "wl-paste", "--type", "text", "--watch", root.captureScript, "text"]'),
+            ("shell/plugins/clipboard/Clipboard.qml", 'command: ["setpriv", "--pdeathsig", "TERM", "wl-paste", "--type", "image/png", "--watch", root.captureScript, "image/png"]'),
+            ("shell/plugins/emojis/Emojis.qml", 'Quickshell.execDetached([root.omarchyPath + "/bin/omarchy-menu-emoji-insert", emoji])'),
+    }
+    allowed_dynamic_used: Counter[tuple[str, str]] = Counter()
+
+    def add(name: str, line: int, invocation: str, shape: str) -> None:
+        normalized_shape = " ".join(shape.split())
+        dynamic_key = (path, normalized_shape)
+        pinned_identity = normalized_shape in pinned_shape_counts
+        if (
+            name == dynamic_name
+            and (dynamic_key in allowed_dynamic_shapes or pinned_identity)
+            and allowed_dynamic_used[dynamic_key]
+            < (pinned_shape_counts[normalized_shape] if pinned_identity else 1)
+        ):
+            allowed_dynamic_used[dynamic_key] += 1
+            return
+        if name.startswith("/"):
+            name = name.rsplit("/", 1)[-1]
+        if (
+            not name
+            or name in SHELL_BUILTINS
+            or name in shell_functions
+            or name.startswith(("$", "omarchy-"))
+        ):
+            return
+        references.append({"name": name, "line": line, "invocation": invocation, "shape": shape.strip()})
+
+    def literal_array_values(value: str) -> list[str]:
+        values = []
+        for match in re.finditer(r"(['\"])(.*?)(?<!\\)\1", value, re.DOTALL):
+            try:
+                values.append(ast.literal_eval(match.group(0)))
+            except (SyntaxError, ValueError):
+                continue
+        return values
+
+    def array_has_dynamic_elements(value: str) -> bool:
+        remainder = re.sub(r"(['\"])(.*?)(?<!\\)\1", "", value, flags=re.DOTALL)
+        return any(part.strip() for part in remainder.split(","))
+
+    def literal_shell_payload(value: str) -> str | None:
+        match = re.match(
+            r"\s*['\"]([^'\"]+)['\"]\s*,\s*['\"]([^'\"]*)['\"]\s*,\s*"
+            r"(['\"])((?:\\.|(?!\3).)*?)\3",
+            value,
+            re.DOTALL,
+        )
+        if not match or not match.group(1).rsplit("/", 1)[-1] in {"bash", "dash", "sh", "zsh"}:
+            return None
+        if not match.group(2).startswith("-") or "c" not in match.group(2):
+            return None
+        return match.group(4)
+
+    for line_number, line in enumerate(text.splitlines(), 1):
+        if path.endswith((".sh", ".bash")):
+            command_line = re.sub(r"^\s*[A-Za-z_][A-Za-z0-9_]*(?:\[[^]]+\])?=", "", line)
+            function_body = re.match(r"^\s*[A-Za-z_][A-Za-z0-9_]*\s*\(\s*\)\s*\{", line)
+            if function_body:
+                command_line = line[function_body.end() :]
+            else:
+                case_arm = re.match(r"^\s*[^;&]+\)\s*", line)
+                if case_arm:
+                    command_line = line[case_arm.end() :]
+            for name in shell_executables(command_line):
+                add(name, line_number, "shell-script", line)
+            for match in COMMAND_SUBSHELL_RE.finditer(line):
+                for name in shell_executables(match.group(1)):
+                    add(name, line_number, "shell-substitution", line)
+            for match in PROCESS_SUBSHELL_RE.finditer(line):
+                for name in shell_executables(match.group(1)):
+                    add(name, line_number, "process-substitution", line)
+
+    for match in ARRAY_COMMAND_RE.finditer(text):
+        line_number = text.count("\n", 0, match.start()) + 1
+        source_line = text.splitlines()[line_number - 1]
+        values = literal_array_values(match.group(1))
+        if not values:
+            if match.group(1).strip():
+                add(dynamic_name, line_number, "command-array", source_line)
+            continue
+        if array_has_dynamic_elements(match.group(1)):
+            add(dynamic_name, line_number, "command-array", source_line)
+            continue
+        add(values[0], line_number, "command-array", source_line)
+        executable = values[0].rsplit("/", 1)[-1]
+        if executable in {"bash", "dash", "sh", "zsh", "command", "builtin", "exec", "env", "timeout"}:
+            array_command = " ".join(shlex.quote(value) for value in values)
+            for name in shell_executables(array_command):
+                add(name, line_number, "command-array-shell", source_line)
+        payload = literal_shell_payload(match.group(1))
+        if payload is not None:
+            for name in shell_executables(payload):
+                add(name, line_number, "command-array-shell", source_line)
+        elif (
+            re.match(
+                r"\s*(?:(?:[A-Za-z_][A-Za-z0-9_]*\.)?command\s*[:=]|"
+                r"(?:Quickshell|Util)\.exec(?:Detached)?\s*\()",
+                match.group(0),
+            )
+            and re.search(
+            r"['\"](?:[^'\"]*/)?(?:bash|dash|sh|zsh)['\"]\s*,\s*"
+            r"['\"][^'\"]*c[^'\"]*['\"]\s*,\s*(?!['\"])",
+            match.group(1),
+            )
+        ):
+            add(dynamic_name, line_number, "command-array-shell", source_line)
+
+    for pattern in (DYNAMIC_COMMAND_RE, DYNAMIC_SCRIPT_RE):
+        for match in pattern.finditer(text):
+            line_number = text.count("\n", 0, match.start()) + 1
+            source_line = text.splitlines()[line_number - 1]
+            add(dynamic_name, line_number, "dynamic-command", source_line)
+
+    for pattern in (DYNAMIC_ASSIGNMENT_RE, DYNAMIC_CALL_RE, DYNAMIC_RUN_RE):
+        for match in pattern.finditer(text):
+            line_number = text.count("\n", 0, match.start()) + 1
+            source_line = text.splitlines()[line_number - 1]
+            add(dynamic_name, line_number, "dynamic-invocation", source_line)
+
+    for match in SHELL_PAYLOAD_RE.finditer(text):
+        line_number = text.count("\n", 0, match.start()) + 1
+        source_line = text.splitlines()[line_number - 1]
+        for name in shell_executables(match.group(2)):
+            add(name, line_number, "shell-payload", source_line)
+
+    for match in SHELL_STRING_RE.finditer(text):
+        line_number = text.count("\n", 0, match.start()) + 1
+        source_line = text.splitlines()[line_number - 1]
+        for name in shell_executables(match.group(2)):
+            add(name, line_number, "shell-string", source_line)
+
+    unique: dict[tuple[str, int, str], dict[str, object]] = {}
+    for reference in references:
+        key = (str(reference["name"]), int(reference["line"]), str(reference["invocation"]))
+        unique[key] = reference
+    return [unique[key] for key in sorted(unique)]

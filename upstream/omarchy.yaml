@@ -8,6 +8,8 @@ policy:
   update_strategy: explicit-upstream-upgrade-issue
   integration_target: omarchy-quattro
   current_pin_role: validated-quattro-runtime
+  maturity_definition:
+    validated: pinned_consumer_evidence_and_reference_hash_and_focused_behavioral_test_and_contract_closure
   runtime_pair:
     status: validated
     omarchy:
@@ -22,5 +24,15 @@ policy:
         revision: 241313f4e8e508cb9b13278c2b0fa25b9ca27163
     validation:
       hermetic_checks: true
-      wayland_hyprland_smoke: true
+      wayland_hyprland_smoke: false
   validated_quattro_pair: true
+contract_audit:
+  scanner: scripts/audit-quattro-contracts
+  snapshot: upstream/quattro-contracts.json
+  scope:
+    - shell/shell.qml
+    - shell/services/
+    - shell/plugins/
+    - config/omarchy/shell.json
+    - default/omarchy/omarchy-menu.jsonc
+  drift_policy: fail-closed-on-snapshot-change

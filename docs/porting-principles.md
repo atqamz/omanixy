@@ -39,14 +39,35 @@ The taxonomy describes compatibility, not stability.
 A feature may be `adapted` and still be experimental, or `omitted` because
 omission is the correct architecture rather than unfinished work.
 
+`maturity: validated` has a stricter meaning than "implemented".
+It means the declared compatibility contract, including any intentional
+adaptation, is proven against pinned consumer evidence, a deterministic
+identity for any referenced upstream implementation, focused behavioral
+evidence for every applicable matrix case, and a passing contract-closure
+check.
+It never means that an Omanixy implementation merely agrees with its own
+tests, and it never upgrades an `adapted` entry to `exact`.
+For `exact`, `omitted`, and `blocked` entries, the evidence proves the native
+capability or the documented reachability boundary rather than an adapter
+implementation.
+
 The porting matrix is a compatibility ledger, not a percentage-complete
 tracker.
 The number of `exact` entries is never a project quality score.
-Issue #3 owns the real contract audit and matrix population.
-Issue #2 records the narrow runtime source contracts needed to make the
-validated Quattro baseline auditable.
-Those entries do not represent the comprehensive compatibility audit owned by
-issue #3.
+Issue #2 records the narrow runtime source contracts needed to make the pinned
+Quattro baseline auditable.
+Issue #3 defines the comprehensive contract audit and ledger; this branch
+implements the pinned baseline and its reviewed compatibility edges.
+
+The contract scanner is a static pin-drift guard.
+It records direct commands, dynamic command expressions, menu fields, absolute
+helper paths, filesystem and environment contracts, native Quickshell imports,
+service names, and security references from the pinned source roots.
+It intentionally excludes the complete upstream `bin/` tree while retaining a
+narrow compatibility-bin view for the audited absolute helper paths that are
+reachable from supported Quattro.
+Behavioral adapter tests and live Wayland/Hyprland smoke are separate runtime
+evidence and do not get replaced by static scanning.
 
 ## Adapters and downstream patches
 
@@ -68,6 +89,16 @@ Broad QML reimplementation or a continuously maintained presentation fork is
 not a compatibility adapter.
 Upstream presentation remains upstream-owned.
 
+The current adapters remain Bash where their boundary is process invocation,
+argv/stdout/stderr handling, bounded command timeouts, and small filesystem
+transactions with explicit rollback.
+Shared timeout and failure helpers keep those paths explicit, and focused
+failure tests cover the stateful audio, network, display, power, clipboard,
+and launcher mutations.
+QML and JavaScript remain the structured layer for presentation state and
+consumer parsing; no domain was split into a second language without a
+specific parsing or state-management benefit.
+
 ## Ownership and reuse
 
 NixOS owns host capabilities and privileged system configuration.
@@ -86,12 +117,12 @@ Omarchy
    ↓
 Omanixy
    ↓
-Universe
+consumer NixOS and Home Manager configuration
 ```
 
-Universe can dogfood Omanixy and reveal missing generic capabilities.
-Those capabilities must be generalized before they become public Omanixy
-behavior.
+Universe is a downstream consumer and validation environment.
+It can reveal missing generic capabilities, but it is never a public Omanixy
+dependency.
 
 ## Pinned source discipline
 

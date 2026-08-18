@@ -55,6 +55,17 @@ runtime API.
 The pinned Quattro runtime is provided by the Home Manager module and
 `packages.${system}.omanixy-shell` output.
 
+The runtime consumes the exact pinned Quattro source through an immutable
+compatibility root.
+The root exposes only the audited helper contracts required by supported
+Quattro consumers, so the package is not an Omarchy CLI or a copy of the
+upstream `bin/` tree.
+The supported native and adapted surfaces, omissions, issue #4 boundaries,
+and drift checks are recorded in
+[`docs/runtime.md`](docs/runtime.md),
+[`docs/upstream.md`](docs/upstream.md), and
+[`upstream/porting-matrix.yaml`](upstream/porting-matrix.yaml).
+
 Omanixy exposes opinionated but overridable defaults and a structured
 upstream-compatible shell configuration escape hatch.
 It does not turn every upstream QML property into a Nix option or require

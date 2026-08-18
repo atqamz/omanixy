@@ -35,7 +35,7 @@ Quickshell is the shell runtime that executes that presentation.
 Omanixy provides the declarative integration boundary.
 NixOS remains authoritative for the operating system and its capabilities.
 
-Issue #2 provides the first validated Quattro runtime baseline.
+Issue #2 provides the first pinned Quattro runtime baseline.
 Later issues add compatibility adapters and security integrations without
 changing the ownership boundary.
 
@@ -234,13 +234,25 @@ reviewed Omarchy Quattro source
 
 The service name `omanixy-shell.service` describes the runtime component.
 It does not redefine the repository as only a shell package.
-The runtime, lifecycle, source consumption, and pairing are owned by issue #2.
+Issue #2 established the runtime lifecycle and pinned pairing.
+This branch extends that baseline with the immutable compatibility view,
+feature closure, and audited adapters described below.
 
 The upstream shell source should remain pinned and read-only in the Nix store
 where technically possible.
 Runtime-writable state must be deliberately materialized outside the store.
 `OMARCHY_PATH` may be an intentional source compatibility interface without
 emulating the complete Omarchy filesystem.
+
+For the pinned Quattro revision, the runtime uses an immutable compatibility
+view because some reachable consumers construct absolute
+`OMARCHY_PATH/bin/...` paths.
+The view contains only the pinned source files required by the supported
+runtime graph, ten narrow compatibility patch sites, the safe fallback
+configuration, the audited default menu, and the helper surface.
+It preserves `passthru.omarchySource` as the exact source identity and exposes
+the view separately as `passthru.omarchyCompatibilityRoot`.
+It does not copy the upstream `bin/` tree or make the store mutable.
 
 ## Compatibility boundary
 
@@ -261,6 +273,11 @@ A downstream QML patch requires documented justification, proof that native
 integration and a narrow adapter are insufficient, minimal scope, focused
 regression coverage, and an explicit relationship to the pinned source.
 A narrow adapter is not a fork of the presentation layer.
+
+The compatibility view and default menu are review surfaces, not a general
+Omarchy filesystem or CLI.
+Every baseline menu action must resolve to a native capability, an audited
+adapter, or an explicit host session action.
 
 See [porting-principles.md](porting-principles.md) for the compatibility
 taxonomy and patch rules.
@@ -302,8 +319,8 @@ following work:
 
 - #2 selects and validates the exact Quattro and Quickshell runtime pair and
   implements the user service;
-- #3 audits shell contracts and populates the compatibility ledger with
-  traceable adapters;
+- #3 defines the shell contract audit and compatibility ledger with traceable
+  adapters;
 - #4 handles lock, PAM, polkit, idle, notification, and session security;
 - #5 defines SemVer and release automation;
 - #6 proves standalone reuse and migrates Universe downstream.

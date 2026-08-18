@@ -1,0 +1,66 @@
+#!/usr/bin/env python3
+"""Remove the pinned Bar.qml transparent foreground implementation."""
+
+from pathlib import Path
+import sys
+
+
+EXPECTED = '''  Process {
+    id: transparentForegroundProc
+    stdout: SplitParser {
+      onRead: function(line) {
+        var value = String(line || "").trim()
+        if (!/^#[0-9A-Fa-f]{6}$/.test(value)) return
+
+        root.foregroundAnimationEnabled = false
+        root.transparentForeground = value
+        if (root.requestedTransparent) {
+          root.useTransparentForeground = true
+          root.transparent = true
+        }
+        root.restoreForegroundAnimation()
+      }
+    }
+  }
+'''
+
+EXPECTED_REFRESH = '''  function refreshTransparentForeground() {
+    if (!requestedTransparent || transparentForegroundProc.running) return
+
+    transparentForegroundProc.command = [
+      "omarchy-bar-text-color",
+      root.position,
+      String(root.barSize),
+      colorHex(root.themeForeground),
+      colorHex(root.themeContrastForeground)
+    ]
+    transparentForegroundProc.running = true
+  }'''
+
+REPLACEMENT_REFRESH = '''  function refreshTransparentForeground() {
+    if (!requestedTransparent) return
+    transparentForeground = themeForeground
+    useTransparentForeground = true
+    transparent = true
+  }'''
+
+
+def main() -> int:
+    if len(sys.argv) != 2:
+        print(f"usage: {sys.argv[0]} BAR_QML", file=sys.stderr)
+        return 2
+    path = Path(sys.argv[1])
+    text = path.read_text()
+    refresh_count = text.count(EXPECTED_REFRESH)
+    if refresh_count != 1:
+        raise SystemExit(f"expected exactly one transparent foreground refresh function, found {refresh_count}")
+    process_count = text.count(EXPECTED)
+    if process_count != 1:
+        raise SystemExit(f"expected exactly one transparent foreground Process block, found {process_count}")
+    text = text.replace(EXPECTED_REFRESH, REPLACEMENT_REFRESH, 1)
+    path.write_text(text.replace(EXPECTED, "", 1))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

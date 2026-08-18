@@ -1,0 +1,37 @@
+#!/usr/bin/env python3
+"""Remove the pinned font provider outside the supported menu contract."""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+
+FONT_PROVIDER = '''    "fonts": {
+      script: "current=$(omarchy-font-current 2>/dev/null); omarchy-font-list 2>/dev/null | while read -r f; do [[ -z $f ]] && continue; printf '%s\\\\t%s\\\\t%s\\\\n' \\"$f\\" \\"$f\\" \\"$current\\"; done",
+      icon: "\ue659",
+      volatile: true,
+      actionFor: function(value) { return "omarchy-font-set " + Util.shellQuote(value) }
+    },
+'''
+
+
+def main() -> int:
+    if len(sys.argv) != 2:
+        print(f"usage: {sys.argv[0]} MENU_QML", file=sys.stderr)
+        return 2
+
+    path = Path(sys.argv[1])
+    text = path.read_text(encoding="utf-8")
+    count = text.count(FONT_PROVIDER)
+    if count != 1:
+        print(
+            f"expected exactly one pinned font provider block, found {count}",
+            file=sys.stderr,
+        )
+        return 1
+    path.write_text(text.replace(FONT_PROVIDER, "", 1), encoding="utf-8")
+    return 0
+
+
+raise SystemExit(main())

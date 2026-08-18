@@ -2,25 +2,16 @@
 set -euo pipefail
 
 repo=${1:?repository path required}
-flake=$repo/flake.nix
+supported_systems=${2:?evaluated supported systems JSON required}
 metadata=$repo/upstream/omarchy.yaml
 matrix=$repo/upstream/porting-matrix.yaml
 lockfile=$repo/flake.lock
+manifest=$repo/upstream/compatibility-contracts.json
 
-omarchy_revision=f0020448ca87329199de7cb12f2015ebc4a3e5e7
-quickshell_revision=28771c7c74b42e20afca0b1b63980cb46515537c
-nixpkgs_revision=241313f4e8e508cb9b13278c2b0fa25b9ca27163
+omarchy_revision=$(jq -er '.pins.omarchy' "$manifest")
+quickshell_revision=$(jq -er '.pins.quickshell' "$manifest")
+nixpkgs_revision=$(jq -er '.pins.nixpkgs' "$manifest")
 
-grep -Fq "github:basecamp/omarchy/$omarchy_revision" "$flake"
-grep -Fq "github:quickshell-mirror/quickshell/$quickshell_revision" "$flake"
-grep -Fq "nixpkgsRevision = \"$nixpkgs_revision\"" "$flake"
-grep -Fq "source: github:basecamp/omarchy/$omarchy_revision" "$metadata"
-grep -Fq "source: github:quickshell-mirror/quickshell/$quickshell_revision" "$metadata"
-grep -Fq "source: github:NixOS/nixpkgs/$nixpkgs_revision" "$metadata"
-grep -Fq "revision: $omarchy_revision" "$metadata"
-grep -Fq "revision: $quickshell_revision" "$metadata"
-grep -Fq "revision: $nixpkgs_revision" "$metadata"
-grep -Fq "\"rev\": \"$nixpkgs_revision\"" "$lockfile"
 jq -e \
   --arg omarchy "$omarchy_revision" \
   --arg quickshell "$quickshell_revision" \
@@ -32,20 +23,51 @@ jq -e \
     and .nodes.quickshell.original.rev == $quickshell
     and .nodes.nixpkgs.locked.rev == $nixpkgs
   ' "$lockfile" >/dev/null
-grep -Fq "validated_quattro_pair: true" "$metadata"
-grep -Fq 'track: quattro' "$metadata"
-! grep -Fq 'release:' "$metadata"
-grep -Fq 'assertOneOf "omanixy supported system"' "$flake"
-grep -Fq 'path: shell/shell.qml' "$matrix"
-grep -Fqx '        - path: shell/' "$matrix"
-grep -Fq 'path: config/omarchy/shell.json' "$matrix"
-grep -Fq 'path: themes/tokyo-night/' "$matrix"
-grep -Fq 'path: bin/omarchy-launch-shell' "$matrix"
-grep -Fq 'consumption: reference-only' "$matrix"
-grep -Fq 'consumption: build-time' "$matrix"
-! rg -n 'github:basecamp/omarchy/(quattro|main|master)' "$flake"
-! rg -n 'github:quickshell-mirror/quickshell/(master|main)' "$flake"
-! rg -n 'pending-issue-2|validated_quattro_pair: false|runtime_pair: pending' "$metadata"
-! find "$repo" -type f -name '*.qml' -print -quit | grep -q .
+${PYTHON:-python3} - "$metadata" "$omarchy_revision" "$quickshell_revision" "$nixpkgs_revision" "$matrix" <<'PY'
+import sys
+import yaml
+
+metadata, omarchy, quickshell, nixpkgs, matrix = sys.argv[1:]
+data = yaml.safe_load(open(metadata, encoding="utf-8"))
+pair = data["policy"]["runtime_pair"]
+assert data["track"] == "quattro"
+assert data["revision"] == omarchy
+assert data["policy"]["validated_quattro_pair"] is True
+assert pair["omarchy"] == {"source": f"github:basecamp/omarchy/{omarchy}", "revision": omarchy}
+assert pair["quickshell"]["source"] == f"github:quickshell-mirror/quickshell/{quickshell}"
+assert pair["quickshell"]["revision"] == quickshell
+assert pair["quickshell"]["nixpkgs"]["source"] == f"github:NixOS/nixpkgs/{nixpkgs}"
+assert pair["quickshell"]["nixpkgs"]["revision"] == nixpkgs
+
+matrix_data = yaml.safe_load(open(matrix, encoding="utf-8"))
+paths = {
+    path["path"]
+    for item in matrix_data["items"]
+    for path in item.get("upstream", {}).get("paths", [])
+}
+assert {"shell/shell.qml", "shell/plugins/", "config/omarchy/shell.json", "themes/tokyo-night/", "bin/omarchy-launch-shell"} <= paths
+consumption = {
+    path["consumption"]
+    for item in matrix_data["items"]
+    for path in item.get("upstream", {}).get("paths", [])
+}
+assert {"reference-only", "build-time"} <= consumption
+PY
+adapter_hash=$( {
+  first=true
+  while IFS= read -r source; do
+    if [[ $first == false ]]; then printf '\n'; fi
+    first=false
+    cat "$repo/$source"
+  done < <(jq -er '.adapterSources[]' "$manifest")
+} | sha256sum | awk '{print $1}')
+jq -e \
+  --arg adapter 'packages/omanixy-shell/compat-adapter.bash' \
+  --arg tests 'test/compat-adapters.sh' \
+  --arg adapter_hash "$adapter_hash" \
+  '.adapter == $adapter and .adapterHash == $adapter_hash and (.adapterSources | type) == "array" and .behavioralTests == $tests and (.helpers | type) == "object"' \
+  "$manifest" >/dev/null
+jq -e --argjson systems "$supported_systems" '$systems == ["x86_64-linux", "aarch64-linux"]' \
+  <<< '{}'
 
 printf '%s\n' 'pin invariants passed'

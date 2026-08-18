@@ -7,12 +7,17 @@ home=${3:?Home Manager test home required}
 custom_home=${4:?custom Home Manager test home required}
 store_home=${5:?store-link test home required}
 store_config=${6:?store-backed source config required}
-malformed_store_config=${7:?malformed store-backed source config required}
+explicit_store_config=${7:?explicit store-backed source config required}
+malformed_store_config=${8:?malformed store-backed source config required}
+custom_store_config=${9:?custom store-backed source config required}
+historical_baseline=${10:?historical issue #2 baseline required}
 mkdir -p "$home"
 mkdir -p "$custom_home"
 mkdir -p "$store_home/.config/omarchy"
 malformed_store_home="${home}-malformed-store-link"
-trap 'rm -rf "$home" "$custom_home" "$store_home" "${home}-broken-store-link" "$malformed_store_home"' EXIT
+explicit_store_home="${home}-explicit-store-link"
+mkdir -p "$explicit_store_home/.config/omarchy"
+trap 'rm -rf "$home" "$custom_home" "$store_home" "$explicit_store_home" "${home}-broken-store-link" "$malformed_store_home"' EXIT
 
 run_activation_at() {
   activation_home=$1
@@ -43,10 +48,35 @@ test -f "$config_file"
 test -w "$config_file"
 test ! -L "$config_file"
 grep -Fq 'disabledPlugins' "$config_file"
+jq -e '.owner == "omanixy" and .schema == 1 and (.selectedFeatures | index("weather") != null)' \
+  "$home/.local/state/omanixy/capabilities.json" >/dev/null
 test -d "$home/.config/omarchy/plugins"
 test -f "$theme_dir/colors.toml"
 test -f "$theme_dir/shell.toml"
 test ! -L "$theme_dir"
+
+migration_home="${home}-migration"
+custom_migration_home="${home}-custom-migration"
+mkdir -p "$migration_home/.config/omarchy" "$custom_migration_home/.config/omarchy"
+trap 'rm -rf "$home" "$custom_home" "$store_home" "$explicit_store_home" "$migration_home" "$custom_migration_home" "${home}-broken-store-link" "$malformed_store_home"' EXIT
+cp "$historical_baseline" "$migration_home/.config/omarchy/shell.json"
+run_activation_at "$migration_home" "$activation"
+jq -e '.version == 1 and .omanixyBaselineVersion == 2 and .bar.layout.right[-1].id == "omarchy.power"' \
+  "$migration_home/.config/omarchy/shell.json" >/dev/null
+cp "$migration_home/.config/omarchy/shell.json" "$migration_home/after-first"
+run_activation_at "$migration_home" "$activation"
+cmp "$migration_home/after-first" "$migration_home/.config/omarchy/shell.json"
+jq '. + {customized: true}' "$historical_baseline" > "$custom_migration_home/.config/omarchy/shell.json"
+cp "$custom_migration_home/.config/omarchy/shell.json" "$custom_migration_home/before"
+run_activation_at "$custom_migration_home" "$activation"
+cmp "$custom_migration_home/before" "$custom_migration_home/.config/omarchy/shell.json"
+
+formatted_migration_home="${home}-formatted-migration"
+mkdir -p "$formatted_migration_home/.config/omarchy"
+jq -S . "$historical_baseline" | sed '1s/{/{\n/' > "$formatted_migration_home/.config/omarchy/shell.json"
+run_activation_at "$formatted_migration_home" "$activation"
+jq -e '.omanixyBaselineVersion == 2 and .bar.layout.center[1].id == "omarchy.weather"' \
+  "$formatted_migration_home/.config/omarchy/shell.json" >/dev/null
 
 printf '%s\n' '{"userOwned":true}' > "$config_file"
 run_activation
@@ -59,22 +89,33 @@ grep -Fqx 'user theme' "$theme_dir/user-state"
 HOME="$custom_home" USER=omanixy-test XDG_RUNTIME_DIR="$custom_home/runtime" \
   bash -c 'run() { "$@"; }; source "$1"' bash "$custom_activation"
 grep -Fq '"custom":true' "$custom_home/.config/omarchy/shell.json"
+jq -e '.disabledPlugins | index("omarchy.audio") != null' "$custom_home/.config/omarchy/shell.json" >/dev/null
 for plugin in \
+  omarchy.active-window \
+  omarchy.agents \
   omarchy.background \
   omarchy.battery \
-  omarchy.clipboard \
+  omarchy.dev-gallery \
+  omarchy.disk-speedtest \
+  omarchy.dropbox \
   omarchy.idle \
+  omarchy.image-picker \
+  omarchy.indicators \
+  omarchy.keyboard-layout \
   omarchy.lock \
-  omarchy.media \
+  omarchy.microphone \
   omarchy.nightlight \
   omarchy.notifications \
-  omarchy.polkit; do
+  omarchy.polkit \
+  omarchy.reminders \
+  omarchy.system-update \
+  omarchy.tailscale; do
   jq -e --arg plugin "$plugin" '.disabledPlugins | index($plugin) != null' "$custom_home/.config/omarchy/shell.json" >/dev/null
 done
 
 home_dry_run="${home}-dry-run"
 mkdir -p "$home_dry_run"
-trap 'rm -rf "$home" "$custom_home" "$store_home" "$home_dry_run" "${home}-broken-store-link"' EXIT
+trap 'rm -rf "$home" "$custom_home" "$store_home" "$explicit_store_home" "$home_dry_run" "${home}-broken-store-link"' EXIT
 run_dry_activation
 test ! -e "$home_dry_run/.config/omarchy/shell.json"
 test ! -e "$home_dry_run/.local/state/omarchy/current/theme"
@@ -105,28 +146,57 @@ store_file="$store_home/.config/omarchy/shell.json"
 test ! -L "$store_file"
 test -w "$store_file"
 jq empty "$store_file"
+test "$(stat -c '%a' "$store_file")" = 600
 for plugin in \
+  omarchy.active-window \
+  omarchy.agents \
   omarchy.background \
   omarchy.battery \
-  omarchy.clipboard \
+  omarchy.dev-gallery \
+  omarchy.disk-speedtest \
+  omarchy.dropbox \
   omarchy.idle \
+  omarchy.image-picker \
+  omarchy.indicators \
+  omarchy.keyboard-layout \
   omarchy.lock \
-  omarchy.media \
+  omarchy.microphone \
   omarchy.nightlight \
   omarchy.notifications \
-  omarchy.polkit; do
+  omarchy.polkit \
+  omarchy.reminders \
+  omarchy.system-update \
+  omarchy.tailscale; do
   jq -e --arg plugin "$plugin" '.disabledPlugins | index($plugin) != null' "$store_file" >/dev/null
 done
 jq -e '
   .version == 1
-  and .idle.screensaver == 150
+  and .omanixyBaselineVersion == 2
   and .bar.layout.left[0].id == "omarchy.menu"
-  and .plugins == []
+  and .bar.layout.center[1].id == "omarchy.weather"
 ' "$store_file" >/dev/null
 printf '%s\n' '{"storeLinkMaterialized":true}' > "$store_file"
 HOME="$store_home" USER=omanixy-test XDG_RUNTIME_DIR="$store_home/runtime" \
   bash -c 'run() { "$@"; }; source "$1"' bash "$activation"
 grep -Fqx '{"storeLinkMaterialized":true}' "$store_file"
+
+ln -s "$explicit_store_config" "$explicit_store_home/.config/omarchy/shell.json"
+HOME="$explicit_store_home" USER=omanixy-test XDG_RUNTIME_DIR="$explicit_store_home/runtime" \
+  bash -c 'run() { "$@"; }; source "$1"' bash "$activation"
+explicit_store_file="$explicit_store_home/.config/omarchy/shell.json"
+test ! -L "$explicit_store_file"
+test "$(stat -c '%a' "$explicit_store_file")" = 600
+for plugin in omarchy.audio omarchy.network; do
+  jq -e --arg plugin "$plugin" '.disabledPlugins | index($plugin) != null' "$explicit_store_file" >/dev/null
+done
+
+custom_store_home="${home}-custom-store-link"
+mkdir -p "$custom_store_home/.config/omarchy"
+ln -s "$custom_store_config" "$custom_store_home/.config/omarchy/shell.json"
+HOME="$custom_store_home" USER=omanixy-test XDG_RUNTIME_DIR="$custom_store_home/runtime" \
+  bash -c 'run() { "$@"; }; source "$1"' bash "$activation"
+jq -e '.version == 1 and .custom == true and (has("disabledPlugins") | not)' \
+  "$custom_store_home/.config/omarchy/shell.json" >/dev/null
 
 mkdir -p "$malformed_store_home/.config/omarchy"
 ln -s "$malformed_store_config" "$malformed_store_home/.config/omarchy/shell.json"
@@ -137,6 +207,8 @@ test "$malformed_status" -ne 0
 test -L "$malformed_store_home/.config/omarchy/shell.json"
 test "$(readlink "$malformed_store_home/.config/omarchy/shell.json")" = "$malformed_store_config"
 grep -Fqx '{"disabledPlugins":' "$malformed_store_config"
-! compgen -G "$malformed_store_home/.config/omarchy/shell.json.omanixy.*" >/dev/null
+if compgen -G "$malformed_store_home/.config/omarchy/shell.json.omanixy.*" >/dev/null; then
+  exit 1
+fi
 
 printf 'configuration ownership checks passed\n'

@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root=${PRJ_ROOT:-$PWD}
+files=()
+
+if (($# > 0)); then
+  for path in "$@"; do
+    if [[ $path = /* ]]; then
+      files+=("$path")
+    else
+      files+=("$root/$path")
+    fi
+  done
+else
+  while IFS= read -r -d '' path; do
+    files+=("$path")
+  done < <(find "$root" -type f -name '*.nix' -not -path "$root/.git/*" -print0)
+fi
+
+if ((${#files[@]} == 0)); then
+  printf '%s\n' "no Nix files found below $root" >&2
+  exit 1
+fi
+
+exec nixpkgs-fmt "${files[@]}"

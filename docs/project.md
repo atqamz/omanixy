@@ -62,12 +62,13 @@ Omarchy
    ↓
 Omanixy
    ↓
-Universe
+consumer NixOS and Home Manager configuration
 ```
 
-`atqamz/universe` is a downstream dogfooding consumer.
-It may expose missing generic capabilities, but those capabilities must be
-generalized before entering Omanixy.
+`atqamz/universe` is a downstream dogfooding consumer and validation
+environment.
+It may expose missing generic capabilities, but Omanixy must never depend on
+it.
 Omanixy must never depend on Universe, Atqa-specific dotfiles, personal
 applications, personal keybindings, or machine-specific hardware policy.
 
@@ -100,7 +101,9 @@ architecture contract is implemented by the runtime baseline and remains the
 boundary for the compatibility audit, security integration, releases, and
 standalone adoption.
 Issue #2 selected and validated the concrete Quattro and Quickshell pair.
-Issues #3 and #4 own the remaining compatibility and security work.
+Issue #3 defines the compatibility ledger and narrow adapters; this branch
+implements the pinned baseline and its reviewed compatibility edges.
+Issue #4 owns the remaining security work.
 
 See [architecture.md](architecture.md) for the component contract and
 [upstream.md](upstream.md) for the current pinning boundary.
