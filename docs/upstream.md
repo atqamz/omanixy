@@ -121,7 +121,8 @@ upstream `bin/` tree.
 Each entry records the exact Quattro revision, source path, observable
 requirement, classification, ownership, dependencies, helper or native API,
 tests, and rationale.
-It distinguishes native Quickshell contracts from Omanixy adapters and records
+It distinguishes native Quickshell contracts from Omanixy adapters, records
+support state independently from compatibility classification, and records
 intentional omissions and issue #4 security boundaries.
 
 `scripts/audit-quattro-contracts` scans the pinned Quattro roots without
@@ -132,6 +133,10 @@ Its deterministic checked-in output is
 The flake check regenerates it from the exact source and fails closed when a
 new helper, executable, absolute helper path, environment variable, service,
 PAM path, or menu command appears.
+The security audit also scans the explicit pinned security-source inventory so
+new helper and executable references in lock, PAM, polkit, idle, notification,
+and their transitive host-policy scripts cannot hide behind the excluded
+upstream `bin/` tree.
 The audit is a static discovery guard, not proof of semantic completeness.
 The structured compatibility manifest adds referenced-helper hashes, consumer
 edges, adapter ownership, and focused-test edges, while closure checks make

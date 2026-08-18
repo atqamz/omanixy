@@ -11,6 +11,43 @@ from pathlib import Path
 
 
 TEXT_SUFFIXES = {".qml", ".js", ".sh"}
+# These are the pinned security sources whose helper and host contracts are
+# part of the issue #4 audit without making the complete upstream bin tree
+# reachable.
+SECURITY_SOURCE_ROLES = {
+    "shell/plugins/lock/Service.qml": "native lock service",
+    "shell/plugins/lock/LockView.qml": "native lock presentation",
+    "shell/plugins/lock/manifest.json": "native lock plugin manifest",
+    "shell/plugins/polkit/PolkitAgent.qml": "session polkit agent",
+    "shell/plugins/polkit/PolkitModel.js": "session polkit model",
+    "shell/plugins/polkit/manifest.json": "session polkit plugin manifest",
+    "shell/plugins/services/idle/Service.qml": "idle service",
+    "shell/plugins/services/idle/IdleModel.js": "idle model",
+    "shell/plugins/services/idle/manifest.json": "idle plugin manifest",
+    "shell/plugins/notifications/Service.qml": "notification daemon service",
+    "shell/plugins/notifications/NotificationLogic.js": "notification lifecycle",
+    "shell/plugins/notifications/manifest.json": "notification plugin manifest",
+    "bin/omarchy-apply-lock": "Arch PAM installer reference",
+    "bin/omarchy-system-lock": "lock action helper reference",
+    "bin/omarchy-system-wake": "wake action helper reference",
+    "bin/omarchy-hyprland-session-locked": "stranded lock probe reference",
+    "bin/omarchy-brightness-keyboard": "keyboard backlight helper reference",
+    "bin/omarchy-brightness-display": "display blank helper reference",
+    "bin/omarchy-hyprland-monitor-clamshell": "clamshell helper reference",
+    "bin/omarchy-hw-laptop-closed": "laptop lid helper reference",
+    "bin/omarchy-launch-screensaver": "screensaver helper reference",
+    "bin/omarchy-hyprland-focus-app": "notification focus helper reference",
+    "bin/omarchy-brightness-display-apple": "Apple display helper reference",
+    "bin/omarchy-brightness-display-ddc": "DDC display helper reference",
+    "bin/omarchy-hw-clamshell": "hardware clamshell helper reference",
+    "bin/omarchy-hw-display": "hardware display helper reference",
+    "bin/omarchy-hyprland-monitor-external-active": "external monitor helper reference",
+    "bin/omarchy-hyprland-monitor-focused": "focused monitor helper reference",
+    "bin/omarchy-hyprland-monitor-focused-apple": "focused Apple monitor helper reference",
+    "bin/omarchy-hyprland-monitor-internal": "internal monitor helper reference",
+    "bin/omarchy-hyprland-monitor-internal-mirror": "mirrored monitor helper reference",
+    "bin/omarchy-hyprland-monitor-laptop": "laptop monitor helper reference",
+}
 MENU_FIELDS = ("action", "when", "checked", "provider")
 ENV_RE = re.compile(r"\$(?:\{)?([A-Z][A-Z0-9_]*)(?:\})?")
 HELPER_RE = re.compile(r"(?<![A-Za-z0-9_-])(omarchy-[a-z0-9][a-z0-9-]*)(?![A-Za-z0-9_-])")
@@ -142,6 +179,7 @@ def main() -> int:
     services: list[dict[str, object]] = []
     security: list[dict[str, object]] = []
     menu_commands: list[dict[str, object]] = []
+    security_source_paths = set(SECURITY_SOURCE_ROLES)
 
     source_files = sorted(
         {
@@ -154,6 +192,11 @@ def main() -> int:
                 path
                 for path in (root / "config/omarchy").glob("shell.json")
                 if path.is_file()
+            ),
+            *(
+                root / relative
+                for relative in security_source_paths
+                if (root / relative).is_file()
             ),
         }
     )
@@ -240,7 +283,7 @@ def main() -> int:
 
             for match in HELPER_RE.finditer(line):
                 command_context = "\n".join(lines[max(0, line_index - 3):line_index])
-                if any(token in command_context for token in ("command", "execDetached", "exec(", "bar.run", "/bin/")):
+                if any(token in command_context for token in ("command", "execDetached", "exec(", "bar.run", "runProcess", "/bin/")):
                     helpers.append(record(relative, line_index, match.group(1), invocation="source"))
 
             for match in re.finditer(r"(?:^|[\"'])((?:bash|sh|env|timeout|systemctl|nmcli|bluetoothctl|wpctl|pactl|wl-copy|wl-paste|wtype|grim|slurp|curl|jq|hyprctl|gsettings|gtk-launch|uwsm-app|pkill|setpriv|find|mkdir|readlink|cp|mv|rm|top|ip|iw|ping|uuidgen|powerprofilesctl|upower|brightnessctl|rfkill))(?=\b)", line):
@@ -279,8 +322,21 @@ def main() -> int:
                         external.append(record(entry["path"], entry["line"], command, invocation=f"menu.{entry['field']}"))
 
     helpers.extend(absolute_helpers)
+    security_source_files = [
+        {
+            "path": path,
+            "role": role,
+            "present": (root / path).is_file(),
+        }
+        for path, role in sorted(SECURITY_SOURCE_ROLES.items())
+    ]
+    security_paths = set(SECURITY_SOURCE_ROLES)
+    security_helpers = [entry for entry in helpers if entry["path"] in security_paths]
+    security_executables = [entry for entry in external if entry["path"] in security_paths]
+    security_filesystem = [entry for entry in filesystem if entry["path"] in security_paths]
+    security_direct_commands = [entry for entry in direct_commands if entry["path"] in security_paths]
     result = {
-        "schema": 1,
+        "schema": 2,
         "roots": [
             "shell/shell.qml",
             "shell/services/",
@@ -300,6 +356,23 @@ def main() -> int:
         "native_quickshell_modules": sorted(imports),
         "service_contracts": sorted(services, key=lambda item: (item["name"], item["path"], item["line"])),
         "security_contracts": sorted(security, key=lambda item: (item["name"], item["path"], item["line"])),
+        "security_source_files": security_source_files,
+        "security_direct_shell_commands": sorted(
+            security_direct_commands,
+            key=lambda item: (item["path"], item["line"], item["name"]),
+        ),
+        "security_helpers": sorted(
+            security_helpers,
+            key=lambda item: (item["name"], item["path"], item["line"], item.get("invocation", "")),
+        ),
+        "security_external_executables": sorted(
+            security_executables,
+            key=lambda item: (item["name"], item["path"], item["line"]),
+        ),
+        "security_filesystem_contracts": sorted(
+            security_filesystem,
+            key=lambda item: (item["name"], item["path"], item["line"], item["kind"]),
+        ),
     }
     json.dump(result, sys.stdout, indent=2, sort_keys=True)
     sys.stdout.write("\n")

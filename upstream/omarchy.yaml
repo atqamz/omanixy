@@ -9,7 +9,13 @@ policy:
   integration_target: omarchy-quattro
   current_pin_role: validated-quattro-runtime
   maturity_definition:
-    validated: pinned_consumer_evidence_and_reference_hash_and_focused_behavioral_test_and_contract_closure
+    audited: pinned_consumer_evidence_and_reference_hash_and_deterministic_contract_audit
+    validated: audited_plus_focused_behavioral_test_and_contract_closure
+  support_state_definition:
+    supported: enabled_by_default_or_explicitly_supported_with_required_evidence
+    experimental: explicit_opt_in_with_bounded_failure_behavior_and_promotion_evidence_pending
+    omitted: intentionally_not_provided_by_omanixy
+    blocked: not_reachable_or_not_safe_to_enable
   runtime_pair:
     status: validated
     omarchy:
@@ -36,3 +42,30 @@ contract_audit:
     - config/omarchy/shell.json
     - default/omarchy/omarchy-menu.jsonc
   drift_policy: fail-closed-on-snapshot-change
+  security_scope:
+    source_roots:
+      - shell/plugins/lock/
+      - shell/plugins/polkit/
+      - shell/plugins/services/idle/
+      - shell/plugins/notifications/
+    helper_sources:
+      - bin/omarchy-apply-lock
+      - bin/omarchy-system-lock
+      - bin/omarchy-system-wake
+      - bin/omarchy-hyprland-session-locked
+      - bin/omarchy-brightness-keyboard
+      - bin/omarchy-brightness-display
+      - bin/omarchy-hyprland-monitor-clamshell
+      - bin/omarchy-hw-laptop-closed
+      - bin/omarchy-launch-screensaver
+      - bin/omarchy-hyprland-focus-app
+      - bin/omarchy-brightness-display-apple
+      - bin/omarchy-brightness-display-ddc
+      - bin/omarchy-hw-clamshell
+      - bin/omarchy-hw-display
+      - bin/omarchy-hyprland-monitor-external-active
+      - bin/omarchy-hyprland-monitor-focused
+      - bin/omarchy-hyprland-monitor-focused-apple
+      - bin/omarchy-hyprland-monitor-internal
+      - bin/omarchy-hyprland-monitor-internal-mirror
+      - bin/omarchy-hyprland-monitor-laptop

@@ -394,6 +394,13 @@
             ${pkgs.bash}/bin/bash ${./test/quattro-contract-audit.sh} ${./.}
             touch "$out"
           '';
+          security-contracts = pkgs.runCommand "omanixy-security-contracts"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.jq pkgs.ripgrep (pkgs.python3.withPackages (ps: [ ps.pyyaml ])) ];
+            } ''
+            PYTHON=${pkgs.python3.withPackages (ps: [ ps.pyyaml ])}/bin/python ${pkgs.bash}/bin/bash ${./test/security-contracts.sh} ${./.} ${runtime.passthru.omarchyCompatibilityRoot}
+            touch "$out"
+          '';
           contract-closure = pkgs.runCommand "omanixy-contract-closure"
             {
               nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gawk pkgs.gnugrep pkgs.gnused pkgs.jq pkgs.procps pkgs.python3 pkgs.util-linux ];

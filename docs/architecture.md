@@ -154,6 +154,41 @@ mandatory for every consumer.
 Opinionated defaults introduced during implementation must remain overridable,
 using `lib.mkDefault` where appropriate.
 
+### Security and session ownership
+
+Security and session ownership are not presentation feature selection.
+The existing `programs.omanixy.features` graph may select a notification-send
+client capability, but it must not select ownership of a lock service, polkit
+agent, idle manager, or notification daemon.
+
+The foundation model has independent dimensions:
+
+| Dimension | Question | Default |
+| --- | --- | --- |
+| Presentation | Does pinned Quattro contain the UI? | upstream evidence only |
+| Session ownership | Which component owns lock, polkit agent, idle, or notification daemon? | consumer or external |
+| System capability | Which host APIs or privileged services are available? | consumer NixOS policy |
+| Compatibility | Is the contract exact, adapted, omitted, or blocked? | ledger classification |
+| Support state | Is it supported, experimental, omitted, or blocked? | blocked until promoted |
+| Evidence | Which validation level has passed? | static audit for the foundation |
+
+The Home Manager module owns user and session integration.
+The NixOS module owns declarative PAM, polkit, and other privileged system
+capabilities when a later layer proves they are required.
+The core shell must remain usable without importing the NixOS module.
+
+Native Quattro security ownership is an explicit opt-in and starts
+experimental.
+Consumer-owned lock, polkit agent, idle manager, and notification daemon
+remain safe defaults.
+Omanixy does not kill or disable an unknown external owner to make an opt-in
+surface work.
+Known declarative conflicts may produce a diagnostic or assertion, while
+runtime registration failure must remain bounded and observable.
+
+The security contract and promotion gate are recorded in
+[`docs/decisions/0005-quattro-security-session-boundary.md`](decisions/0005-quattro-security-session-boundary.md).
+
 ## Public Nix API contract
 
 The obvious minimal Home Manager entry point is:

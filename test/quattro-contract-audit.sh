@@ -14,7 +14,7 @@ run_scan() {
   "$python" "$scanner" "$1"
 }
 
-mkdir -p "$fixture/shell/services" "$fixture/default/omarchy" "$fixture/config/omarchy" "$fixture/bin"
+mkdir -p "$fixture/shell/services" "$fixture/shell/plugins/lock" "$fixture/default/omarchy" "$fixture/config/omarchy" "$fixture/bin"
 absolute_path=\$OMARCHY_PATH
 {
   printf '%s\n' 'Process { command: ["omarchy-fixture-helper", "--verbose"] }'
@@ -33,6 +33,7 @@ printf '%s\n' 'FileView { path: Quickshell.env("lowercase_runtime_variable") }' 
 printf '%s\n' 'import Quickshell.Networking' 'import Quickshell.Services.Mpris' '/etc/pam.d/fixture; /etc/fixture.conf; org.freedesktop.Fixture' > "$fixture/shell/services/Native.qml"
 printf '%s\n' '{"fixture": {"action": "omarchy-menu-helper --flag", "when": "fixture-guard", "checked": "fixture-check", "provider": "fixture-provider"}}' > "$fixture/default/omarchy/omarchy-menu.jsonc"
 printf '%s\n' 'omarchy-unreachable' > "$fixture/bin/omarchy-unreachable"
+printf '%s\n' 'Process { command: ["omarchy-security-fixture"] }' > "$fixture/shell/plugins/lock/Service.qml"
 
 run_scan "$fixture" > "$output"
 run_scan "$fixture" > "$repeat"
@@ -52,6 +53,9 @@ jq -e '.filesystem_contracts | map(.name) | index("/etc/fixture.conf") != null' 
 jq -e '.native_quickshell_modules | sort == ["Quickshell.Networking", "Quickshell.Services.Mpris"]' "$output" >/dev/null
 jq -e '.environment_variables | index("CUSTOM_RUNTIME_VARIABLE") != null' "$output" >/dev/null
 jq -e '.environment_variables | index("lowercase_runtime_variable") != null' "$output" >/dev/null
+jq -e '.schema == 2' "$output" >/dev/null
+jq -e '.security_source_files | any(.[]; .path == "shell/plugins/lock/Service.qml" and .present == true)' "$output" >/dev/null
+jq -e '.security_helpers | map(.name) | index("omarchy-security-fixture") != null' "$output" >/dev/null
 
 if cmp "$output" "$snapshot" >/dev/null 2>&1; then
   printf '%s\n' 'fixture unexpectedly matched the pinned snapshot' >&2
@@ -65,6 +69,8 @@ cp "$output" "$repeat"
   printf '%s\n' '/etc/pam.d/new-service; org.freedesktop.NewService'
   printf '%s\n' "Quickshell.execDetached([\"${absolute_path}/bin/omarchy-new-absolute\"])"
 } > "$fixture/shell/services/Drift.qml"
+printf '%s\n' 'Process { command: ["omarchy-security-new"] }' >> "$fixture/shell/plugins/lock/Service.qml"
+printf '%s\n' '/etc/pam.d/new-security-service; WlSessionLock; org.freedesktop.NewSecurityService' >> "$fixture/shell/plugins/lock/Service.qml"
 sed -i 's/}}$/},"drift":{"action":"omarchy-menu-new"}}/' "$fixture/default/omarchy/omarchy-menu.jsonc"
 if cmp "$repeat" <(run_scan "$fixture") >/dev/null 2>&1; then
   printf '%s\n' 'new contracts did not change the audit snapshot' >&2
@@ -75,5 +81,9 @@ jq -e '.external_executables | map(.name) | index("new-external") != null' <(run
 jq -e '.absolute_helper_paths | map(.name) | index("omarchy-new-absolute") != null' <(run_scan "$fixture") >/dev/null
 jq -e '.security_contracts | map(.name) | index("/etc/pam.d/new-service") != null' <(run_scan "$fixture") >/dev/null
 jq -e '.service_contracts | map(.name) | index("org.freedesktop.NewService") != null' <(run_scan "$fixture") >/dev/null
+jq -e '.security_contracts | map(.name) | index("/etc/pam.d/new-security-service") != null' <(run_scan "$fixture") >/dev/null
+jq -e '.security_contracts | map(.name) | index("WlSessionLock") != null' <(run_scan "$fixture") >/dev/null
+jq -e '.service_contracts | map(.name) | index("org.freedesktop.NewSecurityService") != null' <(run_scan "$fixture") >/dev/null
+jq -e '.security_helpers | map(.name) | index("omarchy-security-new") != null' <(run_scan "$fixture") >/dev/null
 
 printf '%s\n' 'quattro contract audit tests passed'
