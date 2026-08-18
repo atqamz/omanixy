@@ -496,10 +496,16 @@ boundary.
 The same patch script converts the stranded-lock recovery `Process` from a
 `bash -c "omarchy-hyprland-session-locked"` string into direct argv
 (`["omarchy-hyprland-session-locked"]`), and converts the wake/blank
-`Process` commands from the keyboard-backlight/wake helpers into bounded
-Hyprland DPMS dispatches (`hyprctl dispatch 'hl.dsp.dpms({ action = "..." })'`
-via direct argv), matching the existing `omarchy-brightness-display` adapter
-convention rather than porting keyboard-backlight or clamshell logic.
+`Process` commands from the `omarchy-system-wake`/`omarchy-brightness-keyboard`/
+`omarchy-brightness-display` helper invocations into direct-argv, time-bounded
+Hyprland DPMS dispatches
+(`["timeout", "--kill-after=1s", "3s", "hyprctl", "dispatch", "hl.dsp.dpms({ action = \"...\" })"]`),
+reusing the same `timeout --kill-after=1s 3s` bound
+`packages/omanixy-shell/adapters/common.bash`'s `timed()` already validates,
+so a wedged `hyprctl` cannot stall the lock screen's wake/blank path
+indefinitely. Neither the pinned wake/blank calls nor this replacement ever
+involved clamshell logic; that concern belongs to the unrelated lid/monitor
+helpers audited elsewhere in this ADR.
 
 `omarchy-hyprland-session-locked` is a new narrow adapter
 (`packages/omanixy-shell/adapters/lock.bash`) implementing the exit-code ABI
@@ -517,6 +523,40 @@ that ledger's helper set is exact-matched against
 `test/compat-adapters.sh`'s executed test cases by
 `test/compatibility-test-matrix.sh`, and this helper's fake-backend coverage
 lives in `test/security-lock.sh` instead, outside that cross-check.
+
+### Executable surface scanning and independence proofs
+
+`scripts/scan-lock-executable-surface` fail-closed scans every `command:
+[...]` array in the FINAL patched `Service.qml` against an explicit
+allowlist: the executable position must be a literal naming an allowed
+direct executable (`readlink`, `omarchy-hyprland-session-locked`) or the
+`timeout` wrapper around an allowed wrapped executable (`hyprctl`) with a
+literal duration, and a `bash`+`-c` shape is rejected regardless of token
+position. `test/security-lock-executable-surface.sh` proves this against the
+real patched file plus adversarial fixtures - an unknown tool, a
+reintroduced `bash -c` shape (including reordered under `timeout`), a
+dynamic (non-literal) executable or duration, and an unknown executable
+wrapped by `timeout` - are all rejected, while the three real patched-file
+command shapes still pass.
+
+`test/security-lock-managed-plugin.sh` proves the `PluginRegistry.qml`
+managed-security override with real QML behavior rather than a source grep:
+it instantiates the generated registry directly and drives `isEnabled`/
+`setEnabled` against both a plain lock-enabled registry and one with a
+hostile local plugin shadowing the `omarchy.lock` id as a `bar`-kind entry,
+proving the managed override still wins, never mutates
+`shellConfigMutator`, and reports the disabled-capability case as
+unreachable.
+
+`test/security-lock-core-only.sh` proves `security.lock` does not widen a
+core-only build's dependency surface at all: rather than checking a
+hardcoded list of presentation-package name patterns (core-runtime already
+pulls in packages like `pipewire`, `bluez`, `libnotify`, `uwsm`, and
+`qrencode` transitively through `hyprland`/`systemd`, independent of any
+Omanixy feature or of `security.lock`, so a pattern list drifts out of sync
+with that baseline), it compares the core-only and core+lock closures
+directly by package name and asserts the lock capability adds zero new
+names.
 
 ### Conditional packaging
 

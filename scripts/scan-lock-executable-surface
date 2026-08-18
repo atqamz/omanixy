@@ -1,0 +1,118 @@
+#!/usr/bin/env python3
+"""Fail-closed scan of the patched Service.qml's Process.command executable surface.
+
+Validates every command: [...] array against an explicit allowlist: the
+executable position must be a literal string naming an allowed executable,
+a bash -c shape is always rejected regardless of position, and a timeout
+wrapper's own wrapped executable is checked against a separate allowlist so
+a bound cannot be used to smuggle in an arbitrary command.
+"""
+
+from __future__ import annotations
+
+import re
+import sys
+from pathlib import Path
+
+COMMAND_RE = re.compile(r"command\s*:\s*\[([^\]]*)\]")
+STRING_RE = re.compile(r'"(?:\\.|[^"\\])*"')
+DURATION_RE = re.compile(r"^[0-9]+(?:\.[0-9]+)?[smhd]?$")
+
+WRAPPER = "timeout"
+ALLOWED_DIRECT = {"readlink", "omarchy-hyprland-session-locked"}
+ALLOWED_WRAPPED = {"hyprctl"}
+
+
+def fail(message: str) -> None:
+    print(f"lock executable surface: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def unescape(literal: str) -> str:
+    return literal[1:-1].replace('\\"', '"').replace("\\\\", "\\")
+
+
+def tokenize(array_body: str) -> list[tuple[str, bool]]:
+    """Split a command: [...] body into (value, is_literal) tokens."""
+    tokens: list[tuple[str, bool]] = []
+    pos = 0
+    length = len(array_body)
+    while pos < length:
+        while pos < length and array_body[pos] in " \t,":
+            pos += 1
+        if pos >= length:
+            break
+        match = STRING_RE.match(array_body, pos)
+        if match:
+            tokens.append((unescape(match.group(0)), True))
+            pos = match.end()
+            continue
+        end = array_body.find(",", pos)
+        if end < 0:
+            end = length
+        tokens.append((array_body[pos:end].strip(), False))
+        pos = end
+    return tokens
+
+
+def check_command(tokens: list[tuple[str, bool]], context: str) -> None:
+    if not tokens:
+        fail(f"{context}: empty command array")
+
+    values = [value for value, _literal in tokens]
+    if "bash" in values and "-c" in values:
+        fail(f"{context}: bash -c shape is reachable ({values!r})")
+
+    exe_value, exe_literal = tokens[0]
+    if not exe_literal:
+        fail(f"{context}: dynamic executable shape ({exe_value!r} is not a literal)")
+
+    if exe_value == WRAPPER:
+        index = 1
+        while index < len(tokens) and tokens[index][1] and tokens[index][0].startswith("-"):
+            index += 1
+        if index >= len(tokens) or not tokens[index][1] or not DURATION_RE.match(tokens[index][0]):
+            fail(f"{context}: dynamic or missing {WRAPPER} duration shape")
+        index += 1
+        if index >= len(tokens):
+            fail(f"{context}: {WRAPPER} wrapper has no wrapped executable")
+        wrapped_value, wrapped_literal = tokens[index]
+        if not wrapped_literal:
+            fail(f"{context}: dynamic executable shape wrapped by {WRAPPER} ({wrapped_value!r})")
+        if wrapped_value not in ALLOWED_WRAPPED:
+            fail(f"{context}: unknown executable wrapped by {WRAPPER}: {wrapped_value!r}")
+        return
+
+    if exe_value in ALLOWED_DIRECT:
+        return
+
+    if exe_value.startswith("omarchy-"):
+        fail(f"{context}: unknown omarchy-* helper: {exe_value!r}")
+
+    fail(f"{context}: unknown executable: {exe_value!r}")
+
+
+def scan(text: str) -> int:
+    count = 0
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        for match in COMMAND_RE.finditer(line):
+            tokens = tokenize(match.group(1))
+            check_command(tokens, f"line {lineno}")
+            count += 1
+    return count
+
+
+def main() -> int:
+    if len(sys.argv) != 2:
+        print(f"usage: {sys.argv[0]} SERVICE_QML", file=sys.stderr)
+        return 2
+    path = Path(sys.argv[1])
+    count = scan(path.read_text())
+    if count == 0:
+        fail(f"no command: [...] arrays found in {path}")
+    print(f"lock executable surface: {count} command arrays passed", file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -83,6 +83,7 @@
           powerRuntime = runtimeFor system [ "power" ];
           notificationRuntime = runtimeFor system [ "notification" ];
           lockRuntime = runtimeForSecurity system null { lock = true; };
+          coreLockRuntime = runtimeForSecurity system [ "core" ] { lock = true; };
           capabilityRuntimePaths = pkgs.writeText "omanixy-capability-runtime-paths" (builtins.toJSON {
             "audio-control" = toString audioRuntime;
             "audio-default-output" = toString audioRuntime;
@@ -116,6 +117,8 @@
           };
           runtimeClosureInfo = pkgs.closureInfo { rootPaths = [ runtime ]; };
           lockRuntimeClosureInfo = pkgs.closureInfo { rootPaths = [ lockRuntime ]; };
+          coreLockRuntimeClosureInfo = pkgs.closureInfo { rootPaths = [ coreLockRuntime ]; };
+          coreRuntimeClosureInfo = pkgs.closureInfo { rootPaths = [ coreRuntime ]; };
           compatibilityRoot = runtime.passthru.omarchyCompatibilityRoot;
           baselineConfigForTests = builtins.removeAttrs
             (builtins.fromJSON (builtins.readFile ./upstream/shell-baseline.json))
@@ -620,13 +623,14 @@
               integratedOnOffOk = if toplevelForced integratedPamOnLockOffNixosConfiguration then "true" else "false";
               integratedOffOnOk = if toplevelForced integratedPamOffLockOnNixosConfiguration then "true" else "false";
               integratedOnOnOk = if toplevelForced integratedPamOnLockOnNixosConfiguration then "true" else "false";
-              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.jq ];
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.jq pkgs.procps ];
             } ''
             ${pkgs.bash}/bin/bash ${./test/security-lock.sh} \
               ${lockRuntime.passthru.omarchyCompatibilityRoot} ${lockRuntime.passthru.compatibilityBin} ${lockRuntime} \
               ${compatibilityRoot} ${runtime.passthru.compatibilityBin} \
               "$standaloneLockDisabledOk" "$standaloneLockEnabledOk" \
-              "$integratedOffOffOk" "$integratedOnOffOk" "$integratedOffOnOk" "$integratedOnOnOk"
+              "$integratedOffOffOk" "$integratedOnOffOk" "$integratedOffOnOk" "$integratedOnOnOk" \
+              ${./packages/omanixy-shell/adapters/common.bash} ${./packages/omanixy-shell/adapters/lock.bash}
             touch "$out"
           '';
           security-lock-shell-json = pkgs.runCommand "omanixy-security-lock-shell-json"
@@ -645,6 +649,36 @@
             ${pkgs.bash}/bin/bash ${./test/security-lock-closure.sh} \
               ${lockRuntime} "$lockClosurePaths" \
               ${lockRuntime.passthru.compatibilityBin} ${runtime.passthru.compatibilityBin}
+            touch "$out"
+          '';
+          security-lock-executable-surface = pkgs.runCommand "omanixy-security-lock-executable-surface"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.python3 ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-lock-executable-surface.sh} \
+              ${./scripts/scan-lock-executable-surface} \
+              ${lockRuntime.passthru.omarchyCompatibilityRoot}/shell/plugins/lock/Service.qml \
+              ${pkgs.python3}/bin/python3
+            touch "$out"
+          '';
+          security-lock-managed-plugin = pkgs.runCommand "omanixy-security-lock-managed-plugin"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-lock-managed-plugin.sh} \
+              ${lockRuntime.passthru.omarchyCompatibilityRoot} ${lockRuntime}/bin/quickshell \
+              ${compatibilityRoot} ${runtime}/bin/quickshell
+            touch "$out"
+          '';
+          security-lock-core-only = pkgs.runCommand "omanixy-security-lock-core-only"
+            {
+              coreClosurePaths = "${coreRuntimeClosureInfo}/store-paths";
+              coreLockClosurePaths = "${coreLockRuntimeClosureInfo}/store-paths";
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.findutils pkgs.diffutils pkgs.jq ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-lock-core-only.sh} \
+              ${coreLockRuntime.passthru.compatibilityBin} ${coreRuntime.passthru.compatibilityBin} \
+              "$coreClosurePaths" "$coreLockClosurePaths"
             touch "$out"
           '';
           quattro-contract-audit = pkgs.runCommand "omanixy-quattro-contract-audit"

@@ -933,19 +933,12 @@ items:
         - Wayland session lock protocol
         - Hyprland monitor state
         - display DPMS
-        - optional keyboard backlight
     helpers:
       - omarchy-shell
-      - omarchy-system-lock
-      - omarchy-system-wake
       - omarchy-hyprland-session-locked
-      - omarchy-brightness-display
-      - omarchy-brightness-keyboard
-      - omarchy-hyprland-monitor-clamshell
     filesystem:
       - /etc/pam.d/omarchy-lock-password
       - ~/.local/state/omarchy/current/background
-      - /sys/class/leds/*kbd_backlight*
     pam:
       password_service: omarchy-lock-password
       fingerprint_service: omarchy-lock-fingerprint
@@ -966,9 +959,11 @@ items:
         - hermetic osConfig-based PASS/FAIL assertion matrix proving the HM-to-NixOS PAM handshake fails closed for standalone Home Manager and for integrated PAM-disabled configurations, and passes only when PAM is enabled
         - hermetic proof the fingerprint enrollment probe, its PAM conversation, and its retry loop are removed from the patched Service.qml, with fingerprintConfigured forced false
         - hermetic proof the stranded-lock helper is invoked as direct argv rather than through bash -c
-        - hermetic proof wake and blank are bounded Hyprland DPMS dispatches, not the keyboard-backlight or clamshell helpers
+        - hermetic proof wake and blank are bounded, timeout-wrapped Hyprland DPMS dispatches, not the keyboard-backlight or system-wake helpers
         - hermetic proof the lock source tree is packaged only when the security capability is enabled, and never mutates the user-owned shell.json
         - hermetic proof a Nix-managed-enabled security plugin overrides an attempted user disable in PluginRegistry.qml with a deterministic error, while leaving the override list empty when the capability is off
+        - fail-closed scan of the patched Service.qml's Process.command executable surface against an explicit allowlist, with adversarial fixtures proving unknown executables, dynamic executable positions, and bash -c shapes are all rejected
+        - hermetic proof security.lock adds zero new package names to a core-only build's closure, comparing the core-only and core+lock closures directly rather than a hardcoded presentation-package pattern list
       required_before_promotion:
         - crash and restart with an ext-session-lock held
         - stranded lock detection and recovery
@@ -980,6 +975,9 @@ items:
       - test/security-contracts.sh
       - test/security-lock.sh
       - test/security-lock-shell-json.sh
+      - test/security-lock-executable-surface.sh
+      - test/security-lock-managed-plugin.sh
+      - test/security-lock-core-only.sh
     notes:
       - The initial native topology is in-process because it preserves the pinned service and recovery model; it remains experimental because third-party QML shares the process trust boundary.
       - Omanixy does not enable the lock plugin, install a lock agent, or write PAM configuration in layer 1.
