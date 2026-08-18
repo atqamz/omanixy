@@ -41,6 +41,32 @@ printf '%s\n' 'Item { }' > "$fixture/shell/plugins/notifications/Card.qml"
   printf '%s\n' '#!/usr/bin/env bash'
   printf '%s\n' 'mystery-security-tool --probe'
 } > "$fixture/shell/plugins/lock/probe.sh"
+printf '%s\n' \
+  '#!/usr/bin/env bash' \
+  'runner=literal-runner' \
+  '"$runner" --probe' \
+  '$runner --probe' \
+  'env "$runner" --probe' \
+  'timeout 2 "$runner" --probe' \
+  'command "$runner" --probe' \
+  'exec "$runner" --probe' \
+  'runtime_lib=/fixture/lib.sh' \
+  'source "$runtime_lib"' \
+  '. "$runtime_lib"' \
+  'eval "$command"' \
+  'bash -c "$payload"' \
+  "bash -c 'literal-payload-tool --probe'" \
+  'foo=bar literal-assignment-tool --probe' \
+  'foo=bar "$runner" --probe' \
+  'literal-pipeline-a | "$runner"' \
+  'literal-chain-a && "$runner"' \
+  'literal-chain-b || "$runner"' \
+  'devices+=1 literal-array-prefixed-tool --probe' \
+  "cat <<'EOF' > /etc/fixture-heredoc.conf" \
+  'account required literal-heredoc-should-not-appear.so' \
+  'auth required pam_fixture.so' \
+  'EOF' \
+  > "$fixture/bin/omarchy-apply-lock"
 
 run_scan "$fixture" > "$output"
 run_scan "$fixture" > "$repeat"
@@ -51,7 +77,7 @@ jq -e '.direct_shell_commands | map(.name) | index("omarchy-bar-helper") != null
 jq -e '.external_executables | map(.name) | index("fixture-tool") != null' "$output" >/dev/null
 jq -e '.absolute_helper_paths | map(.name) | index("omarchy-unreachable") == null' "$output" >/dev/null
 jq -e '.absolute_helper_paths | map(.name) | index("omarchy-fixture-absolute") != null' "$output" >/dev/null
-jq -e '.dynamic_commands | length == 5' "$output" >/dev/null
+jq -e '.dynamic_commands | length == 19' "$output" >/dev/null
 jq -e '.direct_omarchy_helpers | map(.name) | index("omarchy-dynamic-helper") != null' "$output" >/dev/null
 jq -e '.external_executables | map(.name) | index("dynamic-external") != null' "$output" >/dev/null
 jq -e '.menu_commands | map(.field) | sort == ["action", "checked", "provider", "when"]' "$output" >/dev/null
@@ -60,7 +86,84 @@ jq -e '.filesystem_contracts | map(.name) | index("/etc/fixture.conf") != null' 
 jq -e '.native_quickshell_modules | sort == ["Quickshell.Networking", "Quickshell.Services.Mpris"]' "$output" >/dev/null
 jq -e '.environment_variables | index("CUSTOM_RUNTIME_VARIABLE") != null' "$output" >/dev/null
 jq -e '.environment_variables | index("lowercase_runtime_variable") != null' "$output" >/dev/null
-jq -e '.schema == 3' "$output" >/dev/null
+jq -e '.schema == 4' "$output" >/dev/null
+
+# Section 7 adversarial cases A-F: every dynamic/ambiguous shape inside the
+# BFS-traversed omarchy-apply-lock helper is a visible, categorized record -
+# never silently dropped, and never misclassified as a literal executable.
+jq -e '.security_dynamic_executions | map(.category) | index("variable-command-head") != null' "$output" >/dev/null
+jq -e '.security_dynamic_executions | map(.category) | index("dynamic-source") != null' "$output" >/dev/null
+jq -e '.security_dynamic_executions | map(.category) | index("eval") != null' "$output" >/dev/null
+jq -e '.security_dynamic_executions | map(.category) | index("dynamic-shell-payload") != null' "$output" >/dev/null
+jq -e '.security_dynamic_executions | all(.invocation == "helper-shell")' "$output" >/dev/null
+jq -e '.security_dynamic_executions | length >= 10' "$output" >/dev/null
+jq -e '.security_external_executables | map(.name) | index("literal-payload-tool") != null' "$output" >/dev/null
+jq -e '.security_external_executables | map(.name) | index("literal-assignment-tool") != null' "$output" >/dev/null
+jq -e '.security_external_executables | map(.name) | index("literal-pipeline-a") != null' "$output" >/dev/null
+jq -e '.security_external_executables | map(.name) | index("literal-chain-a") != null' "$output" >/dev/null
+jq -e '.security_external_executables | map(.name) | index("literal-chain-b") != null' "$output" >/dev/null
+jq -e '.security_external_executables | map(.name) | index("bash") != null' "$output" >/dev/null
+jq -e '.security_external_executables | map(.name) | index("env") != null' "$output" >/dev/null
+jq -e '.security_external_executables | map(.name) | index("timeout") != null' "$output" >/dev/null
+jq -e '.security_external_executables | map(.name) | index("literal-runner") == null' "$output" >/dev/null
+
+# Regression: a `name+=value` array-append assignment prefix is not a
+# command name itself - the real command word that follows it in the same
+# part must still be discovered, exactly like a plain `name=value` prefix.
+jq -e '.security_external_executables | map(.name) | index("literal-array-prefixed-tool") != null' "$output" >/dev/null
+
+# Regression: a heredoc body is literal data, never shell syntax - none of
+# its lines (a PAM-style "account"/"auth" directive or the closing
+# delimiter itself) may surface as a discovered command name.
+jq -e '.security_external_executables | map(.name) | index("account") == null' "$output" >/dev/null
+jq -e '.security_external_executables | map(.name) | index("auth") == null' "$output" >/dev/null
+jq -e '.security_external_executables | map(.name) | index("EOF") == null' "$output" >/dev/null
+jq -e '.security_external_executables | map(.name) | index("literal-heredoc-should-not-appear.so") == null' "$output" >/dev/null
+
+# Regression: a subshell-closing paren is not a case-arm pattern terminator -
+# shell_command_line must leave a bare `) redirect &` fragment untouched
+# rather than stripping the paren and promoting the redirect word into
+# command position.
+PYTHONPATH="$repo/scripts" "$python" - "$scanner" <<'PY'
+import importlib.machinery
+import importlib.util
+import sys
+
+loader = importlib.machinery.SourceFileLoader("audit_quattro_contracts", sys.argv[1])
+spec = importlib.util.spec_from_loader(loader.name, loader)
+module = importlib.util.module_from_spec(spec)
+loader.exec_module(module)
+
+line = '  ) 9>"${FIXTURE_LOCK_DIR:-/tmp}/fixture.lock" &'
+assert module.shell_command_line(line) == line, module.shell_command_line(line)
+PY
+
+# Section 4/7 case H: every dynamic execution in this fixture is genuinely
+# unreviewed (the pinned disposition table only covers the real pinned repo),
+# and every real disposition is correctly reported dead against a tree that
+# does not contain the shape it was reviewed against - the mechanism works in
+# both directions on an arbitrary tree, not just the pinned snapshot.
+jq -e '(.security_unreviewed_dynamic_executions | length) == (.security_dynamic_executions | length)' "$output" >/dev/null
+jq -e '.security_dead_dynamic_execution_dispositions | length > 0' "$output" >/dev/null
+
+# Section 5/7 case G: dead_dispositions is a pure function the check FAILS
+# against - a fabricated unused entry must be reported, not swallowed.
+PYTHONPATH="$repo/scripts" "$python" - "$scanner" <<'PY'
+import importlib.machinery
+import importlib.util
+import sys
+
+loader = importlib.machinery.SourceFileLoader("audit_quattro_contracts", sys.argv[1])
+spec = importlib.util.spec_from_loader(loader.name, loader)
+module = importlib.util.module_from_spec(spec)
+loader.exec_module(module)
+
+dead = module.dead_dispositions(
+    {"bin/omarchy-real": "audited-source", "bin/omarchy-never-reached": "audited-source"},
+    {"bin/omarchy-real"},
+)
+assert dead == {"bin/omarchy-never-reached"}, dead
+PY
 
 # Finding 1: a security source with no hand-added filename entry is discovered
 # purely by living under a declared root, and carries a content hash.

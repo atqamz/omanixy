@@ -133,14 +133,22 @@ Its deterministic checked-in output is
 The flake check regenerates it from the exact source and fails closed when a
 new helper, executable, absolute helper path, environment variable, service,
 PAM path, or menu command appears.
-The security audit also scans the explicit pinned security-source inventory so
-new helper and executable references in lock, PAM, polkit, idle, notification,
-and their transitive host-policy scripts cannot hide behind the excluded
-upstream `bin/` tree.
+The security audit also scans the explicit pinned security-source inventory
+and follows the helper closure from each edge whose disposition is
+`audited-source`, so new helper and executable references in lock, PAM,
+polkit, idle, notification, and their audited-source host-policy scripts
+cannot hide behind the excluded upstream `bin/` tree.
+A helper edge dispositioned anything other than `audited-source` is recorded
+but not traversed further: that disposition is a reviewed decision to trust
+the helper at its own boundary, not a claim that whatever it in turn invokes
+has also been discovered.
 The audit is a static discovery guard, not proof of semantic completeness.
 The structured compatibility manifest adds referenced-helper hashes, consumer
 edges, adapter ownership, and focused-test edges, while closure checks make
 those relationships fail closed.
+A referenced-helper hash is provenance and drift evidence: it proves the file
+is unchanged since its disposition was reviewed, not that its behavior is
+safe.
 Its external executable capability map is consumed by the feature-consumer
 closure and runtime capability checks, so a known command added to a selected
 source requires its capability to be present in that presentation feature's

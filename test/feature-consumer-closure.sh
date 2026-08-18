@@ -453,7 +453,7 @@ if "${PYTHON:-python3}" "$checker" "$unknown_eval_payload" "$pinned_source" \
   printf '%s\n' 'feature consumer closure accepted eval pacman in a script payload' >&2
   exit 1
 fi
-grep -Fq 'unknown external executable: eval' "$test_root/unknown-eval-payload-error"
+grep -Fq 'unknown external executable: pacman' "$test_root/unknown-eval-payload-error"
 printf '%s\n' 'REJECTED eval pacman in a script payload'
 
 dynamic_array_payload="$test_root/dynamic-array-payload-root"

@@ -308,6 +308,12 @@
       "path": "default/omarchy/omarchy-menu.jsonc"
     },
     {
+      "invocation": "shell-eval",
+      "line": 411,
+      "name": "omarchy-brightness-display",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
       "invocation": "source",
       "line": 411,
       "name": "omarchy-brightness-display",
@@ -330,6 +336,12 @@
       "line": 247,
       "name": "omarchy-brightness-display",
       "path": "shell/plugins/panels/monitor/Panel.qml"
+    },
+    {
+      "invocation": "shell-eval",
+      "line": 411,
+      "name": "omarchy-brightness-keyboard",
+      "path": "shell/plugins/lock/Service.qml"
     },
     {
       "invocation": "source",
@@ -1221,6 +1233,12 @@
       "path": "default/omarchy/omarchy-menu.jsonc"
     },
     {
+      "invocation": "shell-eval",
+      "line": 171,
+      "name": "omarchy-hw-laptop-closed",
+      "path": "shell/plugins/polkit/PolkitAgent.qml"
+    },
+    {
       "invocation": "source",
       "line": 171,
       "name": "omarchy-hw-laptop-closed",
@@ -1278,6 +1296,12 @@
       "line": 308,
       "name": "omarchy-hyprland-monitor-scaling",
       "path": "shell/plugins/panels/monitor/Panel.qml"
+    },
+    {
+      "invocation": "shell-eval",
+      "line": 391,
+      "name": "omarchy-hyprland-session-locked",
+      "path": "shell/plugins/lock/Service.qml"
     },
     {
       "invocation": "source",
@@ -3479,6 +3503,12 @@
       "path": "shell/plugins/panels/power/Panel.qml"
     },
     {
+      "invocation": "shell-eval",
+      "line": 406,
+      "name": "omarchy-system-wake",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
       "invocation": "source",
       "line": 406,
       "name": "omarchy-system-wake",
@@ -3523,6 +3553,12 @@
       "path": "default/omarchy/omarchy-menu.jsonc"
     },
     {
+      "invocation": "shell-eval",
+      "line": 113,
+      "name": "omarchy-theme-bg-set",
+      "path": "shell/plugins/background/Background.qml"
+    },
+    {
       "invocation": "source",
       "line": 113,
       "name": "omarchy-theme-bg-set",
@@ -3534,6 +3570,12 @@
       "line": 0,
       "name": "omarchy-theme-bg-switcher",
       "path": "default/omarchy/omarchy-menu.jsonc"
+    },
+    {
+      "invocation": "shell-eval",
+      "line": 113,
+      "name": "omarchy-theme-bg-switcher",
+      "path": "shell/plugins/background/Background.qml"
     },
     {
       "invocation": "source",
@@ -3556,6 +3598,12 @@
       "path": "default/omarchy/omarchy-menu.jsonc"
     },
     {
+      "invocation": "shell-eval",
+      "line": 119,
+      "name": "omarchy-theme-set",
+      "path": "shell/plugins/background/Background.qml"
+    },
+    {
       "invocation": "source",
       "line": 119,
       "name": "omarchy-theme-set",
@@ -3567,6 +3615,12 @@
       "line": 0,
       "name": "omarchy-theme-switcher",
       "path": "default/omarchy/omarchy-menu.jsonc"
+    },
+    {
+      "invocation": "shell-eval",
+      "line": 119,
+      "name": "omarchy-theme-switcher",
+      "path": "shell/plugins/background/Background.qml"
     },
     {
       "invocation": "source",
@@ -3685,6 +3739,12 @@
       "invocation": "source",
       "line": 36,
       "name": "omarchy-voxtype-config",
+      "path": "shell/plugins/bar/indicators/Dictation.qml"
+    },
+    {
+      "invocation": "shell-eval",
+      "line": 27,
+      "name": "omarchy-voxtype-status",
       "path": "shell/plugins/bar/indicators/Dictation.qml"
     },
     {
@@ -3829,9 +3889,33 @@
       "path": "shell/plugins/background/Background.qml"
     },
     {
+      "invocation": "shell-eval",
+      "line": 113,
+      "name": "omarchy-theme-bg-set",
+      "path": "shell/plugins/background/Background.qml"
+    },
+    {
+      "invocation": "shell-eval",
+      "line": 113,
+      "name": "omarchy-theme-bg-switcher",
+      "path": "shell/plugins/background/Background.qml"
+    },
+    {
       "invocation": "literal",
       "line": 119,
       "name": "bash",
+      "path": "shell/plugins/background/Background.qml"
+    },
+    {
+      "invocation": "shell-eval",
+      "line": 119,
+      "name": "omarchy-theme-set",
+      "path": "shell/plugins/background/Background.qml"
+    },
+    {
+      "invocation": "shell-eval",
+      "line": 119,
+      "name": "omarchy-theme-switcher",
       "path": "shell/plugins/background/Background.qml"
     },
     {
@@ -3862,6 +3946,12 @@
       "invocation": "literal",
       "line": 27,
       "name": "bash",
+      "path": "shell/plugins/bar/indicators/Dictation.qml"
+    },
+    {
+      "invocation": "shell-eval",
+      "line": 27,
+      "name": "omarchy-voxtype-status",
       "path": "shell/plugins/bar/indicators/Dictation.qml"
     },
     {
@@ -3979,9 +4069,21 @@
       "path": "shell/plugins/lock/Service.qml"
     },
     {
+      "invocation": "shell-eval",
+      "line": 380,
+      "name": "fprintd-list",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
       "invocation": "literal",
       "line": 391,
       "name": "bash",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
+      "invocation": "shell-eval",
+      "line": 391,
+      "name": "omarchy-hyprland-session-locked",
       "path": "shell/plugins/lock/Service.qml"
     },
     {
@@ -3991,9 +4093,27 @@
       "path": "shell/plugins/lock/Service.qml"
     },
     {
+      "invocation": "shell-eval",
+      "line": 406,
+      "name": "omarchy-system-wake",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
       "invocation": "literal",
       "line": 411,
       "name": "bash",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
+      "invocation": "shell-eval",
+      "line": 411,
+      "name": "omarchy-brightness-display",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
+      "invocation": "shell-eval",
+      "line": 411,
+      "name": "omarchy-brightness-keyboard",
       "path": "shell/plugins/lock/Service.qml"
     },
     {
@@ -4375,6 +4495,12 @@
       "path": "shell/plugins/polkit/PolkitAgent.qml"
     },
     {
+      "invocation": "shell-eval",
+      "line": 171,
+      "name": "omarchy-hw-laptop-closed",
+      "path": "shell/plugins/polkit/PolkitAgent.qml"
+    },
+    {
       "invocation": "literal",
       "line": 38,
       "name": "omarchy-battery-low",
@@ -4402,6 +4528,12 @@
       "invocation": "literal",
       "line": 303,
       "name": "bash",
+      "path": "shell/plugins/services/idle/Service.qml"
+    },
+    {
+      "invocation": "shell-eval",
+      "line": 303,
+      "name": "mkdir",
       "path": "shell/plugins/services/idle/Service.qml"
     },
     {
@@ -4467,336 +4599,350 @@
   ],
   "dynamic_commands": [
     {
+      "category": "ambiguous-shell-shape",
+      "invocation": "helper-shell",
+      "line": 17,
+      "name": "\"$@\"",
+      "path": "bin/omarchy-apply-lock"
+    },
+    {
+      "category": "ambiguous-shell-shape",
+      "invocation": "helper-shell",
+      "line": 77,
+      "name": "$1 == \"VCP\" && toupper($2) == \"10\" && $3 == \"C\" && $4 ~ /^[0-9]+$/ && $5 ~ /^[0-9]+$/ && $5 > 0 {",
+      "path": "bin/omarchy-brightness-display-ddc"
+    },
+    {
+      "category": "variable-command-head",
+      "invocation": "helper-shell",
+      "line": 125,
+      "name": "if [[ $bus =~ ^[0-9]+$ && $maximum =~ ^[0-9]+$ && $range_cached_at =~ ^[0-9]+$ ]] && (( maximum > 0 )); then",
+      "path": "bin/omarchy-brightness-display-ddc"
+    },
+    {
+      "category": "ambiguous-shell-shape",
+      "invocation": "helper-shell",
+      "line": 18,
+      "name": "timeout --kill-after=1s 3s 1password --lock >/dev/null 2>&1 || true",
+      "path": "bin/omarchy-system-lock"
+    },
+    {
+      "category": "ambiguous-shell-shape",
       "invocation": "dynamic",
       "line": 193,
       "name": "cmd",
       "path": "shell/Ui/MultiSelect.qml"
     },
     {
+      "category": "ambiguous-shell-shape",
       "invocation": "dynamic",
       "line": 167,
       "name": "updateCommand(kind, agentIds)",
       "path": "shell/plugins/agents/Main.qml"
     },
     {
+      "category": "dynamic-shell-payload",
       "invocation": "shell-eval",
       "line": 423,
       "name": "syncScanProcess.command = [\"bash\", \"-c\", script, root.syncEffectiveDir]",
       "path": "shell/plugins/agents/Main.qml"
     },
     {
-      "invocation": "shell-eval",
-      "line": 113,
-      "name": "command: [\"bash\", \"-c\", \"background=$(omarchy-theme-bg-switcher); [[ -n $background ]] && omarchy-theme-bg-set \\\"$background\\\"\"]",
-      "path": "shell/plugins/background/Background.qml"
-    },
-    {
-      "invocation": "shell-eval",
-      "line": 119,
-      "name": "command: [\"bash\", \"-c\", \"theme=$(omarchy-theme-switcher); [[ -n $theme ]] && omarchy-theme-set \\\"$theme\\\" >/dev/null 2>&1 &\"]",
-      "path": "shell/plugins/background/Background.qml"
-    },
-    {
+      "category": "ambiguous-shell-shape",
       "invocation": "dynamic",
       "line": 614,
       "name": "Util.execDetached(command)",
       "path": "shell/plugins/bar/Bar.qml"
     },
     {
-      "invocation": "shell-eval",
-      "line": 941,
-      "name": "command: [\"bash\", \"-c\", \"[[ -f $HOME/.local/state/omarchy/toggles/bar-off ]] && echo yes || echo no\"]",
-      "path": "shell/plugins/bar/Bar.qml"
-    },
-    {
+      "category": "ambiguous-shell-shape",
       "invocation": "dynamic",
       "line": 1795,
       "name": "\"\"",
       "path": "shell/plugins/bar/Bar.qml"
     },
     {
+      "category": "ambiguous-shell-shape",
       "invocation": "dynamic",
       "line": 1797,
       "name": "String(setting(\"onRightClick\", \"\"))",
       "path": "shell/plugins/bar/Bar.qml"
     },
     {
+      "category": "ambiguous-shell-shape",
       "invocation": "dynamic",
       "line": 1799,
       "name": "String(setting(\"onMiddleClick\", \"\"))",
       "path": "shell/plugins/bar/Bar.qml"
     },
     {
+      "category": "ambiguous-shell-shape",
       "invocation": "dynamic",
       "line": 1801,
       "name": "String(setting(\"onClick\", \"\"))",
       "path": "shell/plugins/bar/Bar.qml"
     },
     {
+      "category": "dynamic-shell-payload",
       "invocation": "shell-eval",
       "line": 1808,
       "name": "command: [\"bash\", \"-lc\", String(customRoot.setting(\"exec\", \"\"))]",
       "path": "shell/plugins/bar/Bar.qml"
     },
     {
-      "invocation": "shell-eval",
-      "line": 27,
-      "name": "command: [\"bash\", \"-c\", \"omarchy-voxtype-status\"]",
-      "path": "shell/plugins/bar/indicators/Dictation.qml"
-    },
-    {
+      "category": "dynamic-shell-payload",
       "invocation": "shell-eval",
       "line": 142,
       "name": "releaseProc.command = [\"bash\", \"-c\", \": > \" + Util.shellQuote(path)]",
       "path": "shell/plugins/image-picker/ImagePicker.qml"
     },
     {
+      "category": "dynamic-shell-payload",
       "invocation": "shell-eval",
       "line": 166,
       "name": "applyProc.command = [\"bash\", \"-c\", \"printf '%s\\\\n' \" + Util.shellQuote(path) + \" > \" + Util.shellQuote(activeSelectionFile) + \"; : > \" + Util.shellQuote(activeDoneFile)]",
       "path": "shell/plugins/image-picker/ImagePicker.qml"
     },
     {
-      "invocation": "shell-eval",
-      "line": 380,
-      "name": "command: [\"bash\", \"-c\", \"if [[ -f /etc/pam.d/omarchy-lock-fingerprint ]] && command -v fprintd-list >/dev/null 2>&1 && fprintd-list \\\"$USER\\\" 2>/dev/null | grep -qi finger; then echo yes; else echo no; fi\"]",
-      "path": "shell/plugins/lock/Service.qml"
-    },
-    {
-      "invocation": "shell-eval",
-      "line": 391,
-      "name": "command: [\"bash\", \"-c\", \"omarchy-hyprland-session-locked\"]",
-      "path": "shell/plugins/lock/Service.qml"
-    },
-    {
-      "invocation": "shell-eval",
-      "line": 406,
-      "name": "command: [\"bash\", \"-c\", \"omarchy-system-wake\"]",
-      "path": "shell/plugins/lock/Service.qml"
-    },
-    {
-      "invocation": "shell-eval",
-      "line": 411,
-      "name": "command: [\"bash\", \"-c\", \"omarchy-brightness-keyboard off; omarchy-brightness-display off\"]",
-      "path": "shell/plugins/lock/Service.qml"
-    },
-    {
+      "category": "dynamic-shell-payload",
       "invocation": "shell-eval",
       "line": 130,
       "name": "resultProc.command = [\"bash\", \"-c\", \": > \" + Util.shellQuote(activeDoneFile)]",
       "path": "shell/plugins/menu/Menu.qml"
     },
     {
+      "category": "dynamic-shell-payload",
       "invocation": "shell-eval",
       "line": 132,
       "name": "resultProc.command = [\"bash\", \"-c\", \"printf '%s\\\\n' \" + Util.shellQuote(selection) + \" > \" + Util.shellQuote(activeSelectionFile) + \"; : > \" + Util.shellQuote(activeDoneFile)]",
       "path": "shell/plugins/menu/Menu.qml"
     },
     {
+      "category": "ambiguous-shell-shape",
       "invocation": "dynamic",
       "line": 138,
       "name": "String(action || \"\")",
       "path": "shell/plugins/menu/Menu.qml"
     },
     {
+      "category": "ambiguous-shell-shape",
       "invocation": "dynamic",
       "line": 141,
       "name": "Util.execDetached(command)",
       "path": "shell/plugins/menu/Menu.qml"
     },
     {
+      "category": "dynamic-shell-payload",
       "invocation": "shell-eval",
       "line": 346,
       "name": "providerProc.command = [\"bash\", \"-lc\", spec.script]",
       "path": "shell/plugins/menu/Menu.qml"
     },
     {
+      "category": "dynamic-shell-payload",
       "invocation": "shell-eval",
       "line": 972,
       "name": "guardProc.command = [\"bash\", \"-lc\", script]",
       "path": "shell/plugins/menu/Menu.qml"
     },
     {
+      "category": "ambiguous-shell-shape",
       "invocation": "dynamic",
       "line": 363,
       "name": "entry ? String(entry.exec || \"\") : \"\"",
       "path": "shell/plugins/notifications/Service.qml"
     },
     {
+      "category": "ambiguous-shell-shape",
       "invocation": "dynamic",
       "line": 367,
       "name": "Util.execDetached(command)",
       "path": "shell/plugins/notifications/Service.qml"
     },
     {
+      "category": "ambiguous-shell-shape",
       "invocation": "dynamic",
       "line": 443,
       "name": "command, done: done || null }])",
       "path": "shell/plugins/notifications/Service.qml"
     },
     {
+      "category": "ambiguous-shell-shape",
       "invocation": "dynamic",
       "line": 464,
       "name": "job.command",
       "path": "shell/plugins/notifications/Service.qml"
     },
     {
+      "category": "dynamic-shell-payload",
       "invocation": "shell-eval",
       "line": 503,
       "name": "var command = [\"bash\", \"-c\",",
       "path": "shell/plugins/notifications/Service.qml"
     },
     {
+      "category": "dynamic-shell-payload",
       "invocation": "shell-eval",
       "line": 570,
       "name": "var command = [\"bash\", \"-c\",",
       "path": "shell/plugins/notifications/Service.qml"
     },
     {
+      "category": "dynamic-shell-payload",
       "invocation": "shell-eval",
       "line": 644,
       "name": "readHistoryProc.command = [\"bash\", \"-c\",",
       "path": "shell/plugins/notifications/Service.qml"
     },
     {
+      "category": "dynamic-shell-payload",
       "invocation": "shell-eval",
       "line": 845,
       "name": "restorePopupsProc.command = [\"bash\", \"-c\",",
       "path": "shell/plugins/notifications/Service.qml"
     },
     {
+      "category": "ambiguous-shell-shape",
       "invocation": "dynamic",
       "line": 273,
       "name": "Quickshell.execDetached(deviceCommand(action, device.address))",
       "path": "shell/plugins/panels/bluetooth/Panel.qml"
     },
     {
+      "category": "ambiguous-shell-shape",
       "invocation": "dynamic",
       "line": 287,
       "name": "Quickshell.execDetached(deviceCommand(\"disconnect\", device.address))",
       "path": "shell/plugins/panels/bluetooth/Panel.qml"
     },
     {
+      "category": "ambiguous-shell-shape",
       "invocation": "dynamic",
       "line": 125,
       "name": "command",
       "path": "shell/plugins/panels/dropbox/Service.qml"
     },
     {
+      "category": "dynamic-shell-payload",
       "invocation": "shell-eval",
       "line": 308,
       "name": "actionProc.command = [\"bash\", \"-c\", \"omarchy-hyprland-monitor-scaling \" + scale]",
       "path": "shell/plugins/panels/monitor/Panel.qml"
     },
     {
+      "category": "dynamic-shell-payload",
       "invocation": "shell-eval",
       "line": 475,
       "name": "dnsProc.command = [\"bash\", \"-c\", root.dnsCommand(\"\")]",
       "path": "shell/plugins/panels/network/Panel.qml"
     },
     {
+      "category": "ambiguous-shell-shape",
       "invocation": "dynamic",
       "line": 662,
       "name": "\"omarchy-dns\"",
       "path": "shell/plugins/panels/network/Panel.qml"
     },
     {
+      "category": "dynamic-shell-payload",
       "invocation": "shell-eval",
       "line": 678,
       "name": "actionProc.command = [\"bash\", \"-c\", root.dnsCommand(provider)]",
       "path": "shell/plugins/panels/network/Panel.qml"
     },
     {
+      "category": "dynamic-shell-payload",
       "invocation": "shell-eval",
       "line": 770,
       "name": "enterpriseConnect.command = [\"bash\", \"-c\", Model.enterpriseConnectScript, \"nmcli-eap\", ssid, identity]",
       "path": "shell/plugins/panels/network/Panel.qml"
     },
     {
+      "category": "ambiguous-shell-shape",
       "invocation": "dynamic",
       "line": 312,
       "name": "plan.command",
       "path": "shell/plugins/panels/tailscale/Service.qml"
     },
     {
+      "category": "ambiguous-shell-shape",
       "invocation": "dynamic",
       "line": 362,
       "name": "command",
       "path": "shell/plugins/panels/tailscale/Service.qml"
     },
     {
+      "category": "ambiguous-shell-shape",
       "invocation": "dynamic",
       "line": 127,
       "name": "requestedIface",
       "path": "shell/plugins/panels/wifiqr/Panel.qml"
     },
     {
-      "invocation": "shell-eval",
-      "line": 171,
-      "name": "command: [\"bash\", \"-c\", \"omarchy-hw-laptop-closed && echo closed || echo open\"]",
-      "path": "shell/plugins/polkit/PolkitAgent.qml"
-    },
-    {
+      "category": "ambiguous-shell-shape",
       "invocation": "dynamic",
       "line": 91,
       "name": "Quickshell.execDetached(args)",
       "path": "shell/plugins/reminders/ReminderFlow.qml"
     },
     {
+      "category": "dynamic-shell-payload",
       "invocation": "shell-eval",
       "line": 60,
       "name": "process.command = [\"bash\", \"-lc\", command]",
       "path": "shell/plugins/services/idle/Service.qml"
     },
     {
+      "category": "ambiguous-shell-shape",
       "invocation": "dynamic",
       "line": 210,
       "name": "value",
       "path": "shell/plugins/services/idle/Service.qml"
     },
     {
+      "category": "dynamic-shell-payload",
       "invocation": "shell-eval",
       "line": 220,
       "name": "stayAwakeStateWriter.command = [\"bash\", \"-lc\", command]",
       "path": "shell/plugins/services/idle/Service.qml"
     },
     {
-      "invocation": "shell-eval",
-      "line": 303,
-      "name": "command: [\"bash\", \"-c\", \"mkdir -p \\\"$HOME/.local/state/omarchy/indicators\\\"; if [[ -f $HOME/.local/state/omarchy/indicators/stay-awake ]]; then echo yes; else echo no; fi\"]",
-      "path": "shell/plugins/services/idle/Service.qml"
-    },
-    {
+      "category": "dynamic-shell-payload",
       "invocation": "shell-eval",
       "line": 49,
       "name": "applyProcess.command = [\"bash\", \"-lc\",",
       "path": "shell/plugins/services/nightlight/Service.qml"
     },
     {
+      "category": "ambiguous-shell-shape",
       "invocation": "dynamic",
       "line": 91,
       "name": "Util.execDetached(Util.shellQuote(root.omarchyPath + \"/bin/omarchy-remove-launcher-entry\") + \" \" + Util.shellQuote(id) + \" \" + Util.shellQuote(String(name || id)))",
       "path": "shell/services/AppLibrary.qml"
     },
     {
+      "category": "dynamic-shell-payload",
       "invocation": "shell-eval",
       "line": 196,
       "name": "command: [\"bash\", \"-c\", root.hiddenEntryScanCommand()]",
       "path": "shell/services/AppLibrary.qml"
     },
     {
+      "category": "dynamic-shell-payload",
       "invocation": "shell-eval",
       "line": 204,
       "name": "command: [\"bash\", \"-c\", root.iconIndexScanCommand()]",
       "path": "shell/services/AppLibrary.qml"
     },
     {
+      "category": "dynamic-shell-payload",
       "invocation": "shell-eval",
       "line": 692,
       "name": "scanProcess.command = [\"bash\", \"-c\", script, registry.firstPartyDir, registry.pluginsDir]",
       "path": "shell/services/PluginRegistry.qml"
     },
     {
+      "category": "dynamic-shell-payload",
       "invocation": "shell-eval",
       "line": 697,
       "name": "initProcess.command = [\"bash\", \"-c\", \"mkdir -p \\\"$0\\\"\", registry.pluginsDir]",
@@ -5245,6 +5391,12 @@
       "path": "default/omarchy/omarchy-menu.jsonc"
     },
     {
+      "invocation": "shell-eval",
+      "line": 380,
+      "name": "fprintd-list",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
       "invocation": "menu.when",
       "line": 0,
       "name": "grep",
@@ -5375,6 +5527,12 @@
       "line": 413,
       "name": "mkdir",
       "path": "shell/plugins/notifications/Service.qml"
+    },
+    {
+      "invocation": "shell-eval",
+      "line": 303,
+      "name": "mkdir",
+      "path": "shell/plugins/services/idle/Service.qml"
     },
     {
       "invocation": "shell-script",
@@ -9111,7 +9269,7 @@
     "config/omarchy/extensions/omarchy-menu.jsonc",
     "default/omarchy/omarchy-menu.jsonc"
   ],
-  "schema": 3,
+  "schema": 4,
   "security_contracts": [
     {
       "line": 39,
@@ -9329,6 +9487,8 @@
       "path": "shell/plugins/polkit/PolkitAgent.qml"
     }
   ],
+  "security_dead_dispositions": [],
+  "security_dead_dynamic_execution_dispositions": [],
   "security_direct_shell_commands": [
     {
       "invocation": "literal",
@@ -9343,9 +9503,21 @@
       "path": "shell/plugins/lock/Service.qml"
     },
     {
+      "invocation": "shell-eval",
+      "line": 380,
+      "name": "fprintd-list",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
       "invocation": "literal",
       "line": 391,
       "name": "bash",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
+      "invocation": "shell-eval",
+      "line": 391,
+      "name": "omarchy-hyprland-session-locked",
       "path": "shell/plugins/lock/Service.qml"
     },
     {
@@ -9355,9 +9527,27 @@
       "path": "shell/plugins/lock/Service.qml"
     },
     {
+      "invocation": "shell-eval",
+      "line": 406,
+      "name": "omarchy-system-wake",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
       "invocation": "literal",
       "line": 411,
       "name": "bash",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
+      "invocation": "shell-eval",
+      "line": 411,
+      "name": "omarchy-brightness-display",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
+      "invocation": "shell-eval",
+      "line": 411,
+      "name": "omarchy-brightness-keyboard",
       "path": "shell/plugins/lock/Service.qml"
     },
     {
@@ -9397,6 +9587,12 @@
       "path": "shell/plugins/polkit/PolkitAgent.qml"
     },
     {
+      "invocation": "shell-eval",
+      "line": 171,
+      "name": "omarchy-hw-laptop-closed",
+      "path": "shell/plugins/polkit/PolkitAgent.qml"
+    },
+    {
       "invocation": "literal",
       "line": 60,
       "name": "bash",
@@ -9412,6 +9608,119 @@
       "invocation": "literal",
       "line": 303,
       "name": "bash",
+      "path": "shell/plugins/services/idle/Service.qml"
+    },
+    {
+      "invocation": "shell-eval",
+      "line": 303,
+      "name": "mkdir",
+      "path": "shell/plugins/services/idle/Service.qml"
+    }
+  ],
+  "security_dynamic_executions": [
+    {
+      "category": "ambiguous-shell-shape",
+      "invocation": "helper-shell",
+      "line": 17,
+      "name": "\"$@\"",
+      "path": "bin/omarchy-apply-lock"
+    },
+    {
+      "category": "ambiguous-shell-shape",
+      "invocation": "helper-shell",
+      "line": 77,
+      "name": "$1 == \"VCP\" && toupper($2) == \"10\" && $3 == \"C\" && $4 ~ /^[0-9]+$/ && $5 ~ /^[0-9]+$/ && $5 > 0 {",
+      "path": "bin/omarchy-brightness-display-ddc"
+    },
+    {
+      "category": "variable-command-head",
+      "invocation": "helper-shell",
+      "line": 125,
+      "name": "if [[ $bus =~ ^[0-9]+$ && $maximum =~ ^[0-9]+$ && $range_cached_at =~ ^[0-9]+$ ]] && (( maximum > 0 )); then",
+      "path": "bin/omarchy-brightness-display-ddc"
+    },
+    {
+      "category": "ambiguous-shell-shape",
+      "invocation": "helper-shell",
+      "line": 18,
+      "name": "timeout --kill-after=1s 3s 1password --lock >/dev/null 2>&1 || true",
+      "path": "bin/omarchy-system-lock"
+    },
+    {
+      "category": "ambiguous-shell-shape",
+      "invocation": "dynamic",
+      "line": 363,
+      "name": "entry ? String(entry.exec || \"\") : \"\"",
+      "path": "shell/plugins/notifications/Service.qml"
+    },
+    {
+      "category": "ambiguous-shell-shape",
+      "invocation": "dynamic",
+      "line": 367,
+      "name": "Util.execDetached(command)",
+      "path": "shell/plugins/notifications/Service.qml"
+    },
+    {
+      "category": "ambiguous-shell-shape",
+      "invocation": "dynamic",
+      "line": 443,
+      "name": "command, done: done || null }])",
+      "path": "shell/plugins/notifications/Service.qml"
+    },
+    {
+      "category": "ambiguous-shell-shape",
+      "invocation": "dynamic",
+      "line": 464,
+      "name": "job.command",
+      "path": "shell/plugins/notifications/Service.qml"
+    },
+    {
+      "category": "dynamic-shell-payload",
+      "invocation": "shell-eval",
+      "line": 503,
+      "name": "var command = [\"bash\", \"-c\",",
+      "path": "shell/plugins/notifications/Service.qml"
+    },
+    {
+      "category": "dynamic-shell-payload",
+      "invocation": "shell-eval",
+      "line": 570,
+      "name": "var command = [\"bash\", \"-c\",",
+      "path": "shell/plugins/notifications/Service.qml"
+    },
+    {
+      "category": "dynamic-shell-payload",
+      "invocation": "shell-eval",
+      "line": 644,
+      "name": "readHistoryProc.command = [\"bash\", \"-c\",",
+      "path": "shell/plugins/notifications/Service.qml"
+    },
+    {
+      "category": "dynamic-shell-payload",
+      "invocation": "shell-eval",
+      "line": 845,
+      "name": "restorePopupsProc.command = [\"bash\", \"-c\",",
+      "path": "shell/plugins/notifications/Service.qml"
+    },
+    {
+      "category": "dynamic-shell-payload",
+      "invocation": "shell-eval",
+      "line": 60,
+      "name": "process.command = [\"bash\", \"-lc\", command]",
+      "path": "shell/plugins/services/idle/Service.qml"
+    },
+    {
+      "category": "ambiguous-shell-shape",
+      "invocation": "dynamic",
+      "line": 210,
+      "name": "value",
+      "path": "shell/plugins/services/idle/Service.qml"
+    },
+    {
+      "category": "dynamic-shell-payload",
+      "invocation": "shell-eval",
+      "line": 220,
+      "name": "stayAwakeStateWriter.command = [\"bash\", \"-lc\", command]",
       "path": "shell/plugins/services/idle/Service.qml"
     }
   ],
@@ -9436,30 +9745,6 @@
     },
     {
       "invocation": "helper-shell",
-      "line": 18,
-      "name": "3s",
-      "path": "bin/omarchy-system-lock"
-    },
-    {
-      "invocation": "helper-shell",
-      "line": 77,
-      "name": "==",
-      "path": "bin/omarchy-brightness-display-ddc"
-    },
-    {
-      "invocation": "helper-shell",
-      "line": 125,
-      "name": "=~",
-      "path": "bin/omarchy-brightness-display-ddc"
-    },
-    {
-      "invocation": "helper-shell",
-      "line": 77,
-      "name": ">",
-      "path": "bin/omarchy-brightness-display-ddc"
-    },
-    {
-      "invocation": "helper-shell",
       "line": 55,
       "name": "END",
       "path": "bin/omarchy-brightness-display-apple"
@@ -9472,81 +9757,9 @@
     },
     {
       "invocation": "helper-shell",
-      "line": 35,
-      "name": "EOF",
-      "path": "bin/omarchy-apply-lock"
-    },
-    {
-      "invocation": "helper-shell",
-      "line": 43,
-      "name": "EOF",
-      "path": "bin/omarchy-apply-lock"
-    },
-    {
-      "invocation": "helper-shell",
-      "line": 51,
-      "name": "SECONDS))",
-      "path": "bin/omarchy-launch-screensaver"
-    },
-    {
-      "invocation": "helper-shell",
-      "line": 34,
-      "name": "account",
-      "path": "bin/omarchy-apply-lock"
-    },
-    {
-      "invocation": "helper-shell",
-      "line": 42,
-      "name": "account",
-      "path": "bin/omarchy-apply-lock"
-    },
-    {
-      "invocation": "helper-shell",
       "line": 25,
       "name": "address",
       "path": "bin/omarchy-hyprland-focus-app"
-    },
-    {
-      "invocation": "helper-shell",
-      "line": 27,
-      "name": "auth",
-      "path": "bin/omarchy-apply-lock"
-    },
-    {
-      "invocation": "helper-shell",
-      "line": 29,
-      "name": "auth",
-      "path": "bin/omarchy-apply-lock"
-    },
-    {
-      "invocation": "helper-shell",
-      "line": 30,
-      "name": "auth",
-      "path": "bin/omarchy-apply-lock"
-    },
-    {
-      "invocation": "helper-shell",
-      "line": 31,
-      "name": "auth",
-      "path": "bin/omarchy-apply-lock"
-    },
-    {
-      "invocation": "helper-shell",
-      "line": 32,
-      "name": "auth",
-      "path": "bin/omarchy-apply-lock"
-    },
-    {
-      "invocation": "helper-shell",
-      "line": 33,
-      "name": "auth",
-      "path": "bin/omarchy-apply-lock"
-    },
-    {
-      "invocation": "helper-shell",
-      "line": 41,
-      "name": "auth",
-      "path": "bin/omarchy-apply-lock"
     },
     {
       "invocation": "helper-shell",
@@ -9921,6 +10134,12 @@
       "path": "bin/omarchy-apply-lock"
     },
     {
+      "invocation": "shell-eval",
+      "line": 380,
+      "name": "fprintd-list",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
       "invocation": "helper-shell",
       "line": 11,
       "name": "getent",
@@ -10012,30 +10231,6 @@
     },
     {
       "invocation": "helper-shell",
-      "line": 6,
-      "name": "internal-monitor-disable",
-      "path": "bin/omarchy-hyprland-monitor-internal"
-    },
-    {
-      "invocation": "helper-shell",
-      "line": 8,
-      "name": "internal-monitor-disable",
-      "path": "bin/omarchy-hyprland-monitor-internal-mirror"
-    },
-    {
-      "invocation": "helper-shell",
-      "line": 8,
-      "name": "internal-monitor-mirror",
-      "path": "bin/omarchy-hyprland-monitor-internal"
-    },
-    {
-      "invocation": "helper-shell",
-      "line": 6,
-      "name": "internal-monitor-mirror",
-      "path": "bin/omarchy-hyprland-monitor-internal-mirror"
-    },
-    {
-      "invocation": "helper-shell",
       "line": 20,
       "name": "jq",
       "path": "bin/omarchy-hyprland-focus-app"
@@ -10045,12 +10240,6 @@
       "line": 8,
       "name": "jq",
       "path": "bin/omarchy-hyprland-monitor-focused-apple"
-    },
-    {
-      "invocation": "helper-shell",
-      "line": 16,
-      "name": "jq",
-      "path": "bin/omarchy-hyprland-session-locked"
     },
     {
       "invocation": "helper-shell",
@@ -10099,6 +10288,12 @@
       "line": 413,
       "name": "mkdir",
       "path": "shell/plugins/notifications/Service.qml"
+    },
+    {
+      "invocation": "shell-eval",
+      "line": 303,
+      "name": "mkdir",
+      "path": "shell/plugins/services/idle/Service.qml"
     },
     {
       "invocation": "helper-shell",
@@ -10264,6 +10459,12 @@
     },
     {
       "invocation": "helper-shell",
+      "line": 16,
+      "name": "state",
+      "path": "bin/omarchy-hyprland-session-locked"
+    },
+    {
+      "invocation": "helper-shell",
       "line": 19,
       "name": "sudo",
       "path": "bin/omarchy-apply-lock"
@@ -10303,18 +10504,6 @@
       "line": 18,
       "name": "xdg-terminal-exec",
       "path": "bin/omarchy-launch-screensaver"
-    },
-    {
-      "invocation": "helper-shell",
-      "line": 76,
-      "name": "{lock_fd}>${XDG_RUNTIME_DIR:-/tmp}/omarchy-brightness-display.lock",
-      "path": "bin/omarchy-brightness-display"
-    },
-    {
-      "invocation": "helper-shell",
-      "line": 77,
-      "name": "~",
-      "path": "bin/omarchy-brightness-display-ddc"
     }
   ],
   "security_filesystem_contracts": [
@@ -10707,7 +10896,7 @@
   ],
   "security_helpers": [
     {
-      "invocation": "source",
+      "invocation": "shell-eval",
       "line": 411,
       "name": "omarchy-brightness-display",
       "path": "shell/plugins/lock/Service.qml"
@@ -10715,8 +10904,26 @@
     {
       "invocation": "source",
       "line": 411,
+      "name": "omarchy-brightness-display",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
+      "invocation": "shell-eval",
+      "line": 411,
       "name": "omarchy-brightness-keyboard",
       "path": "shell/plugins/lock/Service.qml"
+    },
+    {
+      "invocation": "source",
+      "line": 411,
+      "name": "omarchy-brightness-keyboard",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
+      "invocation": "shell-eval",
+      "line": 171,
+      "name": "omarchy-hw-laptop-closed",
+      "path": "shell/plugins/polkit/PolkitAgent.qml"
     },
     {
       "invocation": "source",
@@ -10735,6 +10942,12 @@
       "line": 403,
       "name": "omarchy-hyprland-focus-app",
       "path": "shell/plugins/notifications/Service.qml"
+    },
+    {
+      "invocation": "shell-eval",
+      "line": 391,
+      "name": "omarchy-hyprland-session-locked",
+      "path": "shell/plugins/lock/Service.qml"
     },
     {
       "invocation": "source",
@@ -10765,6 +10978,12 @@
       "line": 79,
       "name": "omarchy-system-lock",
       "path": "shell/plugins/services/idle/Service.qml"
+    },
+    {
+      "invocation": "shell-eval",
+      "line": 406,
+      "name": "omarchy-system-wake",
+      "path": "shell/plugins/lock/Service.qml"
     },
     {
       "invocation": "source",
@@ -10865,6 +11084,7 @@
     "shell/plugins/services/idle/",
     "shell/plugins/notifications/"
   ],
+  "security_unreviewed_dynamic_executions": [],
   "service_contracts": [
     {
       "line": 68,

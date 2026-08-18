@@ -73,12 +73,24 @@ jq -e '
 ' "$baseline" >/dev/null
 
 jq -e '
-  .schema == 3
+  .schema == 4
   and (.security_source_files | all(.[]; .present == true))
   and (.security_helpers | map(.name) | index("omarchy-system-lock") != null)
   and (.security_helpers | map(.name) | index("omarchy-system-wake") != null)
   and (.security_contracts | map(.name) | index("WlSessionLock") != null)
   and (.security_contracts | map(.name) | index("/etc/pam.d/omarchy-lock-password") != null)
+' "$snapshot" >/dev/null
+
+# Section 5/7 case I: on the real pinned repo (not an arbitrary fixture) the
+# closure is fully resolved and every dynamic/ambiguous execution has an
+# exact, pinned, reviewed disposition - the pinned snapshot must actually
+# reach the 0/0/0 state the audit exists to enforce, not merely be capable of
+# reporting non-zero when something is wrong.
+jq -e '
+  ([.security_helper_edges[] | select(.disposition == null)] | length == 0)
+  and (.security_dead_dispositions | length == 0)
+  and (.security_unreviewed_dynamic_executions | length == 0)
+  and (.security_dead_dynamic_execution_dispositions | length == 0)
 ' "$snapshot" >/dev/null
 
 for plugin in lock polkit notifications; do
