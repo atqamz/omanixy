@@ -344,12 +344,40 @@ Two of the pinned Arch stack's modules are deliberately not carried over:
   whole session, not just this one service - and belongs to the layer 8
   failure and recovery matrix with its own explicit tests, not as an implicit
   side effect of declaring the password capability.
-- `pam_systemd_home` is not adopted. It serves systemd-homed accounts; this
-  target is not systemd-homed, so including it would be a dead module and a
-  false capability signal in the generated file.
+- `pam_systemd_home` is not adopted. The implemented password backend is
+  `pam_unix` against ordinary shadow-backed local Unix accounts; systemd-homed
+  authentication is not implemented by this layer. This is a support-scope
+  omission, not a host-specific claim: a NixOS machine can have `systemd-homed`
+  available while a given account is still an ordinary shadow-backed user, so
+  this module makes no claim that the password capability, once enabled, can
+  authenticate every account backend present on the machine. Extending the
+  supported backend set is a consumer gate for whichever layer wires up the
+  native lock, not a decision made here.
 
 `nullok` and `pam_permit.so` remain rejected outright: neither is an
 acceptable authentication-success path for a screen lock.
+
+`security.pam.services.<name>.text` is typed `nullOr lines`, so ordinary
+same-priority definitions merge by newline concatenation; an unrelated normal
+module that also defined this service's `text` would silently extend the
+authentication stack. This layer's `config` sets the service text via
+`lib.mkForce`, so while the option is enabled Omanixy owns the entire text of
+`omarchy-lock-password` atomically and a competing normal-priority definition
+is discarded rather than merged.
+
+`pam_unix.so` shells out to a setuid `unix_chkpwd` helper to read the shadow
+database; nixpkgs's own `security/pam.nix` unconditionally registers
+`security.wrappers.unix_chkpwd` (setuid root, sourced from the same pinned
+`linux-pam` package) independent of which PAM services are enabled, so this
+layer neither vendors nor duplicates that privileged helper.
+
+A build fixture
+(`pamPasswordAdversarialNixosConfiguration` in `flake.nix`, checked by
+`security-pam-composition`) proves the generated file is byte-identical
+whether or not such a competing definition is present. A consumer who wants a
+different policy for this service must disable this option rather than add to
+it; this layer adds no imperative conflict resolution and does not delete or
+mutate any other file.
 
 The Home Manager module and the NixOS module stay structurally independent:
 Home Manager declares no PAM service, and the NixOS module declares no Home

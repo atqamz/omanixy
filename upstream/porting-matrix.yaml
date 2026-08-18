@@ -1029,8 +1029,11 @@ items:
         - account and session rules are not consumed by this Quickshell ABI
         - generated nixpkgs rules are experimental and ordering-sensitive
         - pam_faillock is not adopted in this layer: a lock-screen lockout policy is a cross-cutting recovery decision owned by the layer 8 failure and recovery matrix, not an implicit side effect of the password capability
-        - pam_systemd_home is not adopted: this is a non-systemd-homed host, so the module would be dead weight and a false capability signal
+        - pam_systemd_home is not adopted: the implemented backend is pam_unix against ordinary shadow-backed local Unix accounts; systemd-homed authentication is out of scope for this layer and not claimed to work, independent of whether systemd-homed happens to be available on a given host
         - pam_permit.so is never used as an authentication-success path
+    account_backend:
+      implemented: pam_unix against shadow-backed local Unix accounts
+      unvalidated: systemd-homed accounts (pam_systemd_home not included; not claimed to authenticate)
     failure_sensitive:
       - PAM start failure must be distinct from authentication failure
       - prompt cancellation must abort the PAM subprocess
@@ -1045,15 +1048,19 @@ items:
         - hermetic proof of no nullok, no pam_permit.so, no account/session/password phase, no fingerprint service, and no polkit side effect
         - static proof of no imperative /etc/pam.d writer outside security.pam.services
         - static proof Home Manager declares no PAM service and the NixOS module reaches into no Home Manager or desktop-session option
+        - hermetic build proof that an unrelated normal-priority security.pam.services."omarchy-lock-password".text definition does not concatenate into the Omanixy-owned service text (mkForce ownership), via test/security-pam-composition.sh
       required_before_promotion:
         - live PAM start, prompt, cancel, authentication success, and authentication failure tests against a real pam_unix.so conversation
         - a decision and, if adopted, an explicit lockout policy with real lockout tests, before any faillock module is added
         - native lock or other real PAM_authenticate consumer wiring to this service, still owned by a later stack layer
+        - a decision and implementation, if ever adopted, for authenticating systemd-homed accounts; unvalidated and out of scope until then
     tests:
       - test/quattro-contract-audit.sh
       - test/security-pam.sh
+      - test/security-pam-composition.sh
     notes:
-      - This layer implements security.pam.services."omarchy-lock-password".text as a single explicit auth-only pam_unix.so line; no faillock, systemd-homed, or nullok policy is included.
+      - This layer implements security.pam.services."omarchy-lock-password".text as a single explicit auth-only pam_unix.so line, owned atomically via lib.mkForce; no faillock or nullok policy is included.
+      - The implemented password backend is pam_unix against ordinary shadow-backed local Unix accounts. systemd-homed authentication is not implemented by this layer and is not claimed to work; pam_systemd_home is deliberately absent. A host may have systemd-homed available while a given account is still shadow-backed - this is a support-scope omission, not a host-specific claim.
       - support is experimental, not supported, because no live authentication conversation has been exercised; only the generated declarative artifact is hermetically proven.
       - No PAM consumer, native lock, fingerprint capability, polkit agent, idle manager, or notification daemon is enabled by this layer.
 

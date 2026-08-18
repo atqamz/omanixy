@@ -188,6 +188,30 @@
             ];
           };
           pamPasswordServiceFile = "${pamPasswordNixosConfiguration.config.environment.etc."pam.d/omarchy-lock-password".source}";
+          pamPasswordAdversarialNixosConfiguration = nixpkgs.lib.nixosSystem {
+            inherit system;
+            modules = [
+              self.nixosModules.default
+              {
+                nixpkgs.hostPlatform = system;
+                system.stateVersion = "26.11";
+                programs.omanixy.security.pam.password.enable = true;
+              }
+              (
+                { config, ... }:
+                {
+                  # An unrelated, ordinary normal-priority module definition
+                  # of the same PAM service - simulates a third-party module
+                  # that is unaware Omanixy owns this service. Must not
+                  # merge into the generated file.
+                  security.pam.services."omarchy-lock-password".text = ''
+                    auth sufficient ${config.security.pam.package}/lib/security/pam_permit.so
+                  '';
+                }
+              )
+            ];
+          };
+          pamPasswordAdversarialServiceFile = "${pamPasswordAdversarialNixosConfiguration.config.environment.etc."pam.d/omarchy-lock-password".source}";
           service = homeConfiguration.config.systemd.user.services.omanixy-shell;
           activationScript = pkgs.writeShellScript "omanixy-shell-state-activation" homeConfiguration.config.home.activation.omanixyShellState.data;
           clipboardActivationScript = pkgs.writeShellScript "omanixy-shell-clipboard-state-activation" clipboardHomeConfiguration.config.home.activation.omanixyShellState.data;
@@ -409,6 +433,23 @@
             ${pkgs.bash}/bin/bash ${./test/security-pam.sh} ${./.} "$serviceFile" \
               "$disabledHasPasswordService" "$disabledHasFingerprintService" \
               "$enabledHasFingerprintService" "$enabledPolkitEnabled" "$disabledPolkitEnabled"
+            touch "$out"
+          '';
+          security-pam-composition = pkgs.runCommand "omanixy-security-pam-composition"
+            {
+              ownedServiceFile = pamPasswordServiceFile;
+              adversarialServiceFile = pamPasswordAdversarialServiceFile;
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.diffutils pkgs.gnugrep ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-pam-composition.sh} \
+              "$ownedServiceFile" "$adversarialServiceFile"
+            touch "$out"
+          '';
+          security-pam-writer-guard = pkgs.runCommand "omanixy-security-pam-writer-guard"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.ripgrep ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-pam-writer-guard.sh} ${./test/lib/no-imperative-pam-write.sh}
             touch "$out"
           '';
           quattro-contract-audit = pkgs.runCommand "omanixy-quattro-contract-audit"

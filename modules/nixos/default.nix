@@ -24,12 +24,21 @@ in
         not perform any imperative `/etc` mutation; the PAM service file is
         generated declaratively by `security.pam.services` like any other
         NixOS PAM service.
+
+        `security.pam.services.<name>.text` is typed `nullOr lines`, so
+        ordinary same-priority definitions merge by newline concatenation.
+        While this option is enabled, Omanixy owns the entire text of the
+        `omarchy-lock-password` service via `lib.mkForce`: an unrelated
+        normal-priority definition of the same service cannot silently
+        extend this authentication stack. A consumer who wants a different
+        policy for this service must disable this option rather than add to
+        it.
       '';
     };
   };
 
   config = lib.mkIf cfg.enable {
-    security.pam.services."omarchy-lock-password".text = ''
+    security.pam.services."omarchy-lock-password".text = lib.mkForce ''
       auth required ${config.security.pam.package}/lib/security/pam_unix.so
     '';
   };

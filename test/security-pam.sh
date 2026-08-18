@@ -45,8 +45,9 @@ test "$enabled_polkit" = false
 test "$disabled_polkit" = false
 
 # H. no imperative writer of /etc/pam.d anywhere in Omanixy's own code -
-# the file must only ever be produced by security.pam.services.*.text.
-if rg -n '(sudo|as_root)\s+(tee|cp|install)\s.*pam\.d|pam\.d.*\b(tee|cp|install)\b' \
+# the file must only ever be produced by security.pam.services.*.text. See
+# test/lib/no-imperative-pam-write.sh for the exact scope of this heuristic.
+if ! bash "$repo/test/lib/no-imperative-pam-write.sh" \
   "$repo/modules" "$repo/packages" "$repo/scripts"; then
   printf '%s\n' 'imperative /etc/pam.d write found outside security.pam.services' >&2
   exit 1
