@@ -56,8 +56,12 @@ assert notification_client["id"] != notification_daemon["id"]
 support_states = metadata["policy"]["support_state_definition"]
 assert set(support_states) == {"supported", "experimental", "omitted", "blocked"}
 scope = metadata["contract_audit"]["security_scope"]
-security_sources = {entry["path"] for entry in snapshot["security_source_files"] if entry["present"]}
-assert set(scope["helper_sources"]) <= security_sources
+assert set(scope["source_roots"]) == set(snapshot["security_source_roots"])
+snapshot_dispositions = {
+    edge["path"]: edge["disposition"] for edge in snapshot["security_helper_edges"]
+}
+assert None not in snapshot_dispositions.values()
+assert scope["helper_dispositions"] == snapshot_dispositions
 PY
 
 jq -e '
@@ -69,7 +73,7 @@ jq -e '
 ' "$baseline" >/dev/null
 
 jq -e '
-  .schema == 2
+  .schema == 3
   and (.security_source_files | all(.[]; .present == true))
   and (.security_helpers | map(.name) | index("omarchy-system-lock") != null)
   and (.security_helpers | map(.name) | index("omarchy-system-wake") != null)
@@ -77,9 +81,10 @@ jq -e '
   and (.security_contracts | map(.name) | index("/etc/pam.d/omarchy-lock-password") != null)
 ' "$snapshot" >/dev/null
 
-for plugin in lock polkit idle notifications; do
+for plugin in lock polkit notifications; do
   test ! -e "$compatibility_root/shell/plugins/$plugin"
 done
+test ! -e "$compatibility_root/shell/plugins/services/idle"
 
 if rg -n 'security\.pam\.services|/etc/pam\.d/omarchy-lock|omarchy-lock-(password|fingerprint)' \
   "$repo/modules" "$repo/packages"; then

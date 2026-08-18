@@ -62,14 +62,19 @@ while no usable screen exists.
 It rechecks screen changes and uses `secure` state before starting the
 fingerprint flow.
 
-The service holds `ext-session-lock` state across the shell lifecycle.
+`ext-session-lock` state is retained by the compositor, not by the client
+that requested it: once locked, the surface persists even if the requesting
+client process exits or restarts.
+A restarted shell process therefore cannot assume it still holds an
+unreleased lock and cannot assume the previous lock is gone.
 `omarchy-hyprland-session-locked` probes Hyprland monitor JSON and
 `solitaryBlockedBy` to distinguish a locked monitor, an unlocked monitor, and
-an indeterminate state.
+an indeterminate state, which is how a restarted client detects a stranded
+lock from a prior process rather than tracking its own in-memory state.
 The pinned recovery check retries twenty times at 500 ms and leaves an
 indeterminate result unresolved.
-This is a compositor-state recovery contract, not proof that the lock process
-is alive.
+This is a compositor-state detection and reacquisition contract for a
+possibly-stranded lock, not proof that the original lock process is alive.
 
 The lock reads the background through the current Omarchy state path and
 blanks display and keyboard backlight through helper commands.
@@ -236,9 +241,17 @@ and an explicitly selected Quattro native provider.
 Provider selection is separate from keybinding policy.
 Omanixy does not take ownership of a consumer's Hyprland keybinding.
 
-The later stable boundary should expose `omanixy-shell lock lock` as a
-structured provider operation with machine-readable status and a non-zero
-`provider-unavailable` result when no valid provider is selected.
+`omanixy-shell` remains the narrow Quattro IPC client defined by issue #3: it
+forwards a target and method to `quickshell ipc -n -p "$OMARCHY_PATH/shell"
+call -- <target> <method> [args...]` and adds no provider logic of its own.
+The pinned upstream `bin/omarchy-shell` already forwards the same way, and the
+pinned idle `Service.qml` already calls `omarchy-shell lock isLocked` as a
+plain target/method pair under that existing generic contract.
+A future `lock lock` call is the same kind of plain IPC value, not a new
+dispatcher operation, and requires no new code in `omanixy-shell`.
+Provider selection, machine-readable status, and a non-zero
+`provider-unavailable` result are the responsibility of whatever QML-side
+service implements the `lock` IPC target, not of the IPC client.
 An external provider contract, if needed, uses an explicit executable path and
 fixed argv values rather than shell interpolation.
 Layer 1 does not add or advertise this runtime operation.
