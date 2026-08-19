@@ -34,9 +34,33 @@ grep -q 'import "FingerprintPolicy.js" as FingerprintPolicy' "$fingerprint_servi
 grep -q 'readonly property int fingerprintMaxAttempts: 5' "$fingerprint_service_file"
 grep -q 'readonly property bool fingerprintExhausted: FingerprintPolicy.isExhausted(fingerprintAttempts, fingerprintMaxAttempts)' "$fingerprint_service_file"
 policy_function_body isExhausted | grep -q 'attempts >= maxAttempts'
-function_body beginLock | grep -q 'fingerprintAttempts = 0'
 function_body startFingerprint | grep -q 'fingerprintAttempts += 1'
 grep -q 'repeat: false' "$fingerprint_service_file"
+
+# The pure policy test proves FingerprintPolicy.js's own rules; it proves
+# nothing about whether the generated Service.qml actually wires those
+# rules into lock acquisition. beginLock() must, in order: reset
+# authentication state, invalidate any stale fingerprint readiness and
+# consume budget synchronously, queue the actual lock, and only then defer a
+# bounded fresh readiness refresh - never the reverse, or a stale
+# fingerprintReady=true could survive into the new lock's window until the
+# deferred refresh eventually corrects it. This also catches a future
+# patch-lock-service edit that kept the policy unit test green while
+# quietly dropping the runtime probe trigger itself.
+begin_lock_body=$(function_body beginLock)
+printf '%s\n' "$begin_lock_body" | grep -q 'resetAuthenticationState()'
+printf '%s\n' "$begin_lock_body" | grep -q 'fingerprintAttempts = 0'
+printf '%s\n' "$begin_lock_body" | grep -q 'fingerprintReady = false'
+printf '%s\n' "$begin_lock_body" | grep -q 'queueSessionLock()'
+printf '%s\n' "$begin_lock_body" | grep -qF 'Qt.callLater(function() {'
+printf '%s\n' "$begin_lock_body" | grep -q 'root.refreshFingerprintStatus()'
+
+fingerprint_ready_reset_line=$(printf '%s\n' "$begin_lock_body" | grep -n 'fingerprintReady = false' | head -1 | cut -d: -f1)
+call_later_line=$(printf '%s\n' "$begin_lock_body" | grep -n 'Qt.callLater(function() {' | head -1 | cut -d: -f1)
+if ((fingerprint_ready_reset_line >= call_later_line)); then
+  printf '%s\n' 'beginLock must invalidate fingerprintReady synchronously, before the deferred refresh - not after' >&2
+  exit 1
+fi
 
 # The upstream fingerprintCheckProc's bash -c/fprintd-list/grep probe must
 # never be reintroduced; the audited, argument-free readiness adapter

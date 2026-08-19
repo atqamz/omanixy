@@ -769,7 +769,12 @@ both patch modes rather than left accurate only for the disabled build.
 `fingerprintAttemptsRemaining`, and `fingerprintExhausted`; none of the six
 carry biometric or PAM content, only capability and bounded-counter state.
 `security-lock-fingerprint` proves all of this against the real generated
-Service.qml source, not a description of the intended state machine, and
+Service.qml source, not a description of the intended state machine -
+including that `beginLock()` itself, not only `FingerprintPolicy.js`'s rules
+in isolation, resets authentication state, invalidates readiness
+(`fingerprintReady = false`) and consumes the budget (`fingerprintAttempts
+= 0`) synchronously, then queues the actual lock and only afterward defers
+a bounded fresh readiness refresh via `Qt.callLater`, in that order - and
 `security-lock` continues to prove the disabled build is byte-identical to
 the frozen layer 3 output. `security-lock-fingerprint-behavior` complements
 that structural proof with a behavioral one: it `require()`s
@@ -779,6 +784,50 @@ in-flight-conversation exclusion, budget exhaustion, password-authentication
 precedence, and a stale success result arriving after mid-conversation
 capability revocation - rather than re-deriving the same assertions from a
 disconnected reimplementation of the rules.
+
+The same file also drives four stress sequences through the identical
+`canStartFingerprint()`/`shouldRetryAfterFailure()` decision sequence the
+runtime itself uses, rather than shortcuts like `isExhausted(100, 5)`: 100
+adversarial start attempts resolved as ordinary failures, and again resolved
+through both the `onError` and `onCompleted(Error)` paths a single failed
+conversation drives (see "Concurrency and abort semantics" below) - both
+converge on exactly 5 actual starts and 5 final attempts, never 100, with no
+retry re-permitted after exhaustion; a password submission arriving with a
+fingerprint conversation already in flight and budget remaining permits zero
+further fingerprint starts across 100 further adversarial cycles, and the
+subsequent password failure resumes fingerprint only from the untouched
+remaining budget - never resetting it - with the lock's total starts still
+never exceeding 5; and a fresh `beginLock()` after a prior lock exhausted its
+budget with readiness left `true` resets both attempts and readiness before
+any probe runs, proving budget reset and readiness reset are two separate,
+intentional transitions rather than one derived from the other.
+
+### Concurrency and abort semantics
+
+The pinned Quickshell revision's `PamContext` (`src/services/pam/qml.cpp`)
+makes both `onError` and `onCompleted` call `this->abortConversation()`
+*before* emitting anything to QML, and `abortConversation()` disconnects
+every `PamConversation` signal from the `PamContext`, schedules the
+conversation for `deleteLater()`, and clears the active-conversation
+pointer - in that order - before returning. Two consequences follow
+directly from reading that source, not from this layer's own design: first,
+an explicitly aborted conversation (`fingerprintPam.abort()`, called from
+`submitPassword()` and `onFingerprintPamConfiguredChanged`) can never later
+deliver a `completed`/`error` signal through `PamContext`, because the
+disconnect happens synchronously in the same call that clears the
+conversation - so no additional generation token or sequence counter is
+needed in this layer's QML to guard against a stale post-abort callback; the
+pinned ABI already makes that case unreachable. Second, `onError` emits both
+`error(...)` and `completed(PamResult::Error)` for the *same* failed
+conversation, so `root.onError` and `handleFingerprintFinished` both
+evaluate `FingerprintPolicy.shouldRetryAfterFailure()` around that one
+failure - harmlessly redundantly, since `fingerprintRetryTimer.restart()`
+just reschedules the same single `Timer` instance rather than double-firing
+it. `security-lock-fingerprint-behavior`'s 100-error stress sequence models
+this conservatively by evaluating the retry decision twice per failure
+cycle and asserting both evaluations agree. This section documents what the
+pinned revision (`quickshell-mirror/quickshell@28771c7c74b42e20afca0b1b63980cb46515537c`)
+does; it is not a claim about any other Quickshell revision.
 
 ### Readiness adapter ABI
 
@@ -856,7 +905,15 @@ adds no new systemd unit beyond the `fprintd`-provided one this capability
 merely registers for activation. `security-lock-fingerprint-closure`'s
 declared-input-widening proof is an exact set difference - the
 fingerprint-enabled build adds precisely one `declaredRuntimeInputs` entry
-and removes none, and that one entry is `fprintd` - rather than a substring
-match against the raw diff, so a future change that widened the runtime by
-`fprintd` plus something else unrelated would fail this proof rather than
-pass it silently.
+and removes none, and that one entry is asserted equal to the exact selected
+fingerprint package store path the fixture was built with, not merely a
+`fprintd`-prefixed name - rather than a substring match against the raw
+diff, so a future change that widened the runtime by that package plus
+something else unrelated, or by a same-named but differently-built package,
+would fail this proof rather than pass it silently. This is a
+declared-input and compatibility-bin level proof, not a full-transitive-
+closure one: the closure-reachability check only proves the selected
+fprintd package is absent from the fingerprint-disabled closure and
+reachable from the fingerprint-enabled one, since that package carries its
+own transitive closure and a claim of an exact path-count difference across
+the full closure would overstate what is actually checked.

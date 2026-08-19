@@ -1076,7 +1076,8 @@
             ${pkgs.bash}/bin/bash ${./test/security-lock-fingerprint-closure.sh} \
               "$lockClosurePaths" "$lockFingerprintClosurePaths" \
               "$declaredRuntimeInputs" "$fingerprintDeclaredRuntimeInputs" \
-              ${lockRuntime.passthru.compatibilityBin} ${lockFingerprintRuntime.passthru.compatibilityBin}
+              ${lockRuntime.passthru.compatibilityBin} ${lockFingerprintRuntime.passthru.compatibilityBin} \
+              ${pkgs.fprintd}
             touch "$out"
           '';
           security-lock-fingerprint-behavior = pkgs.runCommand "omanixy-security-lock-fingerprint-behavior"

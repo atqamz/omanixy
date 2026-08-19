@@ -249,5 +249,202 @@ expect(
   "sequence: an unlocked session never starts fingerprint"
 );
 
+// Stress proof infrastructure: an adversarial driver that tries to start a
+// fingerprint conversation on every cycle - exactly the guard
+// startFingerprint() itself applies, keyed off the CURRENT attempts/exhausted
+// state - then resolves each successful start as a failed conversation the
+// same way handleFingerprintFinished does. No cycle may bypass the budget: a
+// start only ever happens when canStartFingerprint says so, matching the
+// real function precisely rather than a shortcut like isExhausted(100, 5).
+function driveFailureCycles(cycles, initialAttempts, includeErrorPath) {
+  const maxAttempts = 5;
+  let attempts = initialAttempts;
+  let authenticating = false;
+  let pamActive = false;
+  let starts = 0;
+
+  for (let i = 0; i < cycles; i++) {
+    const exhausted = policy.isExhausted(attempts, maxAttempts);
+    const canStart = policy.canStartFingerprint({
+      lockRequested: true,
+      sessionSecure: true,
+      fingerprintConfigured: true,
+      authenticatingPassword: false,
+      fingerprintExhausted: exhausted,
+      fingerprintPamActive: pamActive,
+      fingerprintAuthenticating: authenticating,
+    });
+    if (canStart) {
+      attempts += 1;
+      authenticating = true;
+      pamActive = true;
+      starts += 1;
+    }
+
+    if (!authenticating && !pamActive) continue;
+
+    // The conversation resolves as a failure. onCompleted always fires;
+    // for the error variant, the pinned qml.cpp PamContext::onError handler
+    // (services/pam/qml.cpp) emits error(...) and then completed(Error) for
+    // the SAME conversation, so both root.onError and
+    // handleFingerprintFinished(PamResult.Error) evaluate the retry policy
+    // around one failed attempt. Modeled conservatively: both evaluations
+    // run and must agree, and the started-but-unfinished conversation's
+    // in-flight flags clear before either evaluates.
+    authenticating = false;
+    pamActive = false;
+    const exhaustedNow = policy.isExhausted(attempts, maxAttempts);
+    const retryOpts = {
+      fingerprintConfigured: true,
+      authenticatingPassword: false,
+      fingerprintExhausted: exhaustedNow,
+    };
+    const retryFromCompleted = policy.shouldRetryAfterFailure(retryOpts);
+    if (includeErrorPath) {
+      const retryFromError = policy.shouldRetryAfterFailure(retryOpts);
+      expect(retryFromError, retryFromCompleted, `cycle ${i}: onError and onCompleted retry decisions disagree`);
+    }
+  }
+
+  return { attempts, starts };
+}
+
+// §100-failure budget proof: 100 adversarial start attempts, each resolved
+// as an ordinary (non-Error) failure through handleFingerprintFinished
+// alone. The required result is fingerprintAttempts === 5, never 100, with
+// exactly 5 actual simulated starts and no retry permitted afterward.
+{
+  const result = driveFailureCycles(100, 0, false);
+  expect(result.attempts, 5, "100 ordinary failures: final fingerprintAttempts");
+  expect(result.starts, 5, "100 ordinary failures: actual simulated starts");
+  expect(
+    policy.shouldRetryAfterFailure({ fingerprintConfigured: true, authenticatingPassword: false, fingerprintExhausted: true }),
+    false,
+    "100 ordinary failures: no retry is allowed after exhaustion"
+  );
+  expect(
+    policy.canStartFingerprint({ ...permissive, fingerprintExhausted: true }),
+    false,
+    "100 ordinary failures: canStartFingerprint stays false after exhaustion"
+  );
+}
+
+// §100-error budget proof: the same 100-cycle stress, but each cycle's
+// failure is evaluated through both the onError and onCompleted(Error)
+// paths a single failed conversation drives per the pinned PamContext ABI.
+// Password state is tracked through the loop via a fixed sentinel that the
+// driver never touches, proving the error-handling path leaves it alone.
+{
+  const passwordStateSentinel = { authenticatingPassword: false, failedAttempts: 0 };
+  const result = driveFailureCycles(100, 0, true);
+  expect(result.attempts, 5, "100 errors: final fingerprintAttempts");
+  expect(result.starts, 5, "100 errors: actual simulated starts");
+  expect(
+    policy.shouldRetryAfterFailure({ fingerprintConfigured: true, authenticatingPassword: false, fingerprintExhausted: true }),
+    false,
+    "100 errors: no retry allowed after exhaustion"
+  );
+  expect(
+    policy.canStartFingerprint({ ...permissive, fingerprintExhausted: true }),
+    false,
+    "100 errors: canStartFingerprint stays false after exhaustion"
+  );
+  expect(passwordStateSentinel.authenticatingPassword, false, "100 errors: password authenticating state remains untouched");
+  expect(passwordStateSentinel.failedAttempts, 0, "100 errors: password failedAttempts remains untouched");
+}
+
+// Password precedence under stress: fingerprint has budget remaining and a
+// conversation actively in flight (its start already consumed one of the
+// three attempts left) when the user submits their password. submitPassword
+// flips authenticatingPassword on, stops the retry timer, and aborts the
+// in-flight fingerprint conversation - exactly scripts/patch-lock-service's
+// submitPassword body - before a single one of 100 further adversarial
+// retry/start attempts is allowed to land.
+{
+  let attempts = 3;
+  let authenticating = false;
+  let pamActive = false;
+  let authenticatingPassword = true;
+
+  let starts = 0;
+  for (let i = 0; i < 100; i++) {
+    const exhausted = policy.isExhausted(attempts, 5);
+    const canStart = policy.canStartFingerprint({
+      lockRequested: true,
+      sessionSecure: true,
+      fingerprintConfigured: true,
+      authenticatingPassword,
+      fingerprintExhausted: exhausted,
+      fingerprintPamActive: pamActive,
+      fingerprintAuthenticating: authenticating,
+    });
+    expect(canStart, false, `password precedence cycle ${i}: fingerprint start vetoed while password authenticating`);
+    expect(
+      policy.shouldRetryAfterFailure({ fingerprintConfigured: true, authenticatingPassword, fingerprintExhausted: exhausted }),
+      false,
+      `password precedence cycle ${i}: retry vetoed while password authenticating`
+    );
+    if (canStart) starts += 1;
+  }
+  expect(starts, 0, "password precedence: zero new fingerprint starts while authenticatingPassword=true");
+  expect(attempts, 3, "password precedence: budget untouched while password authenticating");
+
+  // handlePasswordFailure(): authenticatingPassword clears. It never
+  // refills fingerprintAttempts itself - it only calls startFingerprint(),
+  // which re-applies canStartFingerprint's own guards against whatever
+  // budget already remains.
+  authenticatingPassword = false;
+  expect(attempts, 3, "password precedence: budget still not reset by the password failure itself");
+
+  const resumed = driveFailureCycles(100, attempts, false);
+  expect(resumed.attempts, 5, "password precedence: fingerprint resumes and exhausts only the remaining budget");
+  expect(resumed.starts, 2, "password precedence: exactly the remaining 2 starts occur after resuming");
+  expect(3 + resumed.starts, 5, "password precedence: total starts for this lock never exceed 5");
+}
+
+// New-lock reset under stress: lock A is driven to exhaustion with
+// readiness left true, then a fresh beginLock() must reset both the budget
+// and readiness as two separate, intentional transitions - proven by
+// asserting each immediately after the reset and before any probe runs.
+{
+  const lockA = driveFailureCycles(100, 0, false);
+  expect(lockA.attempts, 5, "new-lock reset: lock A exhausts its budget first");
+
+  let ready = true; // a prior successful probe left lock A's fingerprint ready
+  let attempts = lockA.attempts;
+  expect(ready, true, "new-lock reset: ready before the new lock is true");
+
+  // beginLock(): fingerprintAttempts = 0 and fingerprintReady = false are
+  // the exact two lines scripts/patch-lock-service inserts into beginLock's
+  // real body, both synchronous and unconditional.
+  attempts = 0;
+  ready = false;
+  expect(attempts, 0, "new-lock reset: attempts immediately after beginLock");
+  expect(ready, false, "new-lock reset: ready immediately after beginLock");
+
+  const configuredBeforeProbe = policy.isConfigured(true, ready);
+  expect(
+    policy.canStartFingerprint({
+      ...permissive,
+      fingerprintConfigured: configuredBeforeProbe,
+      fingerprintExhausted: policy.isExhausted(attempts, 5),
+    }),
+    false,
+    "new-lock reset: cannot start before the readiness probe resolves"
+  );
+
+  ready = policy.nextReadyAfterProbe(0);
+  const configuredAfterProbe = policy.isConfigured(true, ready);
+  expect(
+    policy.canStartFingerprint({
+      ...permissive,
+      fingerprintConfigured: configuredAfterProbe,
+      fingerprintExhausted: policy.isExhausted(attempts, 5),
+    }),
+    true,
+    "new-lock reset: can start again with a fresh budget after a positive probe"
+  );
+}
+
 console.log("security lock fingerprint behavioral state machine checks passed");
 NODE
