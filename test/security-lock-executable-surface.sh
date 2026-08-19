@@ -38,6 +38,26 @@ assert_rejected() {
   assert_rejected_raw "$name" "$(printf '  Process {\n    command: %s\n  }\n' "$body")"
 }
 
+# Like assert_rejected_raw, but also asserts the rejection reason contains
+# a given substring - used where the failure mode itself matters (e.g. a
+# fake-only fixture must fail as "no command bindings", not for some
+# unrelated reason that would also happen to reject the file).
+assert_rejected_because() {
+  local name=$1 needle=$2 content=$3
+  local file="$fixture/$name.qml"
+  printf '%s\n' "$content" >"$file"
+  if "$python_bin" "$scanner" "$file" 2>"$fixture/$name.err"; then
+    printf 'expected rejection for %s, scanner passed\n' "$name" >&2
+    cat "$fixture/$name.err" >&2
+    exit 1
+  fi
+  if ! grep -qF "$needle" "$fixture/$name.err"; then
+    printf 'expected rejection reason %s for %s, got:\n' "$needle" "$name" >&2
+    cat "$fixture/$name.err" >&2
+    exit 1
+  fi
+}
+
 # The directive's own named adversarial examples.
 assert_rejected unknown-tool '["mystery-security-tool", "--probe"]'
 assert_rejected bash-dash-c '["bash", "-c", "$payload"]'
@@ -200,6 +220,143 @@ Process {
     root.buildArg("x)"),
     "-f"
   ]
+}'
+
+# Section 2-8: shared QML/JS lexical preprocessing must be string-safe -
+# command-looking text or comment markers embedded inside a quoted string
+# or template literal must never satisfy or spoof command discovery, and
+# must never hide a real command binding that follows them. Each case
+# below is one letter (A-L) of the directive's adversarial matrix.
+
+# A: a single-quoted-only fake command binding is the only command-looking
+# text in the file - the string's content must not be counted, so the
+# scanner must fail as "no bindings", not silently pass.
+assert_rejected_because fake-single-quoted-only \
+  'no command bindings of any shape found' \
+  'property string fake: '"'"'command: ["readlink", "-f", "/tmp/not-a-real-command"]'"'"''
+
+# B: same, but double-quoted with escaped inner quotes.
+assert_rejected_because fake-double-quoted-escaped-only \
+  'no command bindings of any shape found' \
+  'property string fake: "command: [\"mystery-security-tool\"]"'
+
+# C: a fake quoted command string sits next to a REAL multiline unknown
+# command - the fake must not mask the real one.
+assert_rejected_because fake-string-plus-real-multiline-unknown \
+  'mystery-security-tool' \
+  'property string fake: '"'"'command: ["readlink"]'"'"'
+Process {
+  command: [
+    "mystery-security-tool",
+    "--probe"
+  ]
+}'
+
+# D: an escaped quote inside a string must not incorrectly terminate the
+# lexical quote state, letting a "//" inside the remaining (still-quoted)
+# text hide the REAL unknown command that follows the string.
+assert_rejected_because escaped-quote-then-line-comment-then-real-unknown \
+  'mystery-security-tool' \
+  'property string fake: "a\" // command: [\"mystery-security-tool\"]"
+command: ["mystery-security-tool"]'
+
+# E: same, with a "/* */" block-comment marker instead of "//".
+assert_rejected_because escaped-quote-then-block-comment-then-real-unknown \
+  'mystery-security-tool' \
+  'property string fake: "a\" /* command: [\"mystery-security-tool\"] */"
+command: ["mystery-security-tool"]'
+
+# F: a line-comment-only fake command, with no real binding anywhere in
+# the file, must not count - the scanner must fail as "no bindings".
+assert_rejected_because line-comment-only-fake-command \
+  'no command bindings of any shape found' \
+  '// command: ["readlink", "-f", "/tmp/not-a-real-command"]'
+
+# G: same, with a block comment instead of a line comment.
+assert_rejected_because block-comment-only-fake-command \
+  'no command bindings of any shape found' \
+  '/* command: ["readlink", "-f", "/tmp/not-a-real-command"] */'
+
+# H: a multiline backtick template literal containing a fake command-array
+# binding, with no real binding anywhere else in the file, must not count.
+assert_rejected_because backtick-multiline-fake-command-only \
+  'no command bindings of any shape found' \
+  'property string fake: `
+command: ["readlink"]
+`'
+
+# I: "//" and "/* */" markers inside a multiline backtick literal must not
+# erase the REAL command binding that follows the literal.
+assert_rejected_because backtick-multiline-markers-do-not-erase-real-unknown \
+  'mystery-security-tool' \
+  'property string fake: `// command: ["readlink"]
+/* command: ["readlink"] */`
+command: ["mystery-security-tool"]'
+
+# J: an allowed real command alongside unrelated strings/comments (that
+# happen to contain command-looking text) must still pass.
+assert_allowed_raw allowed-command-with-unrelated-strings-and-comments '
+// just a comment, nothing to see: command: ["mystery-security-tool"]
+property string note: "unrelated string with command: [\"mystery-security-tool\"] inside it"
+Process {
+  command: ["readlink", "-f", root.currentBackgroundLink]
+}'
+
+# K: a real dynamic (non-array) command binding must still be rejected as
+# dynamic even when an allowed-looking quoted fake sits alongside it.
+assert_rejected_because real-dynamic-binding-with-allowed-looking-fake \
+  'dynamic command: binding' \
+  'property string fake: '"'"'command: ["readlink", "-f", "/tmp/x"]'"'"'
+Process {
+  command: root.runtimeCommand
+}'
+
+# L: a real procedural ".command =" mutation to an unknown executable must
+# still be rejected even when an allowed-looking quoted fake sits alongside
+# it - the fake must not launder the real, unknown procedural binding.
+assert_rejected_because real-procedural-unknown-with-allowed-looking-fake \
+  'mystery-security-tool' \
+  'property string fake: '"'"'lockProc.command = ["readlink", "-f", "/tmp/x"]'"'"'
+Process {
+  id: lockProc
+}
+Component.onCompleted: {
+  lockProc.command = ["mystery-security-tool"]
+}'
+
+# Section 9: template interpolation must fail closed rather than become an
+# executable escape hatch. The real, final Service.qml (scanned above)
+# contains no backtick template literals at all, so this is a fixture
+# guarding against future drift, not a fix to an existing binding. A
+# command array built through "${...}" interpolation must still be found
+# and validated against the same allowlist as any other array binding.
+assert_rejected_because template-interpolation-array-command-not-inert \
+  'mystery-security-tool' \
+  'property string fake: `prefix ${root.command = ["mystery-security-tool"]} suffix`'
+
+# A dynamic (non-array) command construction inside interpolation must
+# likewise stay visible and fail closed, not disappear into the literal.
+assert_rejected_because template-interpolation-dynamic-command-not-inert \
+  'dynamic command: binding' \
+  'property string fake: `prefix ${command: root.runtimeCommand} suffix`'
+
+# An unterminated template literal must be rejected outright as unsafe
+# rather than silently absorbing the rest of the file (which could hide a
+# real command binding inside the unterminated span).
+assert_rejected_because unterminated-backtick-template-literal \
+  'unsafe source' \
+  'property string fake: `unterminated
+command: ["mystery-security-tool"]'
+
+# A backtick template literal containing backslash-escape sequences must
+# not desync the position correspondence between the comment-stripped and
+# string-masked text - a real command binding located after such a literal
+# must still be found and validated using its actual (not shifted/garbled)
+# content.
+assert_allowed_raw backtick-with-escapes-does-not-desync-following-real-command '
+property string fake: `a\`b\nc`
+Process {
+  command: ["readlink", "-f", "/tmp/x"]
 }'
 
 # Allowed shapes must still pass, proving the scanner is not simply

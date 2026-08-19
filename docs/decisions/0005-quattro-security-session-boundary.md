@@ -533,8 +533,19 @@ shared QML source-discovery primitives (`scripts/source_discovery.py`) that
 the layer-1 contract audit already relies on, so a multiline array, a
 procedural `.command =` mutation, and any non-array dynamic binding
 (`command: <expr>`, `x.command = <expr>`, a dynamic `exec(...)`/`.run(...)`
-call) are all found the same way everywhere in this repo, and comments/string
-literals are stripped first so neither can satisfy or spoof the scan.
+call) are all found the same way everywhere in this repo. This is a lexical
+masker, not a parser: comments are stripped first, then quoted-string and
+backtick-template-literal content is separately, lexically masked (`${...}`
+interpolation stays live) before discovery runs, so a comment marker or
+command-looking text sitting inside a string or template literal cannot
+satisfy or spoof the scan, and cannot hide a real binding that follows it.
+The literal values used for allowlist validation are still read from the
+comment-stripped (not string-masked) text, so a legitimate command array's
+real executable name is never itself blanked. An unterminated backtick
+template literal is treated as unsafe input and rejected outright, since it
+is the only construct this masker allows to span multiple lines and an
+actually-unterminated one could otherwise silently absorb real code that
+follows it.
 Validation then tokenizes each discovered array positionally: the executable
 position must be a literal naming an allowed direct executable (`readlink`,
 `omarchy-hyprland-session-locked`) or the `timeout` wrapper around an
@@ -552,7 +563,17 @@ procedural binding, an unknown executable wrapped by `timeout`, and a
 same-line or block comment containing an otherwise-allowed-looking command
 sitting next to a real unknown one - are all rejected, while the real
 patched-file command shapes and their multiline/procedural-assignment
-equivalents still pass.
+equivalents still pass. A further string-safety matrix proves the lexical
+masker itself cannot be defeated: a command-looking fake inside a single-
+or double-quoted (including escaped-quote) string, a comment marker
+appearing inside such a string right before a real unknown command, a
+fake command inside a multiline backtick template literal, `//`/`/* */`
+markers inside a backtick literal that must not erase a real binding
+following it, a command constructed through `${...}` interpolation (must
+stay live, not become inert), and an unterminated backtick literal
+(rejected outright as unsafe) are all covered - alongside a real allowed
+command sitting next to unrelated strings/comments containing
+command-looking text, which still passes.
 
 `test/security-lock-managed-plugin.sh` proves two independent things with
 real QML behavior rather than a source grep. First, defense against

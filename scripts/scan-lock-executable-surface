@@ -6,8 +6,14 @@ Discovery reuses the shared QML source-discovery primitives
 on for finding command bindings, so multiline arrays, non-array dynamic
 bindings, and procedural `.command =` mutations are found the same way
 everywhere in this repo instead of via a second, inconsistent parser.
-Comments and string literals are stripped before scanning so neither can
-satisfy or spoof the audit.
+Comments are lexically masked out first, then quoted-string and template-
+literal content is lexically masked a second time to locate genuine
+command bindings - a comment marker or command-looking text sitting inside
+a string or template literal cannot satisfy or spoof the audit. The real
+literal values used for the allowlist check are still read back out of the
+comment-only-masked text, by the position each binding was found at, so a
+legitimate command array's actual executable name is never itself
+blanked.
 
 Every array binding discovered this way is then tokenized and validated
 here against an explicit allowlist: the executable position must be a
@@ -158,14 +164,20 @@ def check_command(tokens: list[tuple[str, bool]], context: str, tally: Tally) ->
 
 
 def scan(text: str) -> Tally:
-    stripped = source_discovery.strip_comments(text, shell=False)
+    try:
+        stripped = source_discovery.strip_comments(text, shell=False)
+        masked = source_discovery.mask_string_literals(stripped)
+    except source_discovery.UnsafeSource as exc:
+        fail(f"unsafe source, cannot prove executable surface is closed: {exc}")
+        raise  # unreachable, fail() always raises SystemExit
+
     tally = Tally()
 
     matches: list[tuple[int, str, "re.Match[str]"]] = []
-    for match in source_discovery.ARRAY_COMMAND_RE.finditer(stripped):
+    for match in source_discovery.ARRAY_COMMAND_RE.finditer(masked):
         matches.append((match.start(), "array", match))
     for label, pattern in DYNAMIC_PATTERNS:
-        for match in pattern.finditer(stripped):
+        for match in pattern.finditer(masked):
             matches.append((match.start(), label, match))
     matches.sort(key=lambda item: item[0])
 
@@ -175,8 +187,9 @@ def scan(text: str) -> Tally:
     for start, kind, match in matches:
         context = f"line {line_of(stripped, start)}"
         if kind != "array":
-            fail(f"{context}: {kind} ({match.group(0).strip()!r})")
-        check_command(tokenize(match.group(1)), context, tally)
+            fail(f"{context}: {kind} ({stripped[match.start():match.end()].strip()!r})")
+        real_body = stripped[match.start(1) : match.end(1)]
+        check_command(tokenize(real_body), context, tally)
 
     return tally
 
