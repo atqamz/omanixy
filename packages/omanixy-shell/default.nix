@@ -300,6 +300,13 @@ let
 
   runtimeInputs = assert featureNamesValid; lib.unique (lib.concatMap (capability: capabilityRuntimeInputs.${capability}) selectedCapabilities);
 
+  # The declared runtime package inputs themselves (store paths of the exact
+  # derivations named in runtimeInputs above), as opposed to the full
+  # transitive closure: selectedCapabilities - and therefore runtimeInputs -
+  # is derived purely from `features`, never from `security`, so this list
+  # is provably identical for a given feature set regardless of security.
+  declaredRuntimeInputs = builtins.toJSON (builtins.sort (a: b: a < b) (map (p: "${p}") runtimeInputs));
+
   allCompatibilityHelpers = [
     "omarchy-shell"
     "omarchy-audio-input-set-default"
@@ -512,7 +519,7 @@ pkgs.symlinkJoin {
     ln -s ${theme} "$out/share/omarchy-theme"
   '';
   passthru = {
-    inherit omarchyRevision quickshellRevision nixpkgsRevision omarchySource omarchyCompatibilityRoot compatibilityBin compatibilityProbes quickshell theme supportedSystems safeMenu safeShellConfig selectedFeatures selectedCapabilities compatibilityHelpers runtimeBlockedPlugins adapterSources adapterSourceHash featureSurface lockEnabled managedEnabledSecurityPlugins;
+    inherit omarchyRevision quickshellRevision nixpkgsRevision omarchySource omarchyCompatibilityRoot compatibilityBin compatibilityProbes quickshell theme supportedSystems safeMenu safeShellConfig selectedFeatures selectedCapabilities compatibilityHelpers runtimeBlockedPlugins adapterSources adapterSourceHash featureSurface lockEnabled managedEnabledSecurityPlugins declaredRuntimeInputs;
     buildProvenance = {
       inherit omarchyRevision quickshellRevision nixpkgsRevision;
     };

@@ -5,6 +5,8 @@ core_lock_compat_bin=${1:?core+lock compatibility bin required}
 core_compat_bin=${2:?core-only compatibility bin required}
 core_closure_paths=${3:?core-only closure store paths required}
 core_lock_closure_paths=${4:?core+lock closure store paths required}
+core_declared_runtime_inputs=${5:?core-only declared runtime inputs json required}
+core_lock_declared_runtime_inputs=${6:?core+lock declared runtime inputs json required}
 
 # Section 11: security.lock must not widen the dependency surface of a
 # core-only build. Presentation features (network, audio, bluetooth,
@@ -42,6 +44,17 @@ for helper in \
     exit 1
   fi
 done
+
+# Declared-input-level proof: the exact set of package derivations named in
+# the Nix expression's own `runtimeInputs` list (declaredRuntimeInputs) - not
+# the emergent transitive closure - must be byte-identical whether or not
+# security.lock is on. This is a stronger, more direct claim than the
+# closure-level proof below: it shows the explicit dependency declaration
+# itself is untouched by `security`, rather than only observing that no new
+# package name happened to surface in the built closure.
+diff -u \
+  <(jq -S . "$core_declared_runtime_inputs") \
+  <(jq -S . "$core_lock_declared_runtime_inputs")
 
 # Closure-level proof: turning on security.lock against a core-only build
 # must not widen the dependency surface at all. A hardcoded list of

@@ -658,12 +658,15 @@
             ${pkgs.bash}/bin/bash ${./test/security-lock-executable-surface.sh} \
               ${./scripts/scan-lock-executable-surface} \
               ${lockRuntime.passthru.omarchyCompatibilityRoot}/shell/plugins/lock/Service.qml \
-              ${pkgs.python3}/bin/python3
+              ${pkgs.python3}/bin/python3 ${./scripts}
             touch "$out"
           '';
           security-lock-managed-plugin = pkgs.runCommand "omanixy-security-lock-managed-plugin"
             {
-              nativeBuildInputs = [ pkgs.bash pkgs.coreutils ];
+              # findutils: the real PluginRegistry.rescan() scan script (driven
+              # by the registry-scan harness) shells out to `find` to locate
+              # manifests under firstPartyDir/pluginsDir.
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.findutils ];
             } ''
             ${pkgs.bash}/bin/bash ${./test/security-lock-managed-plugin.sh} \
               ${lockRuntime.passthru.omarchyCompatibilityRoot} ${lockRuntime}/bin/quickshell \
@@ -674,11 +677,14 @@
             {
               coreClosurePaths = "${coreRuntimeClosureInfo}/store-paths";
               coreLockClosurePaths = "${coreLockRuntimeClosureInfo}/store-paths";
+              coreDeclaredRuntimeInputs = pkgs.writeText "omanixy-core-declared-runtime-inputs.json" coreRuntime.passthru.declaredRuntimeInputs;
+              coreLockDeclaredRuntimeInputs = pkgs.writeText "omanixy-core-lock-declared-runtime-inputs.json" coreLockRuntime.passthru.declaredRuntimeInputs;
               nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.findutils pkgs.diffutils pkgs.jq ];
             } ''
             ${pkgs.bash}/bin/bash ${./test/security-lock-core-only.sh} \
               ${coreLockRuntime.passthru.compatibilityBin} ${coreRuntime.passthru.compatibilityBin} \
-              "$coreClosurePaths" "$coreLockClosurePaths"
+              "$coreClosurePaths" "$coreLockClosurePaths" \
+              "$coreDeclaredRuntimeInputs" "$coreLockDeclaredRuntimeInputs"
             touch "$out"
           '';
           quattro-contract-audit = pkgs.runCommand "omanixy-quattro-contract-audit"

@@ -280,6 +280,55 @@ def shell_executables(value: str) -> list[str]:
     return list(dict.fromkeys(commands))
 
 
+def strip_comments(text: str, shell: bool = False) -> str:
+    """Strip comments for line-oriented scanning.
+
+    Shell has no block-comment syntax, so treating "/*" as a QML/JS block
+    comment opener would eat glob patterns like "image/*)" in a case arm.
+    Shell scripts strip only unquoted "#" to end of line instead.
+    """
+
+    result: list[str] = []
+    block = False
+    for line in text.splitlines(keepends=True):
+        out: list[str] = []
+        quote = ""
+        index = 0
+        while index < len(line):
+            if shell:
+                if not quote and line[index] == "#":
+                    newline = "\n" if line.endswith("\n") else ""
+                    out.append(newline)
+                    break
+            else:
+                if block:
+                    end = line.find("*/", index)
+                    if end < 0:
+                        index = len(line)
+                        break
+                    block = False
+                    index = end + 2
+                    continue
+                if not quote and line.startswith("/*", index):
+                    block = True
+                    index += 2
+                    continue
+                if not quote and line.startswith("//", index):
+                    newline = "\n" if line.endswith("\n") else ""
+                    out.append(newline)
+                    break
+            char = line[index]
+            if char in "\"'`":
+                if quote == char:
+                    quote = ""
+                elif not quote:
+                    quote = char
+            out.append(char)
+            index += 1
+        result.append("".join(out))
+    return "".join(result)
+
+
 def _strip_shell_comment(value: str) -> str:
     quote: str | None = None
     escaped = False

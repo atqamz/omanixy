@@ -527,35 +527,66 @@ lives in `test/security-lock.sh` instead, outside that cross-check.
 ### Executable surface scanning and independence proofs
 
 `scripts/scan-lock-executable-surface` fail-closed scans every `command:
-[...]` array in the FINAL patched `Service.qml` against an explicit
-allowlist: the executable position must be a literal naming an allowed
-direct executable (`readlink`, `omarchy-hyprland-session-locked`) or the
-`timeout` wrapper around an allowed wrapped executable (`hyprctl`) with a
-literal duration, and a `bash`+`-c` shape is rejected regardless of token
-position. `test/security-lock-executable-surface.sh` proves this against the
-real patched file plus adversarial fixtures - an unknown tool, a
-reintroduced `bash -c` shape (including reordered under `timeout`), a
-dynamic (non-literal) executable or duration, and an unknown executable
-wrapped by `timeout` - are all rejected, while the three real patched-file
-command shapes still pass.
+[...]` array (declarative or procedural `x.command = [...]`) in the FINAL
+patched `Service.qml` against an explicit allowlist. Discovery reuses the
+shared QML source-discovery primitives (`scripts/source_discovery.py`) that
+the layer-1 contract audit already relies on, so a multiline array, a
+procedural `.command =` mutation, and any non-array dynamic binding
+(`command: <expr>`, `x.command = <expr>`, a dynamic `exec(...)`/`.run(...)`
+call) are all found the same way everywhere in this repo, and comments/string
+literals are stripped first so neither can satisfy or spoof the scan.
+Validation then tokenizes each discovered array positionally: the executable
+position must be a literal naming an allowed direct executable (`readlink`,
+`omarchy-hyprland-session-locked`) or the `timeout` wrapper around an
+allowed wrapped executable (`hyprctl`) with its own literal flags and
+duration, a `bash`+`-c` shape is rejected regardless of token position, and
+any non-array dynamic binding is an automatic fail - only the identity of
+what gets executed is in scope, so a trailing dynamic argument (e.g. a
+dynamic path passed to `readlink`) does not fail the scan.
+`test/security-lock-executable-surface.sh` proves this against the real
+patched file plus an adversarial matrix covering both the single-line and
+multiline shape of every case above - an unknown tool, a reintroduced
+`bash -c` shape (including reordered under `timeout` and split across
+lines), a dynamic (non-literal) executable, duration, or declarative/
+procedural binding, an unknown executable wrapped by `timeout`, and a
+same-line or block comment containing an otherwise-allowed-looking command
+sitting next to a real unknown one - are all rejected, while the real
+patched-file command shapes and their multiline/procedural-assignment
+equivalents still pass.
 
-`test/security-lock-managed-plugin.sh` proves the `PluginRegistry.qml`
-managed-security override with real QML behavior rather than a source grep:
-it instantiates the generated registry directly and drives `isEnabled`/
-`setEnabled` against both a plain lock-enabled registry and one with a
-hostile local plugin shadowing the `omarchy.lock` id as a `bar`-kind entry,
-proving the managed override still wins, never mutates
-`shellConfigMutator`, and reports the disabled-capability case as
-unreachable.
+`test/security-lock-managed-plugin.sh` proves two independent things with
+real QML behavior rather than a source grep. First, defense against
+contradictory/injected registry state: it instantiates the generated
+`PluginRegistry.qml` directly with a hand-injected `installedPlugins` map
+and drives `isEnabled`/`setEnabled` against both a plain lock-enabled
+registry and one with a hostile local plugin shadowing the `omarchy.lock` id
+as a `bar`-kind entry, proving the managed override still wins even over a
+self-contradictory registry state, never mutates `shellConfigMutator`, and
+reports the disabled-capability case as unreachable. Second, that the real
+filesystem scan-and-merge path itself cannot produce that hostile state: a
+separate harness points the real registry's `firstPartyDir`/`pluginsDir` at
+a copy of the actual first-party `omarchy.lock` manifest tree and a hostile
+third-party directory also claiming the `omarchy.lock` id, drives the real
+`rescan()` (the actual `find`/merge script, not a stand-in for it), and
+asserts the merged `installedPlugins["omarchy.lock"]` resolves to the
+first-party manifest and entry point, never the hostile one.
 
 `test/security-lock-core-only.sh` proves `security.lock` does not widen a
-core-only build's dependency surface at all: rather than checking a
-hardcoded list of presentation-package name patterns (core-runtime already
-pulls in packages like `pipewire`, `bluez`, `libnotify`, `uwsm`, and
-`qrencode` transitively through `hyprland`/`systemd`, independent of any
-Omanixy feature or of `security.lock`, so a pattern list drifts out of sync
-with that baseline), it compares the core-only and core+lock closures
-directly by package name and asserts the lock capability adds zero new
+core-only build's dependency surface at two distinct levels. At the declared
+level, `packages/omanixy-shell`'s own `runtimeInputs` - the explicit list of
+package derivations named in the Nix expression, computed purely from
+`selectedCapabilities`, which is itself derived only from `features` and
+never from `security` - is exposed as `passthru.declaredRuntimeInputs` and
+asserted byte-identical between the core-only and core+lock builds; this is
+a direct claim about the dependency declaration itself, not an emergent
+property of whatever ends up in a built closure. At the closure level, rather
+than checking a hardcoded list of presentation-package name patterns
+(core-runtime already pulls in packages like `pipewire`, `bluez`,
+`libnotify`, `uwsm`, and `qrencode` transitively through `hyprland`/
+`systemd`, independent of any Omanixy feature or of `security.lock`, so a
+pattern list drifts out of sync with that baseline), it compares the
+core-only and core+lock closures' full transitive store paths, stripped to
+package name (hash removed), and asserts the lock capability adds zero new
 names.
 
 ### Conditional packaging
