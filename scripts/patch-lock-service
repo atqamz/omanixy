@@ -1,11 +1,28 @@
 #!/usr/bin/env python3
-"""Narrow post-patches to the pinned Service.qml for the password-only native lock.
+"""Narrow post-patches to the pinned Service.qml for the native lock.
 
-Removes the fingerprint PAM conversation and its retry loop entirely (no
-fingerprintPam PamContext, no startFingerprint()/handleFingerprintFinished(),
-no fprintd probe) and converts the stranded-lock and DPMS Process commands from
-bash -c string shapes to direct argv, reusing the exact Hyprland DPMS dispatch
-and timeout bound already validated in packages/omanixy-shell/adapters/display.bash
+Two modes, selected by --fingerprint:
+
+disabled (default): removes the fingerprint PAM conversation and its retry
+loop entirely (no fingerprintPam PamContext, no
+startFingerprint()/handleFingerprintFinished(), no fprintd probe) - byte-for-
+byte what this script has always produced.
+
+enabled: keeps a hardened fingerprint conversation instead of removing it.
+The upstream fingerprintCheckProc's own "bash -c ... fprintd-list ... | grep"
+probe and its unbounded 250ms retry are never reintroduced as-is - the probe
+is replaced by the audited omarchy-lock-fingerprint-ready adapter (a bounded,
+argument-free helper with a resolved 0/1/2 exit ABI), and the retry loop
+gains a finite fingerprintMaxAttempts budget that only resets on a genuinely
+new lock acquisition (beginLock), never on a screen change, a DPMS event, or
+a password failure. Password submission always aborts any in-flight
+fingerprint conversation and stops the retry timer; fingerprint failure,
+exhaustion, or the absence of hardware never touches password state or calls
+finishUnlock().
+
+Both modes convert the stranded-lock and DPMS Process commands from bash -c
+string shapes to direct argv, reusing the exact Hyprland DPMS dispatch and
+timeout bound already validated in packages/omanixy-shell/adapters/display.bash
 and common.bash's timed().
 """
 
@@ -24,13 +41,26 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
     return text.replace(old, new, 1)
 
 
-def main() -> int:
-    if len(sys.argv) != 2:
-        print(f"usage: {sys.argv[0]} SERVICE_QML", file=sys.stderr)
-        return 2
-    path = Path(sys.argv[1])
-    text = path.read_text()
+def apply_shared(text: str) -> str:
+    stranded_old = '    command: ["bash", "-c", "omarchy-hyprland-session-locked"]'
+    stranded_new = '    command: ["omarchy-hyprland-session-locked"]'
+    text = replace_once(text, stranded_old, stranded_new, "stranded-lock helper invocation")
 
+    # Same bound as packages/omanixy-shell/adapters/common.bash's timed():
+    # timeout --kill-after=1s 3s, so a wedged hyprctl cannot stall the lock
+    # screen's wake/blank path indefinitely.
+    wake_old = '    command: ["bash", "-c", "omarchy-system-wake"]'
+    wake_new = '    command: ["timeout", "--kill-after=1s", "3s", "hyprctl", "dispatch", "hl.dsp.dpms({ action = \\"enable\\" })"]'
+    text = replace_once(text, wake_old, wake_new, "wake DPMS invocation")
+
+    blank_old = '    command: ["bash", "-c", "omarchy-brightness-keyboard off; omarchy-brightness-display off"]'
+    blank_new = '    command: ["timeout", "--kill-after=1s", "3s", "hyprctl", "dispatch", "hl.dsp.dpms({ action = \\"disable\\" })"]'
+    text = replace_once(text, blank_old, blank_new, "blank DPMS invocation")
+
+    return text
+
+
+def apply_fingerprint_disabled(text: str) -> str:
     refresh_old = block([
         "  function refreshFingerprintStatus() {",
         "    if (!fingerprintCheckProc.running) fingerprintCheckProc.running = true",
@@ -58,21 +88,6 @@ def main() -> int:
         "",
     ])
     text = replace_once(text, fingerprint_check_proc, "", "fingerprint check process")
-
-    stranded_old = '    command: ["bash", "-c", "omarchy-hyprland-session-locked"]'
-    stranded_new = '    command: ["omarchy-hyprland-session-locked"]'
-    text = replace_once(text, stranded_old, stranded_new, "stranded-lock helper invocation")
-
-    # Same bound as packages/omanixy-shell/adapters/common.bash's timed():
-    # timeout --kill-after=1s 3s, so a wedged hyprctl cannot stall the lock
-    # screen's wake/blank path indefinitely.
-    wake_old = '    command: ["bash", "-c", "omarchy-system-wake"]'
-    wake_new = '    command: ["timeout", "--kill-after=1s", "3s", "hyprctl", "dispatch", "hl.dsp.dpms({ action = \\"enable\\" })"]'
-    text = replace_once(text, wake_old, wake_new, "wake DPMS invocation")
-
-    blank_old = '    command: ["bash", "-c", "omarchy-brightness-keyboard off; omarchy-brightness-display off"]'
-    blank_new = '    command: ["timeout", "--kill-after=1s", "3s", "hyprctl", "dispatch", "hl.dsp.dpms({ action = \\"disable\\" })"]'
-    text = replace_once(text, blank_old, blank_new, "blank DPMS invocation")
 
     authenticating_old = "  readonly property bool authenticating: authenticatingPassword || fingerprintAuthenticating\n"
     authenticating_new = "  readonly property bool authenticating: authenticatingPassword\n"
@@ -194,9 +209,350 @@ def main() -> int:
     ])
     text = replace_once(text, blank_comment_old, blank_comment_new, "stale fingerprint blank-timer comment")
 
+    return text
+
+
+def apply_fingerprint_enabled(text: str) -> str:
+    properties_old = block([
+        "  property bool authenticatingPassword: false",
+        "  property bool fingerprintAuthenticating: false",
+        "  property bool passwordPamConfigured: false",
+        "  property bool fingerprintConfigured: false",
+    ])
+    properties_new = block([
+        "  property bool authenticatingPassword: false",
+        "  property bool fingerprintAuthenticating: false",
+        "  property bool passwordPamConfigured: false",
+        "  property bool fingerprintPamConfigured: false",
+        "  property bool fingerprintReady: false",
+        "  property int fingerprintAttempts: 0",
+        "  readonly property int fingerprintMaxAttempts: 5",
+        "  readonly property bool fingerprintExhausted: fingerprintAttempts >= fingerprintMaxAttempts",
+        "  readonly property bool fingerprintConfigured: fingerprintPamConfigured && fingerprintReady",
+    ])
+    text = replace_once(text, properties_old, properties_new, "fingerprint capability/readiness properties")
+
+    refresh_old = block([
+        "  function refreshFingerprintStatus() {",
+        "    if (!fingerprintCheckProc.running) fingerprintCheckProc.running = true",
+        "  }",
+    ])
+    refresh_new = block([
+        "  function refreshFingerprintStatus() {",
+        "    if (!fingerprintReadyProbe.running) fingerprintReadyProbe.running = true",
+        "  }",
+    ])
+    text = replace_once(text, refresh_old, refresh_new, "fingerprint status refresh")
+
+    begin_lock_old = block([
+        "  function beginLock() {",
+        "    if (!passwordPamConfigured) {",
+        '      logEvent("lock-denied: missing-pam")',
+        "      return false",
+        "    }",
+        "",
+        "    resetAuthenticationState()",
+        "    lockRequested = true",
+        "    armBlankTimer()",
+        '    logEvent("lock-requested")',
+        "    queueSessionLock()",
+    ])
+    begin_lock_new = block([
+        "  function beginLock() {",
+        "    if (!passwordPamConfigured) {",
+        '      logEvent("lock-denied: missing-pam")',
+        "      return false",
+        "    }",
+        "",
+        "    resetAuthenticationState()",
+        "    fingerprintAttempts = 0",
+        "    lockRequested = true",
+        "    armBlankTimer()",
+        '    logEvent("lock-requested")',
+        "    queueSessionLock()",
+    ])
+    text = replace_once(text, begin_lock_old, begin_lock_new, "beginLock fingerprint budget reset")
+
+    submit_password_old = block([
+        "  function submitPassword(value) {",
+        '    var password = String(value || "")',
+        "    if (!lockRequested || authenticatingPassword || password.length === 0) return",
+        "",
+        "    runWake()",
+        "    pendingPassword = password",
+        '    failureMessage = ""',
+        "    authenticatingPassword = true",
+        "",
+        "    if (!passwordPam.start()) {",
+        "      handlePasswordFailure()",
+        "      return",
+        "    }",
+        "",
+        "    Qt.callLater(respondToPasswordPrompt)",
+        "  }",
+    ])
+    submit_password_new = block([
+        "  function submitPassword(value) {",
+        '    var password = String(value || "")',
+        "    if (!lockRequested || authenticatingPassword || password.length === 0) return",
+        "",
+        "    authenticatingPassword = true",
+        "    fingerprintRetryTimer.stop()",
+        "    fingerprintAuthenticating = false",
+        "    if (fingerprintPam.active) fingerprintPam.abort()",
+        "",
+        "    runWake()",
+        "    pendingPassword = password",
+        '    failureMessage = ""',
+        "",
+        "    if (!passwordPam.start()) {",
+        "      handlePasswordFailure()",
+        "      return",
+        "    }",
+        "",
+        "    Qt.callLater(respondToPasswordPrompt)",
+        "  }",
+    ])
+    text = replace_once(text, submit_password_old, submit_password_new, "submitPassword fingerprint abort-on-submit")
+
+    password_failure_old = block([
+        "  function handlePasswordFailure() {",
+        "    if (!lockRequested) return",
+        "",
+        "    authenticatingPassword = false",
+        '    enteredPassword = ""',
+        '    pendingPassword = ""',
+        "    failedAttempts += 1",
+        '    failureMessage = "Authentication failed (" + failedAttempts + ")"',
+        "    runWake()",
+        "  }",
+    ])
+    password_failure_new = block([
+        "  function handlePasswordFailure() {",
+        "    if (!lockRequested) return",
+        "",
+        "    authenticatingPassword = false",
+        '    enteredPassword = ""',
+        '    pendingPassword = ""',
+        "    failedAttempts += 1",
+        '    failureMessage = "Authentication failed (" + failedAttempts + ")"',
+        "    runWake()",
+        "    startFingerprint()",
+        "  }",
+    ])
+    text = replace_once(text, password_failure_old, password_failure_new, "handlePasswordFailure fingerprint resume")
+
+    start_fingerprint_old = block([
+        "  function startFingerprint() {",
+        '    if (!lockRequested || !sessionLock.secure || !fingerprintConfigured) return',
+        "    if (fingerprintPam.active || fingerprintAuthenticating) return",
+        "",
+        "    fingerprintAuthenticating = true",
+        "    if (!fingerprintPam.start()) {",
+        "      fingerprintAuthenticating = false",
+        "    }",
+        "  }",
+    ])
+    start_fingerprint_new = block([
+        "  function startFingerprint() {",
+        '    if (!lockRequested || !sessionLock.secure || !fingerprintConfigured) return',
+        "    if (authenticatingPassword || fingerprintExhausted) return",
+        "    if (fingerprintPam.active || fingerprintAuthenticating) return",
+        "",
+        "    fingerprintAttempts += 1",
+        "    fingerprintAuthenticating = true",
+        "    if (!fingerprintPam.start()) {",
+        "      fingerprintAuthenticating = false",
+        "    }",
+        "  }",
+    ])
+    text = replace_once(text, start_fingerprint_old, start_fingerprint_new, "startFingerprint budget guard")
+
+    handle_finished_old = block([
+        "  function handleFingerprintFinished(result) {",
+        "    fingerprintAuthenticating = false",
+        "",
+        "    if (!lockRequested) return",
+        "    if (result === PamResult.Success) {",
+        "      finishUnlock()",
+        "    } else if (fingerprintConfigured) {",
+        "      fingerprintRetryTimer.restart()",
+        "    }",
+        "  }",
+    ])
+    handle_finished_new = block([
+        "  function handleFingerprintFinished(result) {",
+        "    fingerprintAuthenticating = false",
+        "",
+        "    if (!lockRequested) return",
+        "    if (result === PamResult.Success) {",
+        "      finishUnlock()",
+        "    } else if (fingerprintConfigured && !authenticatingPassword && !fingerprintExhausted) {",
+        "      fingerprintRetryTimer.restart()",
+        "    }",
+        "  }",
+    ])
+    text = replace_once(text, handle_finished_old, handle_finished_new, "handleFingerprintFinished budget guard")
+
+    fingerprint_pam_error_old = block([
+        "    onError: function(error) {",
+        "      root.fingerprintAuthenticating = false",
+        "      if (root.lockRequested && root.fingerprintConfigured) fingerprintRetryTimer.restart()",
+        "    }",
+    ])
+    fingerprint_pam_error_new = block([
+        "    onError: function(error) {",
+        "      root.fingerprintAuthenticating = false",
+        "      if (root.lockRequested && root.fingerprintConfigured && !root.authenticatingPassword && !root.fingerprintExhausted) fingerprintRetryTimer.restart()",
+        "    }",
+    ])
+    text = replace_once(text, fingerprint_pam_error_old, fingerprint_pam_error_new, "fingerprintPam onError budget guard")
+
+    fingerprint_check_proc_old = block([
+        "  Process {",
+        "    id: fingerprintCheckProc",
+        '    command: ["bash", "-c", "if [[ -f /etc/pam.d/omarchy-lock-fingerprint ]] '
+        '&& command -v fprintd-list >/dev/null 2>&1 && fprintd-list \\"$USER\\" 2>/dev/null | grep -qi finger; then echo yes; else echo no; fi"]',
+        "    stdout: StdioCollector { id: fingerprintCheckStdout; waitForEnd: true }",
+        "    onExited: {",
+        '      root.fingerprintConfigured = String(fingerprintCheckStdout.text || "").trim() === "yes"',
+        "      if (root.lockRequested && root.fingerprintConfigured) root.startFingerprint()",
+        "      else if (!root.fingerprintConfigured && fingerprintPam.active) fingerprintPam.abort()",
+        "    }",
+        "  }",
+    ])
+    fingerprint_check_proc_new = block([
+        "  Process {",
+        "    id: fingerprintReadyProbe",
+        '    command: ["omarchy-lock-fingerprint-ready"]',
+        "    onExited: function(exitCode) {",
+        "      // omarchy-lock-fingerprint-ready's ABI mirrors",
+        "      // omarchy-hyprland-session-locked's: 0/1 are resolved answers, 2 is",
+        '      // "cannot determine" and must not be read as a hardware absence.',
+        "      if (exitCode === 2) return",
+        "",
+        "      root.fingerprintReady = exitCode === 0",
+        "      if (!root.fingerprintReady && fingerprintPam.active) fingerprintPam.abort()",
+        "      if (root.lockRequested) root.startFingerprint()",
+        "    }",
+        "  }",
+    ])
+    text = replace_once(text, fingerprint_check_proc_old, fingerprint_check_proc_new, "fingerprint readiness probe")
+
+    password_fileview = block([
+        "  FileView {",
+        '    path: "/etc/pam.d/omarchy-lock-password"',
+        "    watchChanges: true",
+        "    printErrors: false",
+        "    onLoaded: root.passwordPamConfigured = true",
+        "    onLoadFailed: root.passwordPamConfigured = false",
+        "    onFileChanged: reload()",
+        "  }",
+    ])
+    password_fileview_and_fingerprint = password_fileview + block([
+        "",
+        "  FileView {",
+        '    path: "/etc/pam.d/omarchy-lock-fingerprint"',
+        "    watchChanges: true",
+        "    printErrors: false",
+        "    onLoaded: root.fingerprintPamConfigured = true",
+        "    onLoadFailed: root.fingerprintPamConfigured = false",
+        "    onFileChanged: reload()",
+        "  }",
+        "",
+        "  onFingerprintPamConfiguredChanged: {",
+        "    if (!fingerprintPamConfigured) {",
+        "      fingerprintReady = false",
+        "      return",
+        "    }",
+        "    refreshFingerprintStatus()",
+        "  }",
+    ])
+    text = replace_once(text, password_fileview, password_fileview_and_fingerprint, "fingerprint PAM presence watcher")
+
+    status_old = block([
+        "    function status(): string {",
+        "      return JSON.stringify({",
+        "        locked: root.locked,",
+        "        requested: root.lockRequested,",
+        "        pending: root.pendingSessionLock,",
+        "        sessionLocked: sessionLock.locked,",
+        "        secure: sessionLock.secure,",
+        "        realScreens: root.realScreenCount(),",
+        "        passwordPam: root.passwordPamConfigured,",
+        "        fingerprint: root.fingerprintConfigured,",
+        "        authenticating: root.authenticating,",
+        "        lastEvent: root.lastEvent,",
+        "        lastEventAt: root.lastEventAt",
+        "      })",
+        "    }",
+    ])
+    status_new = block([
+        "    function status(): string {",
+        "      return JSON.stringify({",
+        "        locked: root.locked,",
+        "        requested: root.lockRequested,",
+        "        pending: root.pendingSessionLock,",
+        "        sessionLocked: sessionLock.locked,",
+        "        secure: sessionLock.secure,",
+        "        realScreens: root.realScreenCount(),",
+        "        passwordPam: root.passwordPamConfigured,",
+        "        fingerprint: root.fingerprintConfigured,",
+        "        fingerprintEnabled: root.fingerprintPamConfigured,",
+        "        fingerprintReady: root.fingerprintReady,",
+        "        fingerprintAuthenticating: root.fingerprintAuthenticating,",
+        "        fingerprintAttempts: root.fingerprintAttempts,",
+        "        fingerprintAttemptsRemaining: Math.max(0, root.fingerprintMaxAttempts - root.fingerprintAttempts),",
+        "        fingerprintExhausted: root.fingerprintExhausted,",
+        "        authenticating: root.authenticating,",
+        "        lastEvent: root.lastEvent,",
+        "        lastEventAt: root.lastEventAt",
+        "      })",
+        "    }",
+    ])
+    text = replace_once(text, status_old, status_new, "status() fingerprint fields")
+
+    blank_comment_old = block([
+        "      // Only a password check in flight should hold the display up. The",
+        "      // fingerprint PAM stays armed for the whole lock, so gating on",
+        "      // `authenticating` here would keep the panel lit until unlock.",
+    ])
+    blank_comment_new = block([
+        "      // Only a password check in flight should hold the display up. The",
+        "      // fingerprint PAM is bounded and gets aborted on password submission",
+        "      // or exhaustion, so gating on `authenticating` here would keep the",
+        "      // panel lit past those points.",
+    ])
+    text = replace_once(text, blank_comment_old, blank_comment_new, "stale fingerprint blank-timer comment")
+
+    return text
+
+
+def main(argv: list[str]) -> int:
+    fingerprint_mode = "disabled"
+    positional: list[str] = []
+    args = iter(argv)
+    for arg in args:
+        if arg == "--fingerprint":
+            try:
+                fingerprint_mode = next(args)
+            except StopIteration:
+                print(f"usage: {sys.argv[0]} [--fingerprint disabled|enabled] SERVICE_QML", file=sys.stderr)
+                return 2
+        else:
+            positional.append(arg)
+
+    if fingerprint_mode not in ("disabled", "enabled") or len(positional) != 1:
+        print(f"usage: {sys.argv[0]} [--fingerprint disabled|enabled] SERVICE_QML", file=sys.stderr)
+        return 2
+
+    path = Path(positional[0])
+    text = path.read_text()
+    text = apply_shared(text)
+    text = apply_fingerprint_enabled(text) if fingerprint_mode == "enabled" else apply_fingerprint_disabled(text)
     path.write_text(text)
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

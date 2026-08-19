@@ -135,7 +135,7 @@ def tokenize(array_body: str) -> list[tuple[str, bool]]:
     return tokens
 
 
-def check_command(tokens: list[tuple[str, bool]], context: str, tally: Tally) -> None:
+def check_command(tokens: list[tuple[str, bool]], context: str, tally: Tally, allowed_direct: set[str]) -> None:
     if not tokens:
         fail(f"{context}: empty command array")
 
@@ -167,7 +167,7 @@ def check_command(tokens: list[tuple[str, bool]], context: str, tally: Tally) ->
         tally.entries.append(f"{context}: {WRAPPER} -> {wrapped_value} (allowed-wrapped) {values!r}")
         return
 
-    if exe_value in ALLOWED_DIRECT:
+    if exe_value in allowed_direct:
         tally.allowed_direct += 1
         tally.entries.append(f"{context}: {exe_value} (allowed-direct) {values!r}")
         return
@@ -177,7 +177,7 @@ def check_command(tokens: list[tuple[str, bool]], context: str, tally: Tally) ->
     fail(f"{context}: unknown executable: {exe_value!r}")
 
 
-def scan(text: str) -> Tally:
+def scan(text: str, allowed_direct: set[str]) -> Tally:
     try:
         stripped = source_discovery.strip_comments(text, shell=False)
         masked = source_discovery.mask_string_literals(stripped)
@@ -211,17 +211,35 @@ def scan(text: str) -> Tally:
         if kind != "array":
             fail(f"{context}: {kind} ({stripped[match.start():match.end()].strip()!r})")
         real_body = stripped[match.start(1) : match.end(1)]
-        check_command(tokenize(real_body), context, tally)
+        check_command(tokenize(real_body), context, tally, allowed_direct)
 
     return tally
 
 
-def main() -> int:
-    if len(sys.argv) != 2:
-        print(f"usage: {sys.argv[0]} SERVICE_QML", file=sys.stderr)
+def main(argv: list[str]) -> int:
+    fingerprint_mode = "disabled"
+    positional: list[str] = []
+    args = iter(argv)
+    for arg in args:
+        if arg == "--fingerprint":
+            try:
+                fingerprint_mode = next(args)
+            except StopIteration:
+                print(f"usage: {sys.argv[0]} [--fingerprint disabled|enabled] SERVICE_QML", file=sys.stderr)
+                return 2
+        else:
+            positional.append(arg)
+
+    if fingerprint_mode not in ("disabled", "enabled") or len(positional) != 1:
+        print(f"usage: {sys.argv[0]} [--fingerprint disabled|enabled] SERVICE_QML", file=sys.stderr)
         return 2
-    path = Path(sys.argv[1])
-    tally = scan(path.read_text())
+
+    allowed_direct = set(ALLOWED_DIRECT)
+    if fingerprint_mode == "enabled":
+        allowed_direct.add("omarchy-lock-fingerprint-ready")
+
+    path = Path(positional[0])
+    tally = scan(path.read_text(), allowed_direct)
     total = tally.allowed_direct + tally.allowed_wrapped
     for entry in tally.entries:
         print(f"lock executable surface: {entry}", file=sys.stderr)
@@ -235,4 +253,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

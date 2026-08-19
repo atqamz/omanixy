@@ -665,3 +665,154 @@ authentication, generation switch, logout, reboot, suspend, Hyprland
 process, or live Quickshell session has been exercised. Omanixy still owns no
 lock keybinding, and the native lock still runs in-process inside the
 existing `omanixy-shell` user service with no new systemd unit.
+
+## Layer 4 implementation note
+
+`4-04-security-fingerprint` implements the `security.pam-fingerprint` ledger
+entry only, adding fingerprint authentication as an optional,
+disabled-by-default secondary unlock path alongside - never instead of - the
+layer 2/3 password path. Password authentication remains the mandatory,
+always-functional fallback throughout every configuration this layer adds;
+nothing in this layer can make password authentication unavailable.
+
+### NixOS fingerprint PAM capability
+
+`programs.omanixy.security.pam.fingerprint.enable` (default `false`,
+`modules/nixos/default.nix`) mirrors the password capability's ownership
+contract exactly: `lib.mkForce` on both `enable` and the single-line `text`
+of `security.pam.services."omarchy-lock-fingerprint"` (one
+`auth required ${config.services.fprintd.package}/lib/security/pam_fprintd.so`
+line), plus an assertion against the *resolved* service state rather than
+the override alone, closing the same equal-priority `lines`-merge escape the
+layer 2 note describes. No `account`, `session`, or `password` PAM phase is
+declared, matching the `PamContext` ABI's single `pam_authenticate` call.
+
+The capability also owns the daemon activation `pam_fprintd.so` needs: the
+resolved `services.fprintd.package` is registered directly with
+`services.dbus.packages`, `systemd.packages`, and
+`environment.systemPackages`, the same three lists `services.fprintd`'s own
+module would populate if enabled. This option deliberately never sets
+`services.fprintd.enable` itself, because
+`nixos/modules/security/pam.nix` reads that option as the default for every
+*other* PAM service's own `fprintAuth` - turning it on would silently widen
+fingerprint authentication into login/sudo/su/polkit-1/greetd/sshd and any
+other PAM service that does not override `fprintAuth` itself. An assertion
+verifies `services.fprintd.enable` stays `false` and that the resolved
+package actually landed in all three registration lists, so a host or
+another module contesting either invariant fails the build closed instead of
+silently widening PAM scope or losing the daemon activation. This is a
+Nix-declared capability, not a runtime readiness claim: a machine with this
+enabled but no fingerprint reader, no enrolled finger, or no `fprintd`
+running still builds and boots successfully.
+
+### Home Manager `lock.fingerprint` option and the paired-capability handshake
+
+`programs.omanixy.security.lock.fingerprint.enable` (default `false`,
+`modules/home/default.nix`) extends the layer 3 `osConfig` handshake with
+three further `assertions`, on top of the two `security.lock.enable` already
+enforces: the option is only meaningful while
+`programs.omanixy.security.lock.enable` is also `true`; a standalone Home
+Manager evaluation (no `osConfig`) with fingerprint enabled fails closed,
+for the same reason the lock option itself does; and an integrated
+evaluation fails closed unless the paired NixOS configuration has *both*
+`programs.omanixy.security.pam.password.enable` and
+`programs.omanixy.security.pam.fingerprint.enable` set - the former because
+fingerprint is only ever a secondary path to the mandatory password
+fallback, never a replacement for it, and the latter because it provisions
+the PAM service and daemon fingerprint authenticates against.
+
+Crossing this option against the layer 3 lock/PAM matrix yields seven
+scenarios: the two standalone cases (lock disabled, lock enabled) and the
+four integrated password/fingerprint on/off combinations fail whenever
+either paired NixOS capability is missing, only the fully-integrated
+both-capabilities-on case succeeds with fingerprint enabled, and that same
+integrated configuration continues to succeed with fingerprint left at its
+default (`false`) - proving the new option is additive to, and never a
+precondition of, the existing password-only lock. `security-lock-fingerprint`
+proves this with real `nixosSystem`/`homeManagerConfiguration` evaluations
+forced to `config.system.build.toplevel`, not a description of intended
+behavior.
+
+### Bounded fingerprint state machine
+
+`scripts/patch-lock-service --fingerprint enabled|disabled` gains a second,
+independent mode alongside the existing lock patch. In `enabled` mode it
+reintroduces a fingerprint `PamContext` against the
+`omarchy-lock-fingerprint` service name, but bounds it: a
+`fingerprintMaxAttempts: 5` budget, a readonly `fingerprintExhausted`
+property derived from it, and a non-repeating (`repeat: false`) retry timer
+whose restart on both a failed attempt and a PAM error is guarded by
+`!fingerprintExhausted`. The budget resets only in `beginLock`, tied to lock
+acquisition, never to a screen change, DPMS event, or password failure,
+matching the "Lock and session-lock protocol" finding above that the pinned
+source's unbounded 250 ms retry-on-every-failure needed a tested stop
+condition before promotion. The upstream `fingerprintCheckProc`
+`bash -c`/`fprintd-list` probe is not reintroduced; its replacement is the
+readiness adapter below, invoked as direct argv.
+
+Fingerprint failure, exhaustion, or a PAM error can never call
+`finishUnlock()`, release the lock, or touch password state: the only
+`finishUnlock()` call in `handleFingerprintFinished` is gated on
+`PamResult.Success`, and neither that handler nor the fingerprint PAM
+context's error path references `failedAttempts` or the password `PamContext`.
+Password submission stops the fingerprint retry timer and aborts any
+in-flight fingerprint PAM conversation before starting its own; a password
+failure calls `startFingerprint()` to resume scheduling but never refills
+the fingerprint attempt budget itself, and `startFingerprint()` refuses to
+start while a password check is in flight or the budget is exhausted. The
+pre-existing `idleBlankTimer` stays gated on `authenticatingPassword` alone,
+and the stale upstream comment claiming the fingerprint PAM stays armed for
+the whole lock - no longer true once bounded and abortable - is rewritten in
+both patch modes rather than left accurate only for the disabled build.
+`status()` gains `fingerprintEnabled`, `fingerprintReady`,
+`fingerprintAuthenticating`, `fingerprintAttempts`,
+`fingerprintAttemptsRemaining`, and `fingerprintExhausted`; none of the six
+carry biometric or PAM content, only capability and bounded-counter state.
+`security-lock-fingerprint` proves all of this against the real generated
+Service.qml source, not a description of the intended state machine, and
+`security-lock` continues to prove the disabled build is byte-identical to
+the frozen layer 3 output.
+
+### Readiness adapter ABI
+
+`omarchy-lock-fingerprint-ready` (`packages/omanixy-shell/adapters/lock.bash`)
+is a new narrow adapter, argument-free and scoped to the current user via
+`id -un`, replacing the upstream probe's `bash -c "fprintd-list | grep ..."`
+shape entirely. It classifies `fprintd-list`'s own success/failure exit code
+together with its stdout text - `fprintd-list` puts every message, including
+errors, on stdout rather than stderr, and a successful call still reports "no
+fingers enrolled" as a non-error condition - into the same three-way ABI the
+"Lock and session-lock protocol" finding's compositor-state adapter already
+uses: `0` ready, `1` definitely unavailable (no reader, or no enrollment for
+this user), `2` indeterminate (missing `fprintd-list`, a D-Bus timeout, or any
+output shape the probe cannot classify). The call is time-bounded through the
+same `timed()` primitive `common.bash` already validates, so a wedged
+`fprintd-list`/D-Bus call cannot stall the lock indefinitely, and indeterminate
+is the fail-closed default rather than a guess. No hardware probing occurs
+during Nix evaluation; this adapter only ever runs at runtime, invoked by the
+patched Service.qml as direct argv, never through a shell.
+
+### Executable surface scanning
+
+`scripts/scan-lock-executable-surface` gains a `--fingerprint disabled|enabled`
+profile argument alongside the existing positional file: in `enabled` mode,
+the allowlist gains exactly one new allowed direct executable,
+`omarchy-lock-fingerprint-ready`, and nothing else - no new wrapped
+executable, no relaxation of the existing `bash -c` rejection or literal-only
+tokenization rules the layer 3 note describes. `security-lock-fingerprint-executable-surface`
+proves the disabled-mode allowlist is unchanged from layer 3 and that the
+enabled-mode allowlist accepts only that one addition.
+
+### Scope
+
+This layer promotes `security.pam-fingerprint` from `blocked`/`blocked` to
+its already-declared target of `adapted`/`experimental`, and no other
+`security.*` ledger entry; `security.polkit-agent`, `security.idle`,
+`security.notification-daemon`, and `security.recovery` remain `blocked`.
+`experimental`, not `supported`, because every proof in this layer is
+hermetic: no live `fprintd` daemon, real reader, enrolled or unenrolled
+hardware, or repeated-failure log-volume behavior has been exercised, and
+these remain the ledger's `required_before_promotion` items for this entry.
+Omanixy still owns no polkit, idle, or notification-daemon surface, and
+adds no new systemd unit beyond the `fprintd`-provided one this capability
+merely registers for activation.

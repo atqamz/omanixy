@@ -83,6 +83,7 @@
           powerRuntime = runtimeFor system [ "power" ];
           notificationRuntime = runtimeFor system [ "notification" ];
           lockRuntime = runtimeForSecurity system null { lock = true; };
+          lockFingerprintRuntime = runtimeForSecurity system null { lock = true; fingerprint = true; };
           coreLockRuntime = runtimeForSecurity system [ "core" ] { lock = true; };
           capabilityRuntimePaths = pkgs.writeText "omanixy-capability-runtime-paths" (builtins.toJSON {
             "audio-control" = toString audioRuntime;
@@ -117,6 +118,7 @@
           };
           runtimeClosureInfo = pkgs.closureInfo { rootPaths = [ runtime ]; };
           lockRuntimeClosureInfo = pkgs.closureInfo { rootPaths = [ lockRuntime ]; };
+          lockFingerprintRuntimeClosureInfo = pkgs.closureInfo { rootPaths = [ lockFingerprintRuntime ]; };
           coreLockRuntimeClosureInfo = pkgs.closureInfo { rootPaths = [ coreLockRuntime ]; };
           coreRuntimeClosureInfo = pkgs.closureInfo { rootPaths = [ coreRuntime ]; };
           compatibilityRoot = runtime.passthru.omarchyCompatibilityRoot;
@@ -295,6 +297,122 @@
           # checked when config.system.build.toplevel is forced, never on
           # config.environment.etc directly.
           pamPasswordStrongConflictServiceFile = "${pamPasswordStrongConflictNixosConfiguration.config.environment.etc."pam.d/omarchy-lock-password".source}";
+          # The fingerprint mirror of pamPassword* above: same adversarial
+          # shapes (ordinary competing text, competing enable = false, a
+          # second equal-priority mkForce on text), plus one shape password
+          # has no equivalent of - a host or module setting
+          # services.fprintd.enable directly, which this capability's own
+          # assertion must reject rather than silently widen fingerprint
+          # auth into login/sudo/su/sshd/polkit-1/greetd.
+          pamFingerprintNixosConfiguration = nixpkgs.lib.nixosSystem {
+            inherit system;
+            modules = [
+              self.nixosModules.default
+              bootableStub
+              {
+                nixpkgs.hostPlatform = system;
+                system.stateVersion = "26.11";
+                programs.omanixy.security.pam.fingerprint.enable = true;
+              }
+            ];
+          };
+          pamFingerprintServiceFile = "${pamFingerprintNixosConfiguration.config.environment.etc."pam.d/omarchy-lock-fingerprint".source}";
+          pamFingerprintAdversarialNixosConfiguration = nixpkgs.lib.nixosSystem {
+            inherit system;
+            modules = [
+              self.nixosModules.default
+              bootableStub
+              {
+                nixpkgs.hostPlatform = system;
+                system.stateVersion = "26.11";
+                programs.omanixy.security.pam.fingerprint.enable = true;
+              }
+              {
+                security.pam.services."omarchy-lock-fingerprint".text = ''
+                  auth sufficient /run/wrappers/bin/pam_permit_placeholder.so
+                '';
+              }
+            ];
+          };
+          pamFingerprintAdversarialServiceFile = "${pamFingerprintAdversarialNixosConfiguration.config.environment.etc."pam.d/omarchy-lock-fingerprint".source}";
+          pamFingerprintEnableConflictNixosConfiguration = nixpkgs.lib.nixosSystem {
+            inherit system;
+            modules = [
+              self.nixosModules.default
+              bootableStub
+              {
+                nixpkgs.hostPlatform = system;
+                system.stateVersion = "26.11";
+                programs.omanixy.security.pam.fingerprint.enable = true;
+              }
+              {
+                security.pam.services."omarchy-lock-fingerprint".enable = false;
+              }
+            ];
+          };
+          pamFingerprintEnableConflictServiceFile = "${pamFingerprintEnableConflictNixosConfiguration.config.environment.etc."pam.d/omarchy-lock-fingerprint".source}";
+          pamFingerprintStrongConflictNixosConfiguration = nixpkgs.lib.nixosSystem {
+            inherit system;
+            modules = [
+              self.nixosModules.default
+              bootableStub
+              {
+                nixpkgs.hostPlatform = system;
+                system.stateVersion = "26.11";
+                programs.omanixy.security.pam.fingerprint.enable = true;
+              }
+              (
+                { lib, ... }:
+                {
+                  security.pam.services."omarchy-lock-fingerprint".text = lib.mkForce ''
+                    auth sufficient /run/wrappers/bin/pam_permit_placeholder.so
+                  '';
+                }
+              )
+            ];
+          };
+          pamFingerprintStrongConflictServiceFile = "${pamFingerprintStrongConflictNixosConfiguration.config.environment.etc."pam.d/omarchy-lock-fingerprint".source}";
+          # G. The widening hazard itself: some other module or host config
+          # sets services.fprintd.enable directly (here alongside sshd and
+          # polkit, the two PAM services most likely to actually exist on a
+          # real host and therefore most likely to silently gain fingerprint
+          # auth) while the Omanixy capability is also on. The capability's
+          # own first assertion must fail this closed.
+          pamFingerprintFprintdEnableConflictNixosConfiguration = nixpkgs.lib.nixosSystem {
+            inherit system;
+            modules = [
+              self.nixosModules.default
+              bootableStub
+              {
+                nixpkgs.hostPlatform = system;
+                system.stateVersion = "26.11";
+                programs.omanixy.security.pam.fingerprint.enable = true;
+                services.fprintd.enable = true;
+                services.openssh.enable = true;
+                security.polkit.enable = true;
+              }
+            ];
+          };
+          # H. The widening-absence proof itself: fingerprint enabled
+          # alongside sshd and polkit actually present (services.fprintd.
+          # enable deliberately left untouched, exactly as the capability
+          # intends), reading the resolved fprintAuth default every other
+          # PAM service would have inherited had services.fprintd.enable
+          # been set.
+          pamFingerprintNoWideningNixosConfiguration = nixpkgs.lib.nixosSystem {
+            inherit system;
+            modules = [
+              self.nixosModules.default
+              bootableStub
+              {
+                nixpkgs.hostPlatform = system;
+                system.stateVersion = "26.11";
+                programs.omanixy.security.pam.fingerprint.enable = true;
+                services.openssh.enable = true;
+                security.polkit.enable = true;
+              }
+            ];
+          };
           # Section 26 scenario 1/7: standalone Home Manager, lock disabled
           # (the default) - must evaluate cleanly.
           standaloneLockDisabledEval = builtins.tryEval (
@@ -307,6 +425,28 @@
             builtins.seq
               (homeConfigurationFor system {
                 programs.omanixy.security.lock.enable = true;
+              }).activationPackage.drvPath
+              true
+          );
+          # Fingerprint HM matrix scenario A/7: fingerprint enabled with the
+          # lock itself left at its default (disabled) - must fail closed via
+          # the security.lock.enable assertion in modules/home/default.nix,
+          # independent of osConfig or the paired NixOS config entirely.
+          standaloneFingerprintLockDisabledEval = builtins.tryEval (
+            builtins.seq
+              (homeConfigurationFor system {
+                programs.omanixy.security.lock.fingerprint.enable = true;
+              }).activationPackage.drvPath
+              true
+          );
+          # Fingerprint HM matrix scenario B/7: lock and fingerprint both
+          # enabled, but standalone (no osConfig) - must fail closed via the
+          # osConfig != null assertion.
+          standaloneFingerprintLockEnabledEval = builtins.tryEval (
+            builtins.seq
+              (homeConfigurationFor system {
+                programs.omanixy.security.lock.enable = true;
+                programs.omanixy.security.lock.fingerprint.enable = true;
               }).activationPackage.drvPath
               true
           );
@@ -348,6 +488,53 @@
           integratedPamOnLockOffNixosConfiguration = integratedHomeManagerNixosConfigurationFor true false;
           integratedPamOffLockOnNixosConfiguration = integratedHomeManagerNixosConfigurationFor false true;
           integratedPamOnLockOnNixosConfiguration = integratedHomeManagerNixosConfigurationFor true true;
+          # Fingerprint HM matrix scenarios C-G/7: integrated NixOS + Home
+          # Manager, lock always on (fingerprint is only ever meaningful
+          # alongside it - scenario A/B above already prove the lock-off and
+          # standalone cases fail independently of these), crossed with the
+          # paired NixOS pam.password/pam.fingerprint enablement and whether
+          # the Home Manager fingerprint option itself is on.
+          integratedFingerprintHomeManagerNixosConfigurationFor = pamPasswordEnabled: pamFingerprintEnabled: hmFingerprintEnabled: nixpkgs.lib.nixosSystem {
+            inherit system;
+            modules = [
+              self.nixosModules.default
+              bootableStub
+              home-manager.nixosModules.home-manager
+              {
+                nixpkgs.hostPlatform = system;
+                system.stateVersion = "26.11";
+                programs.omanixy.security.pam.password.enable = pamPasswordEnabled;
+                programs.omanixy.security.pam.fingerprint.enable = pamFingerprintEnabled;
+                users.users."omanixy-test" = {
+                  isNormalUser = true;
+                  home = "/build/omanixy-test";
+                };
+                home-manager.useGlobalPkgs = true;
+                home-manager.useUserPackages = true;
+                home-manager.users."omanixy-test" = {
+                  imports = [ self.homeManagerModules.default ];
+                  home.username = "omanixy-test";
+                  home.homeDirectory = "/build/omanixy-test";
+                  home.stateVersion = "25.11";
+                  programs.omanixy.enable = true;
+                  programs.omanixy.security.lock.enable = true;
+                  programs.omanixy.security.lock.fingerprint.enable = hmFingerprintEnabled;
+                };
+              }
+            ];
+          };
+          # C/7: neither paired NixOS option on - must fail (both assertions).
+          integratedFingerprintPamOffFingerprintOffNixosConfiguration = integratedFingerprintHomeManagerNixosConfigurationFor false false true;
+          # D/7: password on, fingerprint off - must fail (pam.fingerprint assertion).
+          integratedFingerprintPamOnFingerprintOffNixosConfiguration = integratedFingerprintHomeManagerNixosConfigurationFor true false true;
+          # E/7: password off, fingerprint on - must fail (pam.password assertion).
+          integratedFingerprintPamOffFingerprintOnNixosConfiguration = integratedFingerprintHomeManagerNixosConfigurationFor false true true;
+          # F/7: both paired NixOS options on - must pass.
+          integratedFingerprintPamOnFingerprintOnNixosConfiguration = integratedFingerprintHomeManagerNixosConfigurationFor true true true;
+          # G/7: both paired NixOS options on, but the Home Manager
+          # fingerprint option itself left disabled - must pass regardless,
+          # since none of the fingerprint assertions apply while it is off.
+          integratedFingerprintPamOnFingerprintOnHmDisabledNixosConfiguration = integratedFingerprintHomeManagerNixosConfigurationFor true true false;
           service = homeConfiguration.config.systemd.user.services.omanixy-shell;
           activationScript = pkgs.writeShellScript "omanixy-shell-state-activation" homeConfiguration.config.home.activation.omanixyShellState.data;
           clipboardActivationScript = pkgs.writeShellScript "omanixy-shell-clipboard-state-activation" clipboardHomeConfiguration.config.home.activation.omanixyShellState.data;
@@ -615,6 +802,71 @@
               "$strongConflictServiceFile" "$strongConflictToplevelForced"
             touch "$out"
           '';
+          security-pam-fingerprint = pkgs.runCommand "omanixy-security-pam-fingerprint"
+            {
+              serviceFile = pamFingerprintServiceFile;
+              enabledHasPasswordService = if builtins.hasAttr "pam.d/omarchy-lock-password" pamFingerprintNixosConfiguration.config.environment.etc then "true" else "false";
+              enabledPolkitEnabled = if pamFingerprintNixosConfiguration.config.security.polkit.enable then "true" else "false";
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.ripgrep ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-pam-fingerprint.sh} ${./.} "$serviceFile" \
+              "$enabledHasPasswordService" "$enabledPolkitEnabled"
+            touch "$out"
+          '';
+          security-pam-fingerprint-composition = pkgs.runCommand "omanixy-security-pam-fingerprint-composition"
+            {
+              ownedServiceFile = pamFingerprintServiceFile;
+              adversarialServiceFile = pamFingerprintAdversarialServiceFile;
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.diffutils pkgs.gnugrep ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-pam-fingerprint-composition.sh} \
+              "$ownedServiceFile" "$adversarialServiceFile"
+            touch "$out"
+          '';
+          security-pam-fingerprint-capability = pkgs.runCommand "omanixy-security-pam-fingerprint-capability"
+            {
+              ownedServiceFile = pamFingerprintServiceFile;
+              ownedEnable = if pamFingerprintNixosConfiguration.config.security.pam.services."omarchy-lock-fingerprint".enable then "true" else "false";
+              ownedToplevelForced = if toplevelForced pamFingerprintNixosConfiguration then "true" else "false";
+              adversarialToplevelForced = if toplevelForced pamFingerprintAdversarialNixosConfiguration then "true" else "false";
+              enableConflictServiceFile = pamFingerprintEnableConflictServiceFile;
+              enableConflictEnable = if pamFingerprintEnableConflictNixosConfiguration.config.security.pam.services."omarchy-lock-fingerprint".enable then "true" else "false";
+              enableConflictToplevelForced = if toplevelForced pamFingerprintEnableConflictNixosConfiguration then "true" else "false";
+              strongConflictServiceFile = pamFingerprintStrongConflictServiceFile;
+              strongConflictToplevelForced = if toplevelForced pamFingerprintStrongConflictNixosConfiguration then "true" else "false";
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.diffutils pkgs.gnugrep ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-pam-fingerprint-capability.sh} \
+              "$ownedServiceFile" "$ownedEnable" "$ownedToplevelForced" \
+              "$adversarialToplevelForced" \
+              "$enableConflictServiceFile" "$enableConflictEnable" "$enableConflictToplevelForced" \
+              "$strongConflictServiceFile" "$strongConflictToplevelForced"
+            touch "$out"
+          '';
+          security-pam-fingerprint-widening = pkgs.runCommand "omanixy-security-pam-fingerprint-widening"
+            {
+              fprintdEnableConflictToplevelForced = if toplevelForced pamFingerprintFprintdEnableConflictNixosConfiguration then "true" else "false";
+              noWideningToplevelForced = if toplevelForced pamFingerprintNoWideningNixosConfiguration then "true" else "false";
+              noWideningFprintdEnable = if pamFingerprintNoWideningNixosConfiguration.config.services.fprintd.enable then "true" else "false";
+              noWideningLoginFprintAuth = if pamFingerprintNoWideningNixosConfiguration.config.security.pam.services.login.fprintAuth then "true" else "false";
+              noWideningSudoFprintAuth = if pamFingerprintNoWideningNixosConfiguration.config.security.pam.services.sudo.fprintAuth then "true" else "false";
+              noWideningSuFprintAuth = if pamFingerprintNoWideningNixosConfiguration.config.security.pam.services.su.fprintAuth then "true" else "false";
+              noWideningSshdFprintAuth = if pamFingerprintNoWideningNixosConfiguration.config.security.pam.services.sshd.fprintAuth then "true" else "false";
+              noWideningPolkitFprintAuth = if pamFingerprintNoWideningNixosConfiguration.config.security.pam.services."polkit-1".fprintAuth then "true" else "false";
+              noWideningPackageRegistered =
+                if
+                  builtins.elem pamFingerprintNoWideningNixosConfiguration.config.services.fprintd.package pamFingerprintNoWideningNixosConfiguration.config.services.dbus.packages
+                  && builtins.elem pamFingerprintNoWideningNixosConfiguration.config.services.fprintd.package pamFingerprintNoWideningNixosConfiguration.config.systemd.packages
+                  && builtins.elem pamFingerprintNoWideningNixosConfiguration.config.services.fprintd.package pamFingerprintNoWideningNixosConfiguration.config.environment.systemPackages
+                then "true" else "false";
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-pam-fingerprint-widening.sh} \
+              "$fprintdEnableConflictToplevelForced" "$noWideningToplevelForced" "$noWideningFprintdEnable" \
+              "$noWideningLoginFprintAuth" "$noWideningSudoFprintAuth" "$noWideningSuFprintAuth" \
+              "$noWideningSshdFprintAuth" "$noWideningPolkitFprintAuth" "$noWideningPackageRegistered"
+            touch "$out"
+          '';
           security-lock = pkgs.runCommand "omanixy-security-lock"
             {
               standaloneLockDisabledOk = if standaloneLockDisabledEval.success then "true" else "false";
@@ -659,6 +911,48 @@
               ${./scripts/scan-lock-executable-surface} \
               ${lockRuntime.passthru.omarchyCompatibilityRoot}/shell/plugins/lock/Service.qml \
               ${pkgs.python3}/bin/python3 ${./scripts}
+            touch "$out"
+          '';
+          security-lock-fingerprint = pkgs.runCommand "omanixy-security-lock-fingerprint"
+            {
+              standaloneFingerprintLockDisabledOk = if standaloneFingerprintLockDisabledEval.success then "true" else "false";
+              standaloneFingerprintLockEnabledOk = if standaloneFingerprintLockEnabledEval.success then "true" else "false";
+              integratedOffOffOk = if toplevelForced integratedFingerprintPamOffFingerprintOffNixosConfiguration then "true" else "false";
+              integratedOnOffOk = if toplevelForced integratedFingerprintPamOnFingerprintOffNixosConfiguration then "true" else "false";
+              integratedOffOnOk = if toplevelForced integratedFingerprintPamOffFingerprintOnNixosConfiguration then "true" else "false";
+              integratedOnOnOk = if toplevelForced integratedFingerprintPamOnFingerprintOnNixosConfiguration then "true" else "false";
+              integratedOnOnHmDisabledOk = if toplevelForced integratedFingerprintPamOnFingerprintOnHmDisabledNixosConfiguration then "true" else "false";
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-lock-fingerprint.sh} \
+              ${lockFingerprintRuntime.passthru.omarchyCompatibilityRoot}/shell/plugins/lock/Service.qml \
+              ${lockRuntime.passthru.omarchyCompatibilityRoot}/shell/plugins/lock/Service.qml \
+              "$standaloneFingerprintLockDisabledOk" "$standaloneFingerprintLockEnabledOk" \
+              "$integratedOffOffOk" "$integratedOnOffOk" "$integratedOffOnOk" "$integratedOnOnOk" "$integratedOnOnHmDisabledOk"
+            touch "$out"
+          '';
+          security-lock-fingerprint-executable-surface = pkgs.runCommand "omanixy-security-lock-fingerprint-executable-surface"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.python3 ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-lock-fingerprint-executable-surface.sh} \
+              ${./scripts/scan-lock-executable-surface} \
+              ${lockFingerprintRuntime.passthru.omarchyCompatibilityRoot}/shell/plugins/lock/Service.qml \
+              ${pkgs.python3}/bin/python3 ${./scripts}
+            touch "$out"
+          '';
+          security-lock-fingerprint-closure = pkgs.runCommand "omanixy-security-lock-fingerprint-closure"
+            {
+              lockClosurePaths = "${lockRuntimeClosureInfo}/store-paths";
+              lockFingerprintClosurePaths = "${lockFingerprintRuntimeClosureInfo}/store-paths";
+              declaredRuntimeInputs = pkgs.writeText "omanixy-lock-declared-runtime-inputs.json" lockRuntime.passthru.declaredRuntimeInputs;
+              fingerprintDeclaredRuntimeInputs = pkgs.writeText "omanixy-lock-fingerprint-declared-runtime-inputs.json" lockFingerprintRuntime.passthru.declaredRuntimeInputs;
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.findutils pkgs.diffutils pkgs.jq ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-lock-fingerprint-closure.sh} \
+              "$lockClosurePaths" "$lockFingerprintClosurePaths" \
+              "$declaredRuntimeInputs" "$fingerprintDeclaredRuntimeInputs" \
+              ${lockRuntime.passthru.compatibilityBin} ${lockFingerprintRuntime.passthru.compatibilityBin}
             touch "$out"
           '';
           security-lock-managed-plugin = pkgs.runCommand "omanixy-security-lock-managed-plugin"

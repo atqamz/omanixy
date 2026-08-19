@@ -1078,11 +1078,12 @@ items:
       - No PAM consumer, native lock, fingerprint capability, polkit agent, idle manager, or notification daemon is enabled by this layer.
 
   - id: security.pam-fingerprint
-    classification: blocked
-    support: blocked
+    classification: adapted
+    support: experimental
     maturity: audited
     owner: atqamz/omanixy#4
     planned_stack_layer: 4/8
+    promoted_at_layer: 4/8
     audit_layer: 1/8
     target:
       classification: adapted
@@ -1129,15 +1130,35 @@ items:
       available:
         - pinned enrollment probe and fingerprint PAM source audit
         - exact Quickshell PAM subprocess and abort behavior audit
+        - declarative programs.omanixy.security.pam.fingerprint.enable NixOS option, disabled by default
+        - generated /etc/pam.d/omarchy-lock-fingerprint hermetically built and content-checked for a single auth-only pam_fprintd.so line
+        - hermetic proof of no nullok, no pam_permit.so, and no account/session/password phase
+        - static proof of no imperative /etc/pam.d writer outside security.pam.services, and that Home Manager and the runtime package declare no PAM service for fingerprint either
+        - hermetic build proof of mkForce ownership of both the service's enable state and text atomically, mirroring security.pam-password's composition and capability proofs, via test/security-pam-fingerprint-composition.sh and test/security-pam-fingerprint-capability.sh
+        - hermetic proof the capability never sets services.fprintd.enable directly and does not widen the nixpkgs-derived fprintAuth default for login, sudo, su, sshd, or polkit-1, via test/security-pam-fingerprint-widening.sh
+        - hermetic proof of a bounded fingerprint attempt budget (finite fingerprintMaxAttempts, a non-repeating retry timer, and a reset tied only to lock acquisition) replacing the pinned unbounded 250 ms retry loop, and that fingerprint failure, error, and exhaustion never call finishUnlock(), touch password failedAttempts, or refill from a password failure, via test/security-lock-fingerprint.sh
+        - hermetic proof of a narrow, argument-free, current-user-only readiness adapter (omarchy-lock-fingerprint-ready) replacing the pinned bash -c/fprintd-list probe, with a ready/definitely-unavailable/indeterminate exit-code ABI, via the lock executable-surface scan at test/security-lock-fingerprint-executable-surface.sh
+        - hermetic proof the fingerprint-disabled build is byte-identical to the frozen layer-3 password-only output, and that enabling fingerprint widens the declared runtime inputs and built closure by exactly fprintd and the readiness adapter, via test/security-lock-fingerprint-closure.sh
+        - a seven-scenario Home Manager assertion matrix proving programs.omanixy.security.lock.fingerprint.enable is reachable only on an integrated NixOS + Home Manager installation with both paired programs.omanixy.security.pam.password.enable and programs.omanixy.security.pam.fingerprint.enable true, and fails evaluation with an actionable message otherwise
       required_before_promotion:
-        - no-device and daemon-unavailable tests
-        - bounded repeated-failure and log-volume tests
+        - no-device and daemon-unavailable tests against a real fprintd
+        - live bounded repeated-failure and log-volume tests against a real fprintd, beyond the hermetic state-machine proof already in evidence
         - enrolled and unenrolled hardware validation
-        - explicit password fallback behavior
+        - explicit password fallback behavior exercised against a live authentication conversation
     tests:
       - test/quattro-contract-audit.sh
+      - test/security-pam-fingerprint.sh
+      - test/security-pam-fingerprint-composition.sh
+      - test/security-pam-fingerprint-capability.sh
+      - test/security-pam-fingerprint-widening.sh
+      - test/security-lock-fingerprint.sh
+      - test/security-lock-fingerprint-executable-surface.sh
+      - test/security-lock-fingerprint-closure.sh
     notes:
       - Fingerprint is not inferred from the presence of the native lock and is not enabled in layer 1.
+      - "Layer 4 implements security.pam.services.\"omarchy-lock-fingerprint\" as a single explicit auth-only pam_fprintd.so line, registering services.fprintd's package/dbus/systemd surface directly without ever setting services.fprintd.enable itself, so no other PAM service's fprintAuth default widens as a side effect. It adds the structurally separate, default-off programs.omanixy.security.lock.fingerprint Home Manager option as a secondary unlock path alongside the already-mandatory password fallback, never a replacement for it."
+      - Support remains experimental, not supported, for the same reason as security.pam-password: no live authentication conversation, real fprintd daemon, or enrolled hardware has been exercised, only the generated declarative artifact, the bounded state machine, and the readiness adapter's ABI have been hermetically proven.
+      - No polkit agent, idle manager, or notification daemon is enabled by this layer.
 
   - id: security.polkit-agent
     classification: blocked
