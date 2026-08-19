@@ -327,11 +327,33 @@ def _blank(body: str) -> str:
 def _consume_interpolation(text: str, start: int, mask: bool) -> tuple[int, str]:
     """`start` is the index of the "$" opening a "${" inside a backtick
     literal. Returns the index just past the matching unescaped "}" and the
-    interpolation's text (delimiters included), always left verbatim/live -
-    a template-derived executable identity built through interpolation must
-    stay visible to command discovery, never disappear into blanked
-    template text. Nested strings and nested backtick literals are skipped
-    depth-correctly so a "}" inside one of them cannot desync the match."""
+    interpolation's text (delimiters included).
+
+    `${...}` is treated as a live JS-like lexical region: identifiers,
+    operators, calls, assignments, array/object syntax, and nested
+    `${...}` expressions stay live so a command built through interpolation
+    remains visible to discovery. Everything else is inert and cannot
+    perturb that liveness:
+
+    - "//" and "/* */" comments are recognized and blanked to whitespace
+      (never deleted, unlike top-level `strip_comments` - the interpolation
+      walker relies on 1:1 index correspondence with `text` to track brace
+      depth, so shrinking the output here would desync the match) before
+      depth-counting sees them, so a "}" inside a comment can never
+      terminate the interpolation early and comment-only text can never
+      satisfy command discovery.
+    - Quoted string bodies are masked exactly like `mask_string_literals`
+      does at top level: verbatim when `mask` is False (Stage 1 preserves
+      string content), blanked when `mask` is True (Stage 2 hides
+      string-only content from discovery), with the delimiting quotes kept
+      either way so downstream span matching still sees a well-formed
+      string shape.
+    - Nested backtick literals recurse through `_consume_backtick`, so
+      their static text stays inert while any further nested `${...}`
+      inside them stays live.
+
+    Braces inside any of the above are consumed as part of that region and
+    never reach the depth counter, so they cannot desync the match."""
 
     length = len(text)
     index = start + 2
@@ -339,11 +361,26 @@ def _consume_interpolation(text: str, start: int, mask: bool) -> tuple[int, str]
     pieces = ["${"]
     while index < length:
         char = text[index]
+        if text.startswith("//", index):
+            end = text.find("\n", index)
+            end = length if end < 0 else end
+            pieces.append(_blank(text[index:end]))
+            index = end
+            continue
+        if text.startswith("/*", index):
+            end = text.find("*/", index + 2)
+            end = length if end < 0 else end + 2
+            pieces.append(_blank(text[index:end]))
+            index = end
+            continue
         if char in "\"'":
             end = _find_string_end(text, index + 1, char)
             if end < 0:
                 raise UnsafeSource("unterminated string literal inside template interpolation")
-            pieces.append(text[index:end])
+            body = text[index + 1 : end - 1]
+            pieces.append(char)
+            pieces.append(_blank(body) if mask else body)
+            pieces.append(char)
             index = end
             continue
         if char == "`":
@@ -367,7 +404,9 @@ def _consume_backtick(text: str, start: int, mask: bool) -> tuple[int, str]:
     """`start` is just past an opening backtick. Returns the index just past
     the matching unescaped closing backtick and the literal's content
     (excluding delimiters) - verbatim when `mask` is False, with static text
-    blanked (`${...}` interpolation always left live) when `mask` is True."""
+    blanked when `mask` is True. `${...}` interpolation is always recursed
+    into as live code (see `_consume_interpolation`) rather than being
+    blanked as static text, regardless of `mask`."""
 
     length = len(text)
     index = start
@@ -412,6 +451,13 @@ def strip_comments(text: str, shell: bool = False) -> str:
     text (e.g. `Quickshell.env("HOME")`) keeps working unchanged. Use
     `mask_string_literals` on the result when literal-looking text inside a
     string must not itself satisfy command discovery.
+
+    A `${...}` interpolation is live code, not a string: comments inside
+    one are still removed, but - unlike top-level comments, which are
+    deleted and collapse to a bare newline - they are blanked to
+    whitespace in place. `_consume_interpolation` tracks brace depth by
+    walking `text` index-for-index, so shrinking its output here would
+    desync that walk; blanking keeps every offset aligned.
 
     Raises UnsafeSource (QML/JS only) if a backtick template literal or a
     `${...}` interpolation inside one is not closed before the source ends.
@@ -502,10 +548,12 @@ def mask_string_literals(text: str) -> str:
     for the matched span directly out of `text`, rather than out of this
     masked copy.
 
-    `${...}` interpolation inside a template literal is always left
-    live/unmasked, so a command built through interpolation stays visible
-    to further discovery instead of silently disappearing into blanked
-    template text.
+    `${...}` interpolation inside a template literal is walked as live
+    code (see `_consume_interpolation`) rather than blanked as static
+    text, so a command built through interpolation stays visible to
+    further discovery instead of silently disappearing into blanked
+    template text. Quoted strings and comments inside the interpolation
+    are still inert and get blanked/masked the same as everywhere else.
 
     Raises UnsafeSource under the same conditions as `strip_comments`.
     """

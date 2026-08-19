@@ -535,17 +535,30 @@ procedural `.command =` mutation, and any non-array dynamic binding
 (`command: <expr>`, `x.command = <expr>`, a dynamic `exec(...)`/`.run(...)`
 call) are all found the same way everywhere in this repo. This is a lexical
 masker, not a parser: comments are stripped first, then quoted-string and
-backtick-template-literal content is separately, lexically masked (`${...}`
-interpolation stays live) before discovery runs, so a comment marker or
-command-looking text sitting inside a string or template literal cannot
-satisfy or spoof the scan, and cannot hide a real binding that follows it.
-The literal values used for allowlist validation are still read from the
+backtick-template-literal content is separately, lexically masked before
+discovery runs, so a comment marker or command-looking text sitting inside
+a string or template literal cannot satisfy or spoof the scan, and cannot
+hide a real binding that follows it. A `${...}` interpolation inside a
+template literal is treated as its own live JS-like lexical region rather
+than static template text: identifiers, operators, calls, assignments,
+array/object syntax, and a nested `${...}` all stay live, so a command
+built through interpolation is discoverable exactly like top-level code.
+Within that region, quoted strings and `//`/`/* */` comments are inert the
+same way they are everywhere else - masked, and unable to affect the
+brace-depth count that finds the interpolation's real closing `}` - so a
+`}` sitting inside one of them can never terminate the interpolation early
+and hand real code that follows to the wrong (inert) side of that
+boundary. A nested backtick literal's own static text stays inert while a
+further nested interpolation inside it stays live, recursively. The
+literal values used for allowlist validation are still read from the
 comment-stripped (not string-masked) text, so a legitimate command array's
-real executable name is never itself blanked. An unterminated backtick
-template literal is treated as unsafe input and rejected outright, since it
-is the only construct this masker allows to span multiple lines and an
-actually-unterminated one could otherwise silently absorb real code that
-follows it.
+real executable name is never itself blanked. This is deliberately not a
+full ECMAScript parser - it tracks just enough lexical structure (strings,
+comments, braces, backticks) to make those liveness/inertness calls; any
+construct it cannot prove closed - an unterminated backtick template
+literal, or a `${...}` interpolation whose closing `}` is never found -
+is treated as unsafe input and rejected outright, since letting it span
+indefinitely could otherwise silently absorb real code that follows it.
 Validation then tokenizes each discovered array positionally: the executable
 position must be a literal naming an allowed direct executable (`readlink`,
 `omarchy-hyprland-session-locked`) or the `timeout` wrapper around an
@@ -573,7 +586,22 @@ following it, a command constructed through `${...}` interpolation (must
 stay live, not become inert), and an unterminated backtick literal
 (rejected outright as unsafe) are all covered - alongside a real allowed
 command sitting next to unrelated strings/comments containing
-command-looking text, which still passes.
+command-looking text, which still passes. A dedicated interpolation
+lexical matrix additionally proves the region inside `${...}` itself is
+safe: a quoted, block-comment, or line-comment fake command with no real
+command anywhere is inert and fails as unverifiable rather than as
+"found"; a `}` inside a quoted string, a block comment, or a line comment
+cannot terminate the interpolation early and hide the real unknown command
+that follows it; a fake command sitting alongside a real unknown
+assignment (quoted or commented) never launders it; a nested backtick's
+static fake text stays inert while a real unknown command inside its own
+nested interpolation is still found; braces nested inside strings,
+comments, and a nested backtick's static text never desync the depth
+count; a real allowed command located after all of that complexity is
+still found at its correct position; and an interpolation whose `${`
+never finds a matching `}` - independent of whether the backtick itself
+would ever close - fails closed, including when the reason is an
+unterminated `/* */` comment inside it.
 
 `test/security-lock-managed-plugin.sh` proves two independent things with
 real QML behavior rather than a source grep. First, defense against

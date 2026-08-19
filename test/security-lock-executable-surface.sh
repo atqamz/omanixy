@@ -359,6 +359,140 @@ Process {
   command: ["readlink", "-f", "/tmp/x"]
 }'
 
+# Interpolation lexical scanner test group: "${...}" is live JS-like code,
+# but quoted strings, "//" line comments, and "/* */" block comments inside
+# it are inert and must not be able to satisfy discovery or to perturb the
+# brace-depth count that finds the interpolation's real closing "}".
+
+# A: a quoted fake command sitting inside interpolation, with no real
+# command anywhere, must not satisfy discovery - the fake string content
+# must be as inert here as it is in an ordinary top-level string.
+assert_rejected_because interpolation-quoted-fake-double-only \
+  'no command bindings' \
+  'property string fake: `${"command: [\"readlink\"]"}`'
+assert_rejected_because interpolation-quoted-fake-single-only \
+  'no command bindings' \
+  "property string fake: \`\${'command: [\"readlink\"]'}\`"
+
+# B: a block-comment fake command inside interpolation, with no real
+# command anywhere, must likewise not satisfy discovery.
+assert_rejected_because interpolation-block-comment-fake-only \
+  'no command bindings' \
+  'property string fake: `${ /* command: ["readlink"] */ 0 }`'
+
+# C: a line-comment fake command inside interpolation, with no real
+# command anywhere, must likewise not satisfy discovery.
+assert_rejected_because interpolation-line-comment-fake-only \
+  'no command bindings' \
+  'property string fake: `${ 0 // command: ["readlink"]
+}`'
+
+# D: a "}" inside a "/* */" comment must not close the interpolation early -
+# the real unknown command that logically follows it must still be found.
+assert_rejected_because interpolation-block-comment-brace-bypass \
+  'mystery-security-tool' \
+  'property string fake: `prefix ${
+  true /* } */ ? (lockProc.command = ["mystery-security-tool"]) : "x"
+} suffix`'
+
+# E: a "}" inside a "//" comment must not close the interpolation early -
+# the real unknown command that logically follows it must still be found.
+assert_rejected_because interpolation-line-comment-brace-bypass \
+  'mystery-security-tool' \
+  'property string fake: `prefix ${
+  true // } fake terminator
+    ? (lockProc.command = ["mystery-security-tool"])
+    : "x"
+} suffix`'
+
+# F: a "}" inside a quoted string must not close the interpolation early -
+# the real unknown command that logically follows it must still be found.
+assert_rejected_because interpolation-quoted-brace-bypass \
+  'mystery-security-tool' \
+  'property string fake: `${("}" , lockProc.command = ["mystery-security-tool"])}`'
+
+# G: a quoted fake command alongside a real unknown assignment - the fake
+# must not launder or hide the real, unknown binding.
+assert_rejected_because interpolation-quoted-fake-plus-real-unknown \
+  'mystery-security-tool' \
+  'property string fake: `${(
+  "command: [\"readlink\"]",
+  lockProc.command = ["mystery-security-tool"]
+)}`'
+
+# H: a comment fake command (both comment styles) alongside a real unknown
+# assignment - the fake must not launder or hide the real, unknown binding.
+assert_rejected_because interpolation-block-comment-fake-plus-real-unknown \
+  'mystery-security-tool' \
+  'property string fake: `${(
+  /* command: ["readlink"] */
+  lockProc.command = ["mystery-security-tool"]
+)}`'
+assert_rejected_because interpolation-line-comment-fake-plus-real-unknown \
+  'mystery-security-tool' \
+  'property string fake: `${(
+  // command: ["readlink"]
+  lockProc.command = ["mystery-security-tool"]
+)}`'
+
+# I: a nested backtick template's static fake command text must stay inert
+# while a real unknown command inside its own nested interpolation must
+# still be found.
+assert_rejected_because interpolation-nested-template-fake-plus-nested-real-unknown \
+  'mystery-security-tool' \
+  'property string fake: `outer ${
+  `inner fake command: ["readlink"] ${
+     lockProc.command = ["mystery-security-tool"]
+  }`
+}`'
+
+# J: braces occurring inside a nested string, a nested comment, and a
+# nested backtick literal'"'"'s static text must all be ignored by the
+# depth counter - only the real, structurally-final "}}" closes the
+# interpolation and the object literal. A real allowed command elsewhere
+# still passes.
+assert_allowed_raw interpolation-nested-inert-braces '
+property var fake: `${{
+  value: "}",
+  other: '"'"'/* } */'"'"',
+  nested: `static } ${someExpression}`
+}}`
+Process {
+  command: ["readlink", "-f", root.currentBackgroundLink]
+}'
+
+# K: after a complex interpolation exercising quoted, block-comment,
+# line-comment, and nested-backtick braces all in one place, a real
+# allowed command located afterward in the file must still be found at its
+# correct position - proving none of that complexity desyncs offsets for
+# what follows.
+assert_allowed_raw interpolation-allowed-command-after-complex-interpolation '
+property string fake: `${(
+  "}" ,
+  /* } */
+  // }
+  `nested static } ${1}`
+)}`
+Process {
+  command: ["readlink", "-f", root.currentBackgroundLink]
+}'
+
+# L: an interpolation whose "${" never finds a matching "}" (independent of
+# the backtick itself ever closing) must be rejected outright as unsafe.
+assert_rejected_because interpolation-unterminated \
+  'unsafe source' \
+  'property string fake: `prefix ${ still open
+command: ["mystery-security-tool"]'
+
+# M: an unterminated "/* */" block comment inside interpolation must fail
+# closed rather than silently absorbing the real command that follows it.
+assert_rejected_because interpolation-unterminated-block-comment \
+  'unsafe source' \
+  'property string fake: `${
+  /* never closes
+  lockProc.command = ["mystery-security-tool"]
+}`'
+
 # Allowed shapes must still pass, proving the scanner is not simply
 # rejecting everything.
 allowed=$fixture/allowed.qml
