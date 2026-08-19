@@ -83,7 +83,7 @@
           powerRuntime = runtimeFor system [ "power" ];
           notificationRuntime = runtimeFor system [ "notification" ];
           lockRuntime = runtimeForSecurity system null { lock = true; };
-          lockFingerprintRuntime = runtimeForSecurity system null { lock = true; fingerprint = true; };
+          lockFingerprintRuntime = runtimeForSecurity system null { lock = true; fingerprint = true; fingerprintPackage = pkgs.fprintd; };
           coreLockRuntime = runtimeForSecurity system [ "core" ] { lock = true; };
           capabilityRuntimePaths = pkgs.writeText "omanixy-capability-runtime-paths" (builtins.toJSON {
             "audio-control" = toString audioRuntime;
@@ -535,6 +535,87 @@
           # fingerprint option itself left disabled - must pass regardless,
           # since none of the fingerprint assertions apply while it is off.
           integratedFingerprintPamOnFingerprintOnHmDisabledNixosConfiguration = integratedFingerprintHomeManagerNixosConfigurationFor true true false;
+          # Section 8-10 (custom package identity): a distinguishable custom
+          # services.fprintd.package (a plain overrideAttrs rename, so its
+          # store path differs from the plain pkgs.fprintd default while
+          # remaining a real, buildable fprintd) threaded through an
+          # integrated NixOS + Home Manager configuration with both PAM
+          # capabilities and the Home Manager fingerprint option on. Proves
+          # the PAM service, the three NixOS package-registration lists, and
+          # the Home Manager runtime's own declaredRuntimeInputs all resolve
+          # to this one identity - no independent default pkgs.fprintd is
+          # pulled in alongside it anywhere in the chain.
+          customFprintdPackage = pkgs.fprintd.overrideAttrs (old: {
+            pname = "omanixy-test-fprintd";
+          });
+          integratedFingerprintCustomPackageNixosConfiguration = nixpkgs.lib.nixosSystem {
+            inherit system;
+            modules = [
+              self.nixosModules.default
+              bootableStub
+              home-manager.nixosModules.home-manager
+              {
+                nixpkgs.hostPlatform = system;
+                system.stateVersion = "26.11";
+                programs.omanixy.security.pam.password.enable = true;
+                programs.omanixy.security.pam.fingerprint.enable = true;
+                services.fprintd.package = customFprintdPackage;
+                users.users."omanixy-test" = {
+                  isNormalUser = true;
+                  home = "/build/omanixy-test";
+                };
+                home-manager.useGlobalPkgs = true;
+                home-manager.useUserPackages = true;
+                home-manager.users."omanixy-test" = {
+                  imports = [ self.homeManagerModules.default ];
+                  home.username = "omanixy-test";
+                  home.homeDirectory = "/build/omanixy-test";
+                  home.stateVersion = "25.11";
+                  programs.omanixy.enable = true;
+                  programs.omanixy.security.lock.enable = true;
+                  programs.omanixy.security.lock.fingerprint.enable = true;
+                };
+              }
+            ];
+          };
+          integratedFingerprintCustomPackageServiceFile = "${integratedFingerprintCustomPackageNixosConfiguration.config.environment.etc."pam.d/omarchy-lock-fingerprint".source}";
+          integratedFingerprintCustomPackageRuntime = builtins.elemAt
+            integratedFingerprintCustomPackageNixosConfiguration.config.home-manager.users."omanixy-test".home.packages
+            0;
+          # Section 11-13 (TOD activation): services.fprintd.package's own
+          # default already resolves to the TOD-aware daemon when
+          # services.fprintd.tod.enable is set, independent of
+          # services.fprintd.enable; this fixture proves that, and proves
+          # the one environment variable this capability mirrors from
+          # upstream's own services.fprintd.enable-gated block
+          # (FP_TOD_DRIVERS_DIR) resolves to the selected driver's real
+          # path rather than a placeholder.
+          # A hermetic stand-in rather than a real TOD driver package: every
+          # real libfprint-2-tod1-* package in nixpkgs is either unfree
+          # (broadcom, broadcom-cv3plus, elan, goodix, goodix-550a) or marked
+          # broken (vfs0090), neither of which a flake check may depend on.
+          # services.fprintd.tod.driver only needs a package exposing a
+          # driverPath passthru attribute, so this fixture provides exactly
+          # that shape.
+          todDriverPackage = pkgs.runCommand "omanixy-test-tod-driver"
+            {
+              passthru.driverPath = "/lib/libfprint-2/tod-1";
+            } "mkdir -p \"$out\"";
+          pamFingerprintTodNixosConfiguration = nixpkgs.lib.nixosSystem {
+            inherit system;
+            modules = [
+              self.nixosModules.default
+              bootableStub
+              {
+                nixpkgs.hostPlatform = system;
+                system.stateVersion = "26.11";
+                programs.omanixy.security.pam.fingerprint.enable = true;
+                services.fprintd.tod.enable = true;
+                services.fprintd.tod.driver = todDriverPackage;
+              }
+            ];
+          };
+          pamFingerprintTodServiceFile = "${pamFingerprintTodNixosConfiguration.config.environment.etc."pam.d/omarchy-lock-fingerprint".source}";
           service = homeConfiguration.config.systemd.user.services.omanixy-shell;
           activationScript = pkgs.writeShellScript "omanixy-shell-state-activation" homeConfiguration.config.home.activation.omanixyShellState.data;
           clipboardActivationScript = pkgs.writeShellScript "omanixy-shell-clipboard-state-activation" clipboardHomeConfiguration.config.home.activation.omanixyShellState.data;
@@ -867,6 +948,41 @@
               "$noWideningSshdFprintAuth" "$noWideningPolkitFprintAuth" "$noWideningPackageRegistered"
             touch "$out"
           '';
+          security-pam-fingerprint-custom-package = pkgs.runCommand "omanixy-security-pam-fingerprint-custom-package"
+            {
+              serviceFile = integratedFingerprintCustomPackageServiceFile;
+              toplevelForcedOk = if toplevelForced integratedFingerprintCustomPackageNixosConfiguration then "true" else "false";
+              dbusRegistered = if builtins.elem customFprintdPackage integratedFingerprintCustomPackageNixosConfiguration.config.services.dbus.packages then "true" else "false";
+              systemdRegistered = if builtins.elem customFprintdPackage integratedFingerprintCustomPackageNixosConfiguration.config.systemd.packages then "true" else "false";
+              environmentRegistered = if builtins.elem customFprintdPackage integratedFingerprintCustomPackageNixosConfiguration.config.environment.systemPackages then "true" else "false";
+              declaredRuntimeInputs = pkgs.writeText "omanixy-lock-fingerprint-custom-package-declared-runtime-inputs.json" integratedFingerprintCustomPackageRuntime.passthru.declaredRuntimeInputs;
+              customPackagePath = "${customFprintdPackage}";
+              defaultPackagePath = "${pkgs.fprintd}";
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.jq ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-pam-fingerprint-custom-package.sh} \
+              "$serviceFile" "$toplevelForcedOk" \
+              "$dbusRegistered" "$systemdRegistered" "$environmentRegistered" \
+              "$declaredRuntimeInputs" "$customPackagePath" "$defaultPackagePath"
+            touch "$out"
+          '';
+          security-pam-fingerprint-tod = pkgs.runCommand "omanixy-security-pam-fingerprint-tod"
+            {
+              serviceFile = pamFingerprintTodServiceFile;
+              toplevelForcedOk = if toplevelForced pamFingerprintTodNixosConfiguration then "true" else "false";
+              packagePath = "${pamFingerprintTodNixosConfiguration.config.services.fprintd.package}";
+              expectedPackagePath = "${pkgs.fprintd-tod}";
+              envValue = pamFingerprintTodNixosConfiguration.config.systemd.services.fprintd.environment.FP_TOD_DRIVERS_DIR or "";
+              expectedEnvValue = "${todDriverPackage}${todDriverPackage.driverPath}";
+              driverPath = "${todDriverPackage}";
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-pam-fingerprint-tod.sh} \
+              "$serviceFile" "$toplevelForcedOk" \
+              "$packagePath" "$expectedPackagePath" \
+              "$envValue" "$expectedEnvValue" "$driverPath"
+            touch "$out"
+          '';
           security-lock = pkgs.runCommand "omanixy-security-lock"
             {
               standaloneLockDisabledOk = if standaloneLockDisabledEval.success then "true" else "false";
@@ -931,6 +1047,14 @@
               "$integratedOffOffOk" "$integratedOnOffOk" "$integratedOffOnOk" "$integratedOnOnOk" "$integratedOnOnHmDisabledOk"
             touch "$out"
           '';
+          security-lock-fingerprint-ready = pkgs.runCommand "omanixy-security-lock-fingerprint-ready"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-lock-fingerprint-ready.sh} \
+              ${./packages/omanixy-shell/adapters/common.bash} ${./packages/omanixy-shell/adapters/lock.bash}
+            touch "$out"
+          '';
           security-lock-fingerprint-executable-surface = pkgs.runCommand "omanixy-security-lock-fingerprint-executable-surface"
             {
               nativeBuildInputs = [ pkgs.bash pkgs.python3 ];
@@ -953,6 +1077,14 @@
               "$lockClosurePaths" "$lockFingerprintClosurePaths" \
               "$declaredRuntimeInputs" "$fingerprintDeclaredRuntimeInputs" \
               ${lockRuntime.passthru.compatibilityBin} ${lockFingerprintRuntime.passthru.compatibilityBin}
+            touch "$out"
+          '';
+          security-lock-fingerprint-behavior = pkgs.runCommand "omanixy-security-lock-fingerprint-behavior"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.nodejs ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-lock-fingerprint-behavior.sh} \
+              ${lockFingerprintRuntime.passthru.omarchyCompatibilityRoot}/shell/plugins/lock/FingerprintPolicy.js
             touch "$out"
           '';
           security-lock-managed-plugin = pkgs.runCommand "omanixy-security-lock-managed-plugin"

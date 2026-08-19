@@ -12,16 +12,33 @@ lock_fingerprint_compat_bin=${6:?fingerprint-enabled compatibility bin required}
 # packages/omanixy-shell/default.nix's own runtimeInputs list by exactly
 # pkgs.fprintd, the one narrow, documented exception to selectedCapabilities
 # otherwise deriving purely from `features`. Not a general capability - a
-# single named exception.
-new_declared=$(diff <(jq -S . "$declared_runtime_inputs") <(jq -S . "$fingerprint_declared_runtime_inputs") || true)
-if [[ -z "$new_declared" ]]; then
-  printf '%s\n' 'expected fingerprint to widen declaredRuntimeInputs; found no difference' >&2
+# single named exception. An exact set difference (not a substring match
+# against the raw diff) is required, since a substring match would pass
+# just as happily if fprintd was one of several unrelated widenings.
+removed=$(jq -n --slurpfile a "$declared_runtime_inputs" --slurpfile b "$fingerprint_declared_runtime_inputs" '$a[0] - $b[0]')
+added=$(jq -n --slurpfile a "$declared_runtime_inputs" --slurpfile b "$fingerprint_declared_runtime_inputs" '$b[0] - $a[0]')
+
+if [[ "$removed" != "[]" ]]; then
+  printf 'fingerprint removed declaredRuntimeInputs entries instead of only adding:\n%s\n' "$removed" >&2
   exit 1
 fi
-if ! grep -q 'fprintd' <<<"$new_declared"; then
-  printf 'declaredRuntimeInputs widened by something other than fprintd:\n%s\n' "$new_declared" >&2
+
+added_count=$(jq 'length' <<<"$added")
+if [[ "$added_count" != 1 ]]; then
+  printf 'expected fingerprint to add exactly one declaredRuntimeInputs entry, added %s:\n%s\n' "$added_count" "$added" >&2
   exit 1
 fi
+
+added_path=$(jq -r '.[0]' <<<"$added")
+added_name=$(basename "$added_path")
+added_name=${added_name#*-}
+case "$added_name" in
+  fprintd-*) ;;
+  *)
+    printf 'the one added declaredRuntimeInputs entry is not fprintd: %s\n' "$added_path" >&2
+    exit 1
+    ;;
+esac
 
 # Closure-level proof, mirrored from security-lock-closure.sh: fprintd is
 # absent from the fingerprint-disabled closure and present in the

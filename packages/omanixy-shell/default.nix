@@ -38,6 +38,14 @@ let
   };
   lockEnabled = security != null && (security.lock or false);
   fingerprintEnabled = lockEnabled && security != null && (security.fingerprint or false);
+  # The NixOS module registers fingerprint PAM/daemon capability against
+  # config.services.fprintd.package; this must be the exact same package
+  # identity the runtime's fprintd-list client resolves, or PAM and the
+  # readiness adapter can silently disagree about which fprintd is real.
+  fingerprintPackage = if fingerprintEnabled then (security.fingerprintPackage or null) else null;
+  fingerprintPackageValid = lib.assertMsg
+    (!fingerprintEnabled || fingerprintPackage != null)
+    "omanixy fingerprint security requires security.fingerprintPackage to be the NixOS-selected services.fprintd.package";
   managedEnabledSecurityPlugins = lib.optionals lockEnabled [ "omarchy.lock" ];
   managedSecurityPluginIds = builtins.toJSON managedEnabledSecurityPlugins;
   externalExecutableCapabilities = contractSource.externalExecutableCapabilities or { };
@@ -165,6 +173,9 @@ let
             install -Dm644 ${omarchySource}/shell/plugins/lock/LockView.qml "$out/shell/plugins/lock/LockView.qml"
             install -Dm644 ${omarchySource}/shell/plugins/lock/Service.qml "$out/shell/plugins/lock/Service.qml"
             chmod u+w "$out/shell/plugins/lock/Service.qml"
+            ${lib.optionalString fingerprintEnabled ''
+            install -Dm644 ${./FingerprintPolicy.js} "$out/shell/plugins/lock/FingerprintPolicy.js"
+            ''}
             ${pkgs.python3}/bin/python3 ${../../scripts/patch-lock-service} \
               --fingerprint ${if fingerprintEnabled then "enabled" else "disabled"} \
               "$out/shell/plugins/lock/Service.qml"
@@ -300,20 +311,21 @@ let
     };
   };
 
-  runtimeInputs = assert featureNamesValid; lib.unique (
+  runtimeInputs = assert featureNamesValid; assert fingerprintPackageValid; lib.unique (
     (lib.concatMap (capability: capabilityRuntimeInputs.${capability}) selectedCapabilities)
-    ++ lib.optional fingerprintEnabled pkgs.fprintd
+    ++ lib.optional fingerprintEnabled fingerprintPackage
   );
 
   # The declared runtime package inputs themselves (store paths of the exact
   # derivations named in runtimeInputs above), as opposed to the full
   # transitive closure: selectedCapabilities - and therefore runtimeInputs -
   # is derived purely from `features`, never from `security`, with one
-  # narrow, deliberate exception: pkgs.fprintd is added only when
-  # fingerprintEnabled, so this list is provably identical for a given
-  # feature set across every security state except that one. The Layer 4
-  # closure test proves the widening happens exactly when fingerprintEnabled
-  # flips, and only then.
+  # narrow, deliberate exception: fingerprintPackage (the NixOS-selected
+  # services.fprintd.package, never an independently-chosen pkgs.fprintd) is
+  # added only when fingerprintEnabled, so this list is provably identical
+  # for a given feature set across every security state except that one. The
+  # Layer 4 closure test proves the widening happens exactly when
+  # fingerprintEnabled flips, and only then.
   declaredRuntimeInputs = builtins.toJSON (builtins.sort (a: b: a < b) (map (p: "${p}") runtimeInputs));
 
   allCompatibilityHelpers = [

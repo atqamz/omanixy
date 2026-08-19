@@ -1138,20 +1138,29 @@ items:
         - hermetic proof the capability never sets services.fprintd.enable directly and does not widen the nixpkgs-derived fprintAuth default for login, sudo, su, sshd, or polkit-1, via test/security-pam-fingerprint-widening.sh
         - hermetic proof of a bounded fingerprint attempt budget (finite fingerprintMaxAttempts, a non-repeating retry timer, and a reset tied only to lock acquisition) replacing the pinned unbounded 250 ms retry loop, and that fingerprint failure, error, and exhaustion never call finishUnlock(), touch password failedAttempts, or refill from a password failure, via test/security-lock-fingerprint.sh
         - hermetic proof of a narrow, argument-free, current-user-only readiness adapter (omarchy-lock-fingerprint-ready) replacing the pinned bash -c/fprintd-list probe, with a ready/definitely-unavailable/indeterminate exit-code ABI, via the lock executable-surface scan at test/security-lock-fingerprint-executable-surface.sh
+        - behavioral proof of that adapter's own exit-code ABI against a fake-binary/PATH-injection harness covering args-supplied, missing-backend, id-lookup-failure, timeout, arbitrary-exit-code, single- and multi-device enrollment, no-enrollment, no-device, and malformed-output cases, and that no raw signal/timeout/missing-backend exit code ever leaks past it, via test/security-lock-fingerprint-ready.sh
         - hermetic proof the fingerprint-disabled build is byte-identical to the frozen layer-3 password-only output, and that enabling fingerprint widens the declared runtime inputs and built closure by exactly fprintd and the readiness adapter, via test/security-lock-fingerprint-closure.sh
         - a seven-scenario Home Manager assertion matrix proving programs.omanixy.security.lock.fingerprint.enable is reachable only on an integrated NixOS + Home Manager installation with both paired programs.omanixy.security.pam.password.enable and programs.omanixy.security.pam.fingerprint.enable true, and fails evaluation with an actionable message otherwise
+        - hermetic proof that a custom services.fprintd.package threads through as one identity end to end: the generated PAM service, the three NixOS package-registration lists, and the Home Manager runtime's own declared closure inputs all resolve to that exact store path, with no independently-resolved default pkgs.fprintd pulled in alongside it, via test/security-pam-fingerprint-custom-package.sh
+        - hermetic proof that services.fprintd.tod.enable resolves services.fprintd.package to the TOD-aware daemon and mirrors the one FP_TOD_DRIVERS_DIR environment variable upstream's own services.fprintd.enable-gated block would otherwise only set, pointed at the selected driver's real path, via test/security-pam-fingerprint-tod.sh
+        - behavioral proof of FingerprintPolicy.js's own state machine, driven directly via Node require() rather than a disconnected reimplementation of its rules: every canStartFingerprint and shouldRetryAfterFailure guard vetoing independently, and a full simulated lock lifecycle (indeterminate probe, capability configuration, in-flight-conversation exclusion, budget exhaustion, password-authentication precedence, mid-conversation capability revocation failing a stale success closed, insecure-session and already-unlocked exclusion), via test/security-lock-fingerprint-behavior.sh
       required_before_promotion:
         - no-device and daemon-unavailable tests against a real fprintd
         - live bounded repeated-failure and log-volume tests against a real fprintd, beyond the hermetic state-machine proof already in evidence
         - enrolled and unenrolled hardware validation
         - explicit password fallback behavior exercised against a live authentication conversation
+        - validation against a real (non-fixture) TOD driver package once one is available under a license this flake can evaluate hermetically
     tests:
       - test/quattro-contract-audit.sh
       - test/security-pam-fingerprint.sh
       - test/security-pam-fingerprint-composition.sh
       - test/security-pam-fingerprint-capability.sh
       - test/security-pam-fingerprint-widening.sh
+      - test/security-pam-fingerprint-custom-package.sh
+      - test/security-pam-fingerprint-tod.sh
       - test/security-lock-fingerprint.sh
+      - test/security-lock-fingerprint-ready.sh
+      - test/security-lock-fingerprint-behavior.sh
       - test/security-lock-fingerprint-executable-surface.sh
       - test/security-lock-fingerprint-closure.sh
     notes:

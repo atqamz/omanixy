@@ -85,6 +85,15 @@ in
         `pam_unix.so`, `pam_permit.so`, `nullok`, or the account/session/
         password PAM phases.
 
+        When `services.fprintd.tod.enable` is also set, this mirrors the one
+        environment variable `nixos/modules/services/security/fprintd.nix`
+        would otherwise only set inside its own `services.fprintd.enable`
+        gate (`FP_TOD_DRIVERS_DIR`, pointing at the selected TOD driver) onto
+        the `fprintd.service` unit, the same way that upstream module does
+        it: layering an environment override onto the unit registered via
+        `systemd.packages` above, without independently re-deriving or
+        widening `services.fprintd.package`'s own already-TOD-aware default.
+
         This is a Nix-declared capability, not a runtime readiness claim: a
         machine with this enabled but no fingerprint reader (or no enrolled
         finger) still builds and boots successfully, and password
@@ -128,6 +137,19 @@ in
       services.dbus.packages = [ config.services.fprintd.package ];
       systemd.packages = [ config.services.fprintd.package ];
       environment.systemPackages = [ config.services.fprintd.package ];
+
+      # services.fprintd.package's own default already resolves to the TOD
+      # variant when services.fprintd.tod.enable is set, independent of
+      # services.fprintd.enable, so the registrations above already carry a
+      # TOD-capable daemon with no change needed. The one thing the upstream
+      # module only wires inside its own services.fprintd.enable-gated
+      # config block is this environment variable telling that daemon where
+      # to find the driver; since this capability never sets
+      # services.fprintd.enable, that block never runs, so it is mirrored
+      # here instead - narrowly, and only this one variable.
+      systemd.services.fprintd.environment = lib.mkIf config.services.fprintd.tod.enable {
+        FP_TOD_DRIVERS_DIR = "${config.services.fprintd.tod.driver}${config.services.fprintd.tod.driver.driverPath}";
+      };
 
       security.pam.services."omarchy-lock-fingerprint" = {
         enable = lib.mkForce true;
@@ -187,6 +209,22 @@ in
             programs.omanixy.security.pam.fingerprint if this service needs a
             different policy; this option does not provide an extraConfig
             escape hatch.
+          '';
+        }
+        {
+          assertion = !config.services.fprintd.tod.enable
+            || (config.systemd.services.fprintd.environment.FP_TOD_DRIVERS_DIR or null)
+            == "${config.services.fprintd.tod.driver}${config.services.fprintd.tod.driver.driverPath}";
+          message = ''
+            programs.omanixy.security.pam.fingerprint.enable and
+            services.fprintd.tod.enable are both true, but the resolved
+            systemd.services.fprintd.environment.FP_TOD_DRIVERS_DIR does not
+            match the selected TOD driver's path. Another module is
+            overriding that unit's environment at an equal-or-stronger
+            priority; this capability needs to own it so the TOD-aware
+            daemon it activates can actually find its driver. Disable
+            programs.omanixy.security.pam.fingerprint if this host needs a
+            different fprintd/TOD activation path.
           '';
         }
       ];

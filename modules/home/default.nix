@@ -8,9 +8,17 @@
 
 let
   cfg = config.programs.omanixy;
+  fingerprintPackage =
+    if cfg.security.lock.enable && cfg.security.lock.fingerprint.enable && osConfig != null
+    then osConfig.services.fprintd.package
+    else null;
   runtime = omanixyRuntimeFor cfg.features (
     if cfg.security.lock.enable
-    then { lock = true; fingerprint = cfg.security.lock.fingerprint.enable; }
+    then {
+      lock = true;
+      fingerprint = cfg.security.lock.fingerprint.enable;
+      fingerprintPackage = fingerprintPackage;
+    }
     else null
   );
   coreutils = "${pkgs.coreutils}/bin";

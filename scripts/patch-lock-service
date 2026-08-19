@@ -213,6 +213,10 @@ def apply_fingerprint_disabled(text: str) -> str:
 
 
 def apply_fingerprint_enabled(text: str) -> str:
+    import_old = "import qs.Commons\n"
+    import_new = 'import qs.Commons\nimport "FingerprintPolicy.js" as FingerprintPolicy\n'
+    text = replace_once(text, import_old, import_new, "fingerprint policy import")
+
     properties_old = block([
         "  property bool authenticatingPassword: false",
         "  property bool fingerprintAuthenticating: false",
@@ -227,8 +231,8 @@ def apply_fingerprint_enabled(text: str) -> str:
         "  property bool fingerprintReady: false",
         "  property int fingerprintAttempts: 0",
         "  readonly property int fingerprintMaxAttempts: 5",
-        "  readonly property bool fingerprintExhausted: fingerprintAttempts >= fingerprintMaxAttempts",
-        "  readonly property bool fingerprintConfigured: fingerprintPamConfigured && fingerprintReady",
+        "  readonly property bool fingerprintExhausted: FingerprintPolicy.isExhausted(fingerprintAttempts, fingerprintMaxAttempts)",
+        "  readonly property bool fingerprintConfigured: FingerprintPolicy.isConfigured(fingerprintPamConfigured, fingerprintReady)",
     ])
     text = replace_once(text, properties_old, properties_new, "fingerprint capability/readiness properties")
 
@@ -266,6 +270,7 @@ def apply_fingerprint_enabled(text: str) -> str:
         "",
         "    resetAuthenticationState()",
         "    fingerprintAttempts = 0",
+        "    fingerprintReady = false",
         "    lockRequested = true",
         "    armBlankTimer()",
         '    logEvent("lock-requested")',
@@ -355,9 +360,15 @@ def apply_fingerprint_enabled(text: str) -> str:
     ])
     start_fingerprint_new = block([
         "  function startFingerprint() {",
-        '    if (!lockRequested || !sessionLock.secure || !fingerprintConfigured) return',
-        "    if (authenticatingPassword || fingerprintExhausted) return",
-        "    if (fingerprintPam.active || fingerprintAuthenticating) return",
+        "    if (!FingerprintPolicy.canStartFingerprint({",
+        "      lockRequested: lockRequested,",
+        "      sessionSecure: sessionLock.secure,",
+        "      fingerprintConfigured: fingerprintConfigured,",
+        "      authenticatingPassword: authenticatingPassword,",
+        "      fingerprintExhausted: fingerprintExhausted,",
+        "      fingerprintPamActive: fingerprintPam.active,",
+        "      fingerprintAuthenticating: fingerprintAuthenticating",
+        "    })) return",
         "",
         "    fingerprintAttempts += 1",
         "    fingerprintAuthenticating = true",
@@ -386,8 +397,16 @@ def apply_fingerprint_enabled(text: str) -> str:
         "",
         "    if (!lockRequested) return",
         "    if (result === PamResult.Success) {",
-        "      finishUnlock()",
-        "    } else if (fingerprintConfigured && !authenticatingPassword && !fingerprintExhausted) {",
+        "      // fingerprintConfigured reflects capability+readiness as of right",
+        "      // now, not as of when this PAM conversation started - a success",
+        "      // callback arriving after capability/readiness was revoked",
+        "      // mid-conversation must fail closed rather than unlock.",
+        "      if (FingerprintPolicy.shouldFinishUnlockOnSuccess(fingerprintConfigured)) finishUnlock()",
+        "    } else if (FingerprintPolicy.shouldRetryAfterFailure({",
+        "      fingerprintConfigured: fingerprintConfigured,",
+        "      authenticatingPassword: authenticatingPassword,",
+        "      fingerprintExhausted: fingerprintExhausted",
+        "    })) {",
         "      fingerprintRetryTimer.restart()",
         "    }",
         "  }",
@@ -403,7 +422,11 @@ def apply_fingerprint_enabled(text: str) -> str:
     fingerprint_pam_error_new = block([
         "    onError: function(error) {",
         "      root.fingerprintAuthenticating = false",
-        "      if (root.lockRequested && root.fingerprintConfigured && !root.authenticatingPassword && !root.fingerprintExhausted) fingerprintRetryTimer.restart()",
+        "      if (root.lockRequested && FingerprintPolicy.shouldRetryAfterFailure({",
+        "        fingerprintConfigured: root.fingerprintConfigured,",
+        "        authenticatingPassword: root.authenticatingPassword,",
+        "        fingerprintExhausted: root.fingerprintExhausted",
+        "      })) fingerprintRetryTimer.restart()",
         "    }",
     ])
     text = replace_once(text, fingerprint_pam_error_old, fingerprint_pam_error_new, "fingerprintPam onError budget guard")
@@ -428,10 +451,11 @@ def apply_fingerprint_enabled(text: str) -> str:
         "    onExited: function(exitCode) {",
         "      // omarchy-lock-fingerprint-ready's ABI mirrors",
         "      // omarchy-hyprland-session-locked's: 0/1 are resolved answers, 2 is",
-        '      // "cannot determine" and must not be read as a hardware absence.',
-        "      if (exitCode === 2) return",
-        "",
-        "      root.fingerprintReady = exitCode === 0",
+        '      // "cannot determine". An indeterminate result fails closed too -',
+        "      // it never leaves a prior fingerprintReady = true standing, since",
+        "      // that would let a stale readiness answer survive whatever made",
+        "      // this probe indeterminate.",
+        "      root.fingerprintReady = FingerprintPolicy.nextReadyAfterProbe(exitCode)",
         "      if (!root.fingerprintReady && fingerprintPam.active) fingerprintPam.abort()",
         "      if (root.lockRequested) root.startFingerprint()",
         "    }",
@@ -462,7 +486,13 @@ def apply_fingerprint_enabled(text: str) -> str:
         "",
         "  onFingerprintPamConfiguredChanged: {",
         "    if (!fingerprintPamConfigured) {",
-        "      fingerprintReady = false",
+        "      // Capability revocation must never unlock, crash, or restart",
+        "      // Quickshell, and must always leave the password path usable -",
+        "      // it only tears down the fingerprint side.",
+        "      fingerprintReady = FingerprintPolicy.nextReadyAfterCapabilityRevoked()",
+        "      fingerprintRetryTimer.stop()",
+        "      fingerprintAuthenticating = false",
+        "      if (fingerprintPam.active) fingerprintPam.abort()",
         "      return",
         "    }",
         "    refreshFingerprintStatus()",

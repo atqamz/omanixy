@@ -36,6 +36,12 @@ lock_fingerprint_ready() {
   # a missing reader specifically. Anything else on either exit code (D-Bus
   # timeout, permission denial, a malformed response) is a shape this probe
   # cannot classify, so it degrades to indeterminate rather than guessing.
+  #
+  # A multi-reader machine can print both a negative line for one device and
+  # a positive one for another in the same exit-0 run (list.c iterates every
+  # device in turn), so the positive pattern must be tested first: one
+  # enrolled, usable fingerprint anywhere makes the answer READY regardless
+  # of what an earlier device in the loop reported.
   command -v fprintd-list >/dev/null 2>&1 || exit 2
 
   local user output status
@@ -49,8 +55,8 @@ lock_fingerprint_ready() {
   case $status in
     0)
       case $output in
-        *'has no fingers enrolled'*) exit 1 ;;
         *'Fingerprints for user'*) exit 0 ;;
+        *'has no fingers enrolled'*) exit 1 ;;
         *) exit 2 ;;
       esac
       ;;

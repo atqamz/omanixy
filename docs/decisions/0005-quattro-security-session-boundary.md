@@ -771,7 +771,14 @@ carry biometric or PAM content, only capability and bounded-counter state.
 `security-lock-fingerprint` proves all of this against the real generated
 Service.qml source, not a description of the intended state machine, and
 `security-lock` continues to prove the disabled build is byte-identical to
-the frozen layer 3 output.
+the frozen layer 3 output. `security-lock-fingerprint-behavior` complements
+that structural proof with a behavioral one: it `require()`s
+`FingerprintPolicy.js` directly and drives every exported guard - including
+a full simulated lock lifecycle covering an indeterminate readiness probe,
+in-flight-conversation exclusion, budget exhaustion, password-authentication
+precedence, and a stale success result arriving after mid-conversation
+capability revocation - rather than re-deriving the same assertions from a
+disconnected reimplementation of the rules.
 
 ### Readiness adapter ABI
 
@@ -791,6 +798,35 @@ same `timed()` primitive `common.bash` already validates, so a wedged
 is the fail-closed default rather than a guess. No hardware probing occurs
 during Nix evaluation; this adapter only ever runs at runtime, invoked by the
 patched Service.qml as direct argv, never through a shell.
+`security-lock-fingerprint-ready` proves the classification itself against a
+fake `fprintd-list`/`id` PATH-injection harness covering the full exit-code
+matrix - missing backend, `id` failure, timeout, an unclassifiable exit
+code, single- and multi-device enrollment, no enrollment, no devices, and
+malformed output in both the success and failure paths - and asserts no raw
+signal, timeout, or missing-backend exit code ever leaks past the adapter's
+own `0`/`1`/`2` ABI.
+
+### Package identity and TOD activation
+
+Two further hermetic proofs close gaps the ledger flagged as unaddressed
+when this layer's capability was first added. `security-pam-fingerprint-custom-package`
+proves a custom `services.fprintd.package` threads through as a single
+identity: the generated PAM service, all three NixOS registration lists, and
+the Home Manager runtime's own `declaredRuntimeInputs` all resolve to that
+exact overridden store path, with no independently-resolved default
+`pkgs.fprintd` pulled in alongside it - the split-brain package ownership
+this capability must never reintroduce.
+`security-pam-fingerprint-tod` proves `services.fprintd.tod.enable` resolves
+`services.fprintd.package` to the TOD-aware daemon on its own (independent
+of `services.fprintd.enable`) and mirrors the one `FP_TOD_DRIVERS_DIR`
+environment variable upstream's own `services.fprintd.enable`-gated block
+would otherwise only set, pointed at the selected driver's real path. Both
+proofs use hermetic fixtures rather than a real driver package: every
+`libfprint-2-tod1-*` driver in the pinned nixpkgs is either marked
+`meta.broken` or carries an unfree license this flake cannot evaluate
+without `allowUnfree`, so the TOD fixture is a minimal stand-in derivation
+exposing only the one `driverPath` passthru attribute the upstream module
+actually reads.
 
 ### Executable surface scanning
 
@@ -811,8 +847,16 @@ its already-declared target of `adapted`/`experimental`, and no other
 `security.notification-daemon`, and `security.recovery` remain `blocked`.
 `experimental`, not `supported`, because every proof in this layer is
 hermetic: no live `fprintd` daemon, real reader, enrolled or unenrolled
-hardware, or repeated-failure log-volume behavior has been exercised, and
-these remain the ledger's `required_before_promotion` items for this entry.
+hardware, or repeated-failure log-volume behavior has been exercised, and a
+real (non-fixture) TOD driver package has not been validated since every
+license-clear candidate in the pinned nixpkgs is currently marked broken.
+These remain the ledger's `required_before_promotion` items for this entry.
 Omanixy still owns no polkit, idle, or notification-daemon surface, and
 adds no new systemd unit beyond the `fprintd`-provided one this capability
-merely registers for activation.
+merely registers for activation. `security-lock-fingerprint-closure`'s
+declared-input-widening proof is an exact set difference - the
+fingerprint-enabled build adds precisely one `declaredRuntimeInputs` entry
+and removes none, and that one entry is `fprintd` - rather than a substring
+match against the raw diff, so a future change that widened the runtime by
+`fprintd` plus something else unrelated would fail this proof rather than
+pass it silently.
