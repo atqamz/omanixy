@@ -277,21 +277,11 @@ assert_rejected_because block-comment-only-fake-command \
   'no command bindings of any shape found' \
   '/* command: ["readlink", "-f", "/tmp/not-a-real-command"] */'
 
-# H: a multiline backtick template literal containing a fake command-array
-# binding, with no real binding anywhere else in the file, must not count.
-assert_rejected_because backtick-multiline-fake-command-only \
-  'no command bindings of any shape found' \
-  'property string fake: `
-command: ["readlink"]
-`'
-
-# I: "//" and "/* */" markers inside a multiline backtick literal must not
-# erase the REAL command binding that follows the literal.
-assert_rejected_because backtick-multiline-markers-do-not-erase-real-unknown \
-  'mystery-security-tool' \
-  'property string fake: `// command: ["readlink"]
-/* command: ["readlink"] */`
-command: ["mystery-security-tool"]'
+# H and I of the original matrix (a fake command inside a backtick template
+# literal, with or without a real binding alongside it) are now covered by
+# the "Template literal rejection test group" below: security.lock rejects
+# any live backtick template literal outright, so those two shapes are
+# folded into that group's cases C and H instead of living here.
 
 # J: an allowed real command alongside unrelated strings/comments (that
 # happen to contain command-looking text) must still pass.
@@ -324,174 +314,139 @@ Component.onCompleted: {
   lockProc.command = ["mystery-security-tool"]
 }'
 
-# Section 9: template interpolation must fail closed rather than become an
-# executable escape hatch. The real, final Service.qml (scanned above)
-# contains no backtick template literals at all, so this is a fixture
-# guarding against future drift, not a fix to an existing binding. A
-# command array built through "${...}" interpolation must still be found
-# and validated against the same allowlist as any other array binding.
-assert_rejected_because template-interpolation-array-command-not-inert \
-  'mystery-security-tool' \
-  'property string fake: `prefix ${root.command = ["mystery-security-tool"]} suffix`'
-
-# A dynamic (non-array) command construction inside interpolation must
-# likewise stay visible and fail closed, not disappear into the literal.
-assert_rejected_because template-interpolation-dynamic-command-not-inert \
-  'dynamic command: binding' \
-  'property string fake: `prefix ${command: root.runtimeCommand} suffix`'
-
-# An unterminated template literal must be rejected outright as unsafe
-# rather than silently absorbing the rest of the file (which could hide a
-# real command binding inside the unterminated span).
+# Section 9: security.lock's executable-surface scanner treats live
+# backtick/template literals as categorically unsupported, not as a shape
+# it partially parses. QML/JS template literals admit full ECMAScript
+# grammar - regex literals in particular make "}" -> interpolation-depth
+# counting unprovable without a real parser (division vs. regexp-literal
+# ambiguity, character classes, escaped slashes, flags) - so rather than
+# grow the shared lexer to chase that, any live template literal makes the
+# whole file's executable surface unverifiable and rejects it outright. The
+# real, final Service.qml (scanned above) contains no template literals at
+# all, so this is strictly stricter than general QML, not a parsing gap.
+#
+# Malformed backtick/interpolation constructs are still caught first by the
+# pre-existing UnsafeSource fail-closed path (shared with every other
+# source_discovery consumer) before the categorical rejection below even
+# has a chance to run.
 assert_rejected_because unterminated-backtick-template-literal \
   'unsafe source' \
   'property string fake: `unterminated
 command: ["mystery-security-tool"]'
 
-# A backtick template literal containing backslash-escape sequences must
-# not desync the position correspondence between the comment-stripped and
-# string-masked text - a real command binding located after such a literal
-# must still be found and validated using its actual (not shifted/garbled)
-# content.
-assert_allowed_raw backtick-with-escapes-does-not-desync-following-real-command '
-property string fake: `a\`b\nc`
-Process {
-  command: ["readlink", "-f", "/tmp/x"]
-}'
-
-# Interpolation lexical scanner test group: "${...}" is live JS-like code,
-# but quoted strings, "//" line comments, and "/* */" block comments inside
-# it are inert and must not be able to satisfy discovery or to perturb the
-# brace-depth count that finds the interpolation's real closing "}".
-
-# A: a quoted fake command sitting inside interpolation, with no real
-# command anywhere, must not satisfy discovery - the fake string content
-# must be as inert here as it is in an ordinary top-level string.
-assert_rejected_because interpolation-quoted-fake-double-only \
-  'no command bindings' \
-  'property string fake: `${"command: [\"readlink\"]"}`'
-assert_rejected_because interpolation-quoted-fake-single-only \
-  'no command bindings' \
-  "property string fake: \`\${'command: [\"readlink\"]'}\`"
-
-# B: a block-comment fake command inside interpolation, with no real
-# command anywhere, must likewise not satisfy discovery.
-assert_rejected_because interpolation-block-comment-fake-only \
-  'no command bindings' \
-  'property string fake: `${ /* command: ["readlink"] */ 0 }`'
-
-# C: a line-comment fake command inside interpolation, with no real
-# command anywhere, must likewise not satisfy discovery.
-assert_rejected_because interpolation-line-comment-fake-only \
-  'no command bindings' \
-  'property string fake: `${ 0 // command: ["readlink"]
-}`'
-
-# D: a "}" inside a "/* */" comment must not close the interpolation early -
-# the real unknown command that logically follows it must still be found.
-assert_rejected_because interpolation-block-comment-brace-bypass \
-  'mystery-security-tool' \
-  'property string fake: `prefix ${
-  true /* } */ ? (lockProc.command = ["mystery-security-tool"]) : "x"
-} suffix`'
-
-# E: a "}" inside a "//" comment must not close the interpolation early -
-# the real unknown command that logically follows it must still be found.
-assert_rejected_because interpolation-line-comment-brace-bypass \
-  'mystery-security-tool' \
-  'property string fake: `prefix ${
-  true // } fake terminator
-    ? (lockProc.command = ["mystery-security-tool"])
-    : "x"
-} suffix`'
-
-# F: a "}" inside a quoted string must not close the interpolation early -
-# the real unknown command that logically follows it must still be found.
-assert_rejected_because interpolation-quoted-brace-bypass \
-  'mystery-security-tool' \
-  'property string fake: `${("}" , lockProc.command = ["mystery-security-tool"])}`'
-
-# G: a quoted fake command alongside a real unknown assignment - the fake
-# must not launder or hide the real, unknown binding.
-assert_rejected_because interpolation-quoted-fake-plus-real-unknown \
-  'mystery-security-tool' \
-  'property string fake: `${(
-  "command: [\"readlink\"]",
-  lockProc.command = ["mystery-security-tool"]
-)}`'
-
-# H: a comment fake command (both comment styles) alongside a real unknown
-# assignment - the fake must not launder or hide the real, unknown binding.
-assert_rejected_because interpolation-block-comment-fake-plus-real-unknown \
-  'mystery-security-tool' \
-  'property string fake: `${(
-  /* command: ["readlink"] */
-  lockProc.command = ["mystery-security-tool"]
-)}`'
-assert_rejected_because interpolation-line-comment-fake-plus-real-unknown \
-  'mystery-security-tool' \
-  'property string fake: `${(
-  // command: ["readlink"]
-  lockProc.command = ["mystery-security-tool"]
-)}`'
-
-# I: a nested backtick template's static fake command text must stay inert
-# while a real unknown command inside its own nested interpolation must
-# still be found.
-assert_rejected_because interpolation-nested-template-fake-plus-nested-real-unknown \
-  'mystery-security-tool' \
-  'property string fake: `outer ${
-  `inner fake command: ["readlink"] ${
-     lockProc.command = ["mystery-security-tool"]
-  }`
-}`'
-
-# J: braces occurring inside a nested string, a nested comment, and a
-# nested backtick literal'"'"'s static text must all be ignored by the
-# depth counter - only the real, structurally-final "}}" closes the
-# interpolation and the object literal. A real allowed command elsewhere
-# still passes.
-assert_allowed_raw interpolation-nested-inert-braces '
-property var fake: `${{
-  value: "}",
-  other: '"'"'/* } */'"'"',
-  nested: `static } ${someExpression}`
-}}`
-Process {
-  command: ["readlink", "-f", root.currentBackgroundLink]
-}'
-
-# K: after a complex interpolation exercising quoted, block-comment,
-# line-comment, and nested-backtick braces all in one place, a real
-# allowed command located afterward in the file must still be found at its
-# correct position - proving none of that complexity desyncs offsets for
-# what follows.
-assert_allowed_raw interpolation-allowed-command-after-complex-interpolation '
-property string fake: `${(
-  "}" ,
-  /* } */
-  // }
-  `nested static } ${1}`
-)}`
-Process {
-  command: ["readlink", "-f", root.currentBackgroundLink]
-}'
-
-# L: an interpolation whose "${" never finds a matching "}" (independent of
-# the backtick itself ever closing) must be rejected outright as unsafe.
-assert_rejected_because interpolation-unterminated \
+assert_rejected_because unterminated-template-interpolation \
   'unsafe source' \
   'property string fake: `prefix ${ still open
 command: ["mystery-security-tool"]'
 
-# M: an unterminated "/* */" block comment inside interpolation must fail
-# closed rather than silently absorbing the real command that follows it.
-assert_rejected_because interpolation-unterminated-block-comment \
+assert_rejected_because unterminated-block-comment-inside-template-interpolation \
   'unsafe source' \
   'property string fake: `${
   /* never closes
   lockProc.command = ["mystery-security-tool"]
 }`'
+
+# Template literal rejection test group: security.lock rejects any live
+# backtick/template literal outright, regardless of what it contains - a
+# backtick that survives comment-stripping and string-masking is by
+# construction a live template delimiter, never a shape that gets
+# discovered-and-then-validated. Letters follow the security-policy matrix.
+
+# A: the simplest possible template literal, no interpolation at all.
+assert_rejected_because plain-template-literal-rejected \
+  'template literals are unsupported' \
+  'property string x: `hello`'
+
+# B: static-text-only template - this is about the backtick construct
+# itself, not about interpolation.
+assert_rejected_because static-only-template-literal-rejected \
+  'template literals are unsupported' \
+  'property string x: `static text`'
+
+# C: a template containing only an allowed-looking command string is not
+# evidence the file is safe - it is rejected the same as any other
+# template literal, without even reaching discovery.
+assert_rejected_because template-with-allowed-looking-command-string-rejected \
+  'template literals are unsupported' \
+  'property string fake: `
+command: ["readlink"]
+`'
+
+# D: ordinary "${...}" interpolation - still rejected categorically.
+assert_rejected_because template-with-ordinary-interpolation-rejected \
+  'template literals are unsupported' \
+  'property string x: `hello ${name}`'
+
+# E: nested template/interpolation - still rejected categorically.
+assert_rejected_because nested-template-interpolation-rejected \
+  'template literals are unsupported' \
+  'property string x: `outer ${ `inner ${value}` }`'
+
+# F: a "}" inside a "/.../ " regex literal is not lexed as a regex by the
+# shared interpolation walker, so it could otherwise be miscounted as
+# closing the interpolation early and exposing whatever real code follows
+# it as live. The categorical rejection makes that regex blind spot
+# irrelevant: the whole file is unverifiable the moment a live backtick is
+# present, so this shape can never reach "mystery-security-tool" through
+# discovery in the first place.
+assert_rejected_because regex-literal-brace-bypass-rejected \
+  'template literals are unsupported' \
+  'property string fake: `prefix ${
+  /}/.test(value)
+    ? (lockProc.command = ["mystery-security-tool"])
+    : null
+} suffix`'
+
+# G: a regex literal using a character class and an escaped slash - a
+# different ECMAScript regex shape than F, same categorical rejection.
+assert_rejected_because regex-literal-character-class-bypass-rejected \
+  'template literals are unsupported' \
+  'property string fake: `prefix ${
+  /[}\/]/.test(value)
+    ? (lockProc.command = ["mystery-security-tool"])
+    : null
+} suffix`'
+
+# H: a template literal sitting alongside a real, unknown ".command ="
+# mutation elsewhere in the file - the categorical rejection fires before
+# discovery of the real binding ever runs, so a template literal can never
+# be used to distract from or launder an unrelated dangerous binding.
+assert_rejected_because template-alongside-real-unknown-command-rejected \
+  'template literals are unsupported' \
+  'property string fake: `// command: ["readlink"]
+/* command: ["readlink"] */`
+command: ["mystery-security-tool"]'
+
+# I: a literal backtick character inside an ordinary double-quoted string is
+# not a template delimiter - it is masked along with the rest of the
+# string's content, so it must not trigger rejection.
+assert_allowed_raw backtick-inside-double-quoted-string-still-passes '
+property string x: "literal ` character"
+Process {
+  command: ["readlink", "-f", root.currentBackgroundLink]
+}'
+
+# J: same, single-quoted.
+assert_allowed_raw backtick-inside-single-quoted-string-still-passes '
+property string x: '"'"'literal ` character'"'"'
+Process {
+  command: ["readlink", "-f", root.currentBackgroundLink]
+}'
+
+# K: a literal backtick character inside a "//" comment is removed along
+# with the rest of the comment before the categorical check ever runs.
+assert_allowed_raw backtick-inside-line-comment-still-passes '
+// literal ` character in a line comment
+Process {
+  command: ["readlink", "-f", root.currentBackgroundLink]
+}'
+
+# L: same, "/* */" block comment.
+assert_allowed_raw backtick-inside-block-comment-still-passes '
+/* literal ` character in a block comment */
+Process {
+  command: ["readlink", "-f", root.currentBackgroundLink]
+}'
 
 # Allowed shapes must still pass, proving the scanner is not simply
 # rejecting everything.
