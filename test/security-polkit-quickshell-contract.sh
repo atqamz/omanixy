@@ -128,11 +128,60 @@ assert_before "$completed_body" "this->mRequest->complete();" "emit this->authen
 
 # 6. Agent destruction cancels queued and active requests, and unregisters
 # only the listener's own (non-null) registration handle - never an unknown
-# external agent's.
-destructor_body=$(extract_function "$agentimpl_cpp" "PolkitAgentImpl::~PolkitAgentImpl()")
-grep -Fq 'cancelAllRequests(' <<<"$destructor_body"
+# external agent's. The destructor itself is a one-liner
+# ("PolkitAgentImpl::~PolkitAgentImpl() { this->cancelAllRequests(...); }"),
+# so a plain substring grep on that single line is sufficient evidence it
+# delegates to cancelAllRequests, rather than extract_function's line-based
+# "}\n"-anchored extraction (which is designed for, and only needed by,
+# multi-line function bodies).
+grep -Fq 'PolkitAgentImpl::~PolkitAgentImpl() { this->cancelAllRequests("PolkitAgent is being destroyed"); }' "$agentimpl_cpp"
+
 cancel_all_body=$(extract_function "$agentimpl_cpp" "void PolkitAgentImpl::cancelAllRequests(const QString& reason)")
+
+# 6a. Queued requests are fully drained: each is cancelled with the given
+# reason and deleted, in that order, before the loop advances.
+grep -Fq 'AuthRequest* req = this->queuedRequests.back();' <<<"$cancel_all_body"
+grep -Fq 'req->cancel(reason);' <<<"$cancel_all_body"
+grep -Fq 'delete req;' <<<"$cancel_all_body"
+grep -Fq 'this->queuedRequests.pop_back()' <<<"$cancel_all_body"
+assert_before "$cancel_all_body" "req->cancel(reason);" "delete req;" \
+  "each queued request must be cancelled before being deleted"
+
+# 6b. The active flow (if any) is cancelled and scheduled for deletion,
+# after the queued requests have been drained.
+grep -Fq 'auto* flow = this->bActiveFlow.value();' <<<"$cancel_all_body"
+grep -Fq 'flow->cancelAuthenticationRequest();' <<<"$cancel_all_body"
+grep -Fq 'flow->deleteLater();' <<<"$cancel_all_body"
+assert_before "$cancel_all_body" "delete req;" "flow->cancelAuthenticationRequest();" \
+  "queued requests must be drained before the active flow is cancelled"
+assert_before "$cancel_all_body" "flow->cancelAuthenticationRequest();" "flow->deleteLater();" \
+  "the active flow must be cancelled before being scheduled for deletion"
+
+# 6c. Unregistration is conditional on the listener actually being
+# registered, and happens last (after queued/active cleanup) - restated
+# here for ordering evidence beyond the existing bare-presence check below.
 grep -Fq 'if (this->bIsRegistered.value()) qs_polkit_agent_unregister(this->listener.get());' <<<"$cancel_all_body"
+assert_before "$cancel_all_body" "flow->deleteLater();" "qs_polkit_agent_unregister(this->listener.get());" \
+  "the active flow must be scheduled for deletion before the listener is unregistered"
+
+# 6d. qs_polkit_agent_unregister itself (listener.cpp, not agentimpl.cpp):
+# checks the registration handle for null before touching it, unregisters
+# via the polkit-provided helper using exactly that handle - no lookup,
+# enumeration, or iteration over any other agent/listener - and clears the
+# handle afterward, so a second call becomes a no-op rather than a
+# double-unregister or an operation on a stale handle.
+unregister_body=$(extract_function "$listener_cpp" "void qs_polkit_agent_unregister(QsPolkitAgent* agent)")
+grep -Fq 'if (agent->registration_handle != nullptr) {' <<<"$unregister_body"
+grep -Fq 'polkit_agent_listener_unregister(agent->registration_handle);' <<<"$unregister_body"
+grep -Fq 'agent->registration_handle = nullptr;' <<<"$unregister_body"
+assert_before "$unregister_body" "if (agent->registration_handle != nullptr) {" "polkit_agent_listener_unregister(agent->registration_handle);" \
+  "qs_polkit_agent_unregister must check the handle for null before using it"
+assert_before "$unregister_body" "polkit_agent_listener_unregister(agent->registration_handle);" "agent->registration_handle = nullptr;" \
+  "qs_polkit_agent_unregister must call the polkit helper before clearing its own handle"
+if grep -Eiq '\b(while|for)\s*\(|\bfind\b|enumerate|foreach' <<<"$unregister_body"; then
+  printf '%s\n' 'qs_polkit_agent_unregister unexpectedly contains a loop/enumeration construct' >&2
+  exit 1
+fi
 
 # 7. QML-generation takeover (hot-reload) is the pinned Quickshell internal
 # behavior for replacing a previous listener instance - it is not, and must

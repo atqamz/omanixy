@@ -1041,20 +1041,43 @@ gone from both the module body and its `module.exports` surface.
 
 `scripts/scan-polkit-executable-surface` proves a different invariant than
 `scan-lock-executable-surface`: where the lock scanner allowlists a bounded
-set of literal, audited commands and treats zero bindings as unverifiable,
-the polkit scanner's audited invariant is *absence* - the adapted agent
-needs no external `Process` command at all, so finding zero bindings of any
-shape (array, dynamic, procedural `.command =`, or `Quickshell.exec`/`.run`
-call) is the passing state, and finding even one allowlisted-looking
-command is a failure. It reuses the same shared `source_discovery`
-comment/string-masking primitives the lock scanner does, for the same
-reason: consistent lexical discovery everywhere in this repository, with a
-fresh, narrow policy layered on top per audited surface.
+set of literal, audited commands bound to `Process.command` and treats zero
+bindings as unverifiable, the polkit scanner's audited invariant is
+*absence of any process-execution surface at all*. A command-property
+inventory alone is not that invariant: the pinned Quickshell `Process` type
+also exposes `Q_INVOKABLE void exec(QList<QString> command)` (and a
+`ProcessContext` overload), so a `Process` object with no `command:`
+property whatsoever can still execute an arbitrary command via
+`someProcess.exec([...])`, an unqualified `exec([...])` called from inside
+that `Process`'s own scope, or a literal array handed to an unrelated
+`object.run([...])` - none of which are a "command binding" in the sense
+the lock scanner's allowlist model cares about, and the first remediation
+pass's scanner generation (reusing `source_discovery`'s shared
+`DYNAMIC_RUN_RE`, which deliberately excludes a literal array argument
+because the lock allowlist needs to inspect rather than reject one) could
+not see any of them. The scanner therefore enforces the stronger invariant
+the real generated file actually satisfies: zero `Process` object
+instantiations, zero `command:`/`.command =` property bindings, and zero
+`exec(...)`/`execDetached(...)`/`.run(...)` calls of any shape - qualified
+or bare, literal-argument or dynamic. It reuses the shared `source_discovery`
+comment/string-masking primitives the lock scanner does for lexical
+discovery only; the policy regexes themselves are local to
+`scan-polkit-executable-surface` and do not touch `scripts/source_discovery.py`,
+so Layer 3's lock scanner (and any other consumer of that shared module)
+keeps its existing, narrower behavior unchanged.
 `security-polkit-executable-surface` proves the real generated
-`PolkitAgent.qml` passes with zero bindings, and that adversarial fixtures
-covering a bare unknown-executable array, a `bash -c` shape, a dynamic
-command expression, a procedural assignment, a multiline variant, and a
-reintroduced `omarchy-hw-laptop-closed` invocation are all rejected.
+`PolkitAgent.qml` passes with zero Process objects, zero command bindings,
+and zero exec/run calls, and that a permanent adversarial fixture set is
+rejected: a `Process` object driven purely through `.exec(...)` with a
+literal or dynamic argument, an unqualified `exec(...)` call from inside a
+`Process`'s own scope, the original `command:`/procedural-assignment
+shapes, a literal- or dynamic-argument `object.run(...)` call, qualified
+`Quickshell.exec`/`execDetached`, a multiline `.exec([...])` call, and a
+reintroduced `omarchy-hw-laptop-closed` invocation - alongside fixtures
+proving Process/exec/run-looking text sitting inertly in a `//` comment, a
+`/* */` comment, or an ordinary quoted string produces no false positive,
+and that a real call following such fake text is still caught at its
+correct position. The template-literal fail-closed policy is unchanged.
 
 ### Scope
 
@@ -1077,7 +1100,26 @@ layer 4's fingerprint capability changes neither `services.fprintd.enable`
 nor the dedicated `omarchy-lock-fingerprint` PAM service (byte-identical to
 the fingerprint-only build), and that no policy is copied between the
 screen-lock and polkit PAM services in either direction.
-`security-polkit-core-only` and `security-polkit-closure` prove the
-adapted agent widens neither the declared runtime inputs nor the closure at
-all - a stronger claim than layer 3/4's "one new helper" proofs, since the
-adapted agent needs no compatibility-bin executable whatsoever.
+`security-polkit-core-only` proves `declaredRuntimeInputs` and the
+compatibility-bin entry set are byte-identical between a core-only build
+and a core+polkit build, and that the polkit-enabled build's transitive
+dependency package-name set contains no new name. It also proves a
+stronger, raw store-path-level claim: the Omanixy-owned compatibility root
+genuinely gains new content (the polkit plugin files), and everything that
+references the compatibility root's store path in its own build - `ipc`,
+`compatAdapter`, the runtime script, the compatibility bin, and the final
+package itself - therefore changes store path identity too, purely by Nix's
+own content-addressed propagation. The test names those exact six
+derivations per build (not an `/^omanixy-/` package-name pattern) as the
+only closure entries allowed to differ, and after excluding precisely that
+named set, asserts every remaining store path - the entire external
+dependency surface - is byte-identical between the two closures, not merely
+same-named. This is a stronger claim than layer 3/4's "one new helper, no
+new package name" proofs: polkit adds no external runtime dependency store
+path at all, only the expected, reviewed Omanixy-owned content derivations
+differ. `security-polkit-closure` separately proves the polkit-agent-enabled
+build's compatibility-bin entry set is byte-identical to the
+polkit-disabled default build's (not merely the core-only comparison above),
+that `fprintd` is unreachable from its closure, and that the compatibility
+root contains exactly the polkit plugin files and none of layer 3/4's lock
+or idle/notification surface.

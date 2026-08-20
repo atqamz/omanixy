@@ -7,6 +7,11 @@ core_closure_paths=${3:?core-only closure store paths required}
 core_polkit_closure_paths=${4:?core+polkit closure store paths required}
 core_declared_runtime_inputs=${5:?core-only declared runtime inputs json required}
 core_polkit_declared_runtime_inputs=${6:?core+polkit declared runtime inputs json required}
+core_expected_changed=${7:?core-only expected-changed self derivations list required}
+core_polkit_expected_changed=${8:?core+polkit expected-changed self derivations list required}
+
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
 
 # Parallels test/security-lock-core-only.sh: programs.omanixy.security.
 # polkit.agent must not widen the dependency surface of a core-only build.
@@ -49,16 +54,41 @@ diff -u \
   <(jq -S . "$core_declared_runtime_inputs") \
   <(jq -S . "$core_polkit_declared_runtime_inputs")
 
-# Closure-level proof: turning on security.polkit.agent against a core-only
-# build must not widen the dependency surface at all.
-strip_hashes() {
-  sed -E 's#^/nix/store/[a-z0-9]{32}-##' "$1" | sort -u
-}
+# Raw store-path closure proof. Unlike a hash-stripped package-NAME
+# comparison (which only proves no new package name appears anywhere, and
+# would silently accept a same-named-but-differently-built external
+# dependency, or a byte-for-byte content change disguised as "the same
+# package"), this compares the actual store paths in each closure directly.
+#
+# The Omanixy-owned compatibility root, and everything that references its
+# store path in its own build (ipc, compatAdapter, the runtime script, the
+# compatibility bin, and the final package itself), are EXPECTED to change
+# identity, because the compatibility root's contents genuinely differ
+# (the polkit plugin becomes reachable). Passing their exact store paths in
+# - rather than filtering by an /^omanixy-/ name pattern - means only that
+# specific, named, reviewed set of self-derivations is allowed to differ;
+# anything else that changed identity would show up as an unexpected
+# difference below and fail this check.
+comm -13 <(sort "$core_closure_paths") <(sort "$core_polkit_closure_paths") >"$work/new-paths"
+comm -23 <(sort "$core_closure_paths") <(sort "$core_polkit_closure_paths") >"$work/removed-paths"
 
-new_names=$(comm -13 <(strip_hashes "$core_closure_paths") <(strip_hashes "$core_polkit_closure_paths"))
-if [[ -n "$new_names" ]]; then
-  printf 'security.polkit.agent widens the core-only closure with new package(s):\n%s\n' "$new_names" >&2
+unexpected_new=$(comm -23 <(sort "$work/new-paths") <(sort "$core_polkit_expected_changed"))
+if [[ -n "$unexpected_new" ]]; then
+  printf 'security.polkit.agent adds unexpected new store path(s) to the core-only closure:\n%s\n' "$unexpected_new" >&2
   exit 1
 fi
+
+unexpected_removed=$(comm -23 <(sort "$work/removed-paths") <(sort "$core_expected_changed"))
+if [[ -n "$unexpected_removed" ]]; then
+  printf 'security.polkit.agent removes unexpected store path(s) from the core-only closure:\n%s\n' "$unexpected_removed" >&2
+  exit 1
+fi
+
+# After excluding ONLY the explicitly-expected-changed Omanixy self
+# derivations, every remaining (i.e. external) store path must be
+# byte-identical between the two closures - not merely same-named.
+comm -23 <(sort "$core_closure_paths") <(sort "$core_expected_changed") >"$work/core-external"
+comm -23 <(sort "$core_polkit_closure_paths") <(sort "$core_polkit_expected_changed") >"$work/core-polkit-external"
+diff -u "$work/core-external" "$work/core-polkit-external"
 
 printf '%s\n' 'security polkit core-only independence checks passed'

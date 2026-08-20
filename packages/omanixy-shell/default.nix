@@ -561,6 +561,11 @@ pkgs.symlinkJoin {
   '';
   passthru = {
     inherit omarchyRevision quickshellRevision nixpkgsRevision omarchySource omarchyCompatibilityRoot compatibilityBin compatibilityProbes quickshell theme supportedSystems safeMenu safeShellConfig selectedFeatures selectedCapabilities compatibilityHelpers runtimeBlockedPlugins adapterSources adapterSourceHash featureSurface lockEnabled fingerprintEnabled polkitAgentEnabled managedEnabledSecurityPlugins declaredRuntimeInputs;
+    # Exposed only so closure-independence tests can name the exact set of
+    # Omanixy-owned derivations expected to change identity when the
+    # compatibility root's contents change (e.g. a security capability
+    # adding plugin files), as opposed to filtering by package-name pattern.
+    inherit ipc compatAdapter runtime;
     buildProvenance = {
       inherit omarchyRevision quickshellRevision nixpkgsRevision;
     };

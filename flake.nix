@@ -1338,12 +1338,38 @@
               corePolkitClosurePaths = "${corePolkitRuntimeClosureInfo}/store-paths";
               coreDeclaredRuntimeInputs = pkgs.writeText "omanixy-core-declared-runtime-inputs.json" coreRuntime.passthru.declaredRuntimeInputs;
               corePolkitDeclaredRuntimeInputs = pkgs.writeText "omanixy-core-polkit-declared-runtime-inputs.json" corePolkitRuntime.passthru.declaredRuntimeInputs;
+              # The exact, named set of Omanixy-owned derivations expected to
+              # change store path when the compatibility root's contents
+              # change (here: the polkit plugin becoming reachable) - not a
+              # package-name pattern. omarchyCompatibilityRoot genuinely
+              # contains different files; ipc/compatAdapter/runtime/
+              # compatibilityBin/the final package all reference its store
+              # path in interpolated script text or their own build inputs,
+              # so they propagate a new hash without gaining any new
+              # external dependency of their own.
+              coreExpectedChanged = pkgs.writeText "omanixy-core-expected-changed" (nixpkgs.lib.concatMapStringsSep "\n" toString [
+                coreRuntime
+                coreRuntime.passthru.omarchyCompatibilityRoot
+                coreRuntime.passthru.compatibilityBin
+                coreRuntime.passthru.ipc
+                coreRuntime.passthru.compatAdapter
+                coreRuntime.passthru.runtime
+              ]);
+              corePolkitExpectedChanged = pkgs.writeText "omanixy-core-polkit-expected-changed" (nixpkgs.lib.concatMapStringsSep "\n" toString [
+                corePolkitRuntime
+                corePolkitRuntime.passthru.omarchyCompatibilityRoot
+                corePolkitRuntime.passthru.compatibilityBin
+                corePolkitRuntime.passthru.ipc
+                corePolkitRuntime.passthru.compatAdapter
+                corePolkitRuntime.passthru.runtime
+              ]);
               nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.findutils pkgs.diffutils pkgs.jq ];
             } ''
             ${pkgs.bash}/bin/bash ${./test/security-polkit-core-only.sh} \
               ${corePolkitRuntime.passthru.compatibilityBin} ${coreRuntime.passthru.compatibilityBin} \
               "$coreClosurePaths" "$corePolkitClosurePaths" \
-              "$coreDeclaredRuntimeInputs" "$corePolkitDeclaredRuntimeInputs"
+              "$coreDeclaredRuntimeInputs" "$corePolkitDeclaredRuntimeInputs" \
+              "$coreExpectedChanged" "$corePolkitExpectedChanged"
             touch "$out"
           '';
           security-polkit-closure = pkgs.runCommand "omanixy-security-polkit-closure"
