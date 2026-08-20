@@ -89,6 +89,19 @@
           corePolkitRuntime = runtimeForSecurity system [ "core" ] { polkitAgent = true; };
           idleRuntime = runtimeForSecurity system null { lock = true; idle = true; };
           coreLockIdleRuntime = runtimeForSecurity system [ "core" ] { lock = true; idle = true; };
+          # Section 15/30-31 of the Layer-6 remediation: proves
+          # packages/omanixy-shell/default.nix's own idleRequiresLockValid
+          # assertion fires for a caller that constructs the security
+          # attrset directly, bypassing programs.omanixy.security.idle and
+          # the Home Manager assertion matrix entirely. Both force real
+          # evaluation (.drvPath) rather than merely building an
+          # unevaluated attrset.
+          packageIdleWithoutLockEval = builtins.tryEval (
+            builtins.seq (runtimeForSecurity system null { idle = true; lock = false; }).drvPath true
+          );
+          packageIdleWithLockEval = builtins.tryEval (
+            builtins.seq (runtimeForSecurity system null { idle = true; lock = true; }).drvPath true
+          );
           capabilityRuntimePaths = pkgs.writeText "omanixy-capability-runtime-paths" (builtins.toJSON {
             "audio-control" = toString audioRuntime;
             "audio-default-output" = toString audioRuntime;
@@ -1622,6 +1635,16 @@
             ${pkgs.bash}/bin/bash ${./test/security-idle-no-dpms-widening.sh} \
               ${coreLockRuntime.passthru.omarchyCompatibilityRoot}/shell/plugins/lock/Service.qml \
               ${coreLockIdleRuntime.passthru.omarchyCompatibilityRoot}/shell/plugins/lock/Service.qml
+            touch "$out"
+          '';
+          security-idle-package-invariant = pkgs.runCommand "omanixy-security-idle-package-invariant"
+            {
+              idleWithoutLockOk = if packageIdleWithoutLockEval.success then "true" else "false";
+              idleWithLockOk = if packageIdleWithLockEval.success then "true" else "false";
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-idle-package-invariant.sh} \
+              "$idleWithoutLockOk" "$idleWithLockOk"
             touch "$out"
           '';
           security-idle-quickshell-contract = pkgs.runCommand "omanixy-security-idle-quickshell-contract"

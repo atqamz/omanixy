@@ -16,16 +16,27 @@
 # ledger, not to modify or re-implement any of it. Section 43 deliberately
 # does not claim this proves real compositor/inhibitor interaction - that is
 # explicitly deferred to Layer 8.
+#
+# Remediation pass: also proves the pinned Quickshell.Io Process ABI
+# (src/io/process.{hpp,cpp}) the idle service's own FailedToStart handling
+# depends on - a normal finish emits exited() before runningChanged(), a
+# failed-to-start process emits ONLY runningChanged() and never exited() at
+# all, and Process exposes a real, parameterless, untracked
+# Q_INVOKABLE startDetached() (the reason scan-idle-executable-surface must
+# reject it unconditionally, even against an otherwise-allowlisted argv).
 set -euo pipefail
 
 quickshell_src=${1:?pinned Quickshell source root required}
 idle_notify_dir=$quickshell_src/src/wayland/idle_notify
+io_dir=$quickshell_src/src/io
 
 monitor_hpp=$idle_notify_dir/monitor.hpp
 monitor_cpp=$idle_notify_dir/monitor.cpp
 proto_cpp=$idle_notify_dir/proto.cpp
+process_hpp=$io_dir/process.hpp
+process_cpp=$io_dir/process.cpp
 
-for f in "$monitor_hpp" "$monitor_cpp" "$proto_cpp"; do
+for f in "$monitor_hpp" "$monitor_cpp" "$proto_cpp" "$process_hpp" "$process_cpp"; do
   test -f "$f"
 done
 
@@ -144,6 +155,51 @@ grep -Fq 'this->bIsIdle = false;' <<<"$resumed_body"
 # points - matches the "bounded, event-driven, never a busy-wait" claim.
 if grep -Eq '\b(while|for)\s*\(' <<<"$create_body"; then
   printf '%s\n' 'IdleNotificationManager::createIdleNotification unexpectedly contains a loop construct' >&2
+  exit 1
+fi
+
+# 11. Process exposes a real, parameterless, untracked startDetached() -
+# the exact reason scan-idle-executable-surface must reject it
+# unconditionally, even against an otherwise-allowlisted argv: it launches
+# whatever `command` already holds completely outside Quickshell's own
+# tracking (no `running` transition to true, no `exited` ever possible).
+grep -Fq 'Q_INVOKABLE void startDetached();' "$process_hpp"
+start_detached_body=$(extract_function "$process_cpp" "void Process::startDetached()")
+grep -Fq 'process.startDetached();' <<<"$start_detached_body"
+
+# 12 & 13 both live inside Process::onFinished/Process::onErrorOccurred -
+# the two real transitions the idle service's FailedToStart handling
+# (requestLock/reconcileLockFailedToStart, and the probe/writer analogs)
+# depends on.
+on_finished_body=$(extract_function "$process_cpp" "void Process::onFinished(qint32 exitCode, QProcess::ExitStatus exitStatus)")
+on_error_occurred_body=$(extract_function "$process_cpp" "void Process::onErrorOccurred(QProcess::ProcessError error)")
+
+# 12. A normal finish (onFinished): the process handle is cleared BEFORE
+# exited() is emitted, and exited() is emitted BEFORE runningChanged() -
+# the exact ordering test/security-idle-qml-behavior.sh's fakeExit() is
+# deliberately built to exercise in the REVERSE order (property change
+# before the signal), proving the production callLater-based
+# reconciliation is safe regardless of which order a real or fake caller
+# uses.
+grep -Fq 'this->process = nullptr;' <<<"$on_finished_body"
+grep -Fq 'emit this->exited(exitCode, exitStatus);' <<<"$on_finished_body"
+grep -Fq 'emit this->runningChanged();' <<<"$on_finished_body"
+assert_before "$on_finished_body" 'this->process = nullptr;' 'emit this->exited(exitCode, exitStatus);' \
+  "the process handle must be cleared before exited() is emitted"
+assert_before "$on_finished_body" 'emit this->exited(exitCode, exitStatus);' 'emit this->runningChanged();' \
+  "exited() must be emitted before runningChanged() on a normal finish"
+
+# 13. A failed-to-start process (onErrorOccurred(QProcess::FailedToStart)):
+# only runningChanged() is ever emitted - exited() is never reachable from
+# this function at all. This is the entire reason the idle service cannot
+# rely on an "onError" QML signal (none exists) and must instead detect
+# the no-exit transition through running/runningChanged plus its own
+# explicit per-operation awaiting-result state.
+grep -Fq 'if (error == QProcess::FailedToStart)' <<<"$on_error_occurred_body"
+grep -Fq 'this->process = nullptr;' <<<"$on_error_occurred_body"
+grep -Fq 'emit this->runningChanged();' <<<"$on_error_occurred_body"
+if grep -q 'emit this->exited(' <<<"$on_error_occurred_body"; then
+  printf '%s\n' 'Process::onErrorOccurred unexpectedly emits exited() - FailedToStart must never emit it' >&2
   exit 1
 fi
 

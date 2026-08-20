@@ -12,10 +12,10 @@ fixture=$(mktemp -d)
 trap 'chmod -R u+w "$fixture"; rm -rf "$fixture"' EXIT
 
 # The real, final Service.qml has exactly the four allowed exact-argv
-# command bindings and zero exec/execDetached/run calls.
+# command bindings and zero exec/execDetached/run/startDetached calls.
 scan_output=$("$python_bin" "$scanner" "$service_file" 2>&1)
 printf '%s\n' "$scan_output" >&2
-grep -Fq '4 command binding(s) passed, 0 exec/run calls found' <<<"$scan_output"
+grep -Fq '4 command binding(s) passed, 0 exec/execDetached/run/startDetached calls found' <<<"$scan_output"
 
 assert_rejected_raw() {
   local name=$1 content=$2
@@ -109,6 +109,39 @@ assert_rejected_because "fake-comment-then-real-bad" "not one of the allowed exa
 assert_rejected_because "fake-string-then-real-exec" "exec/execDetached call found" 'Item {
   property string note: "exec([\"fake\"])"
   function go() { Quickshell.exec(["omanixy-shell", "lock", "lock"]) }
+}'
+
+# startDetached() bypass matrix (Section 11/12): Process.startDetached()
+# launches the process's already-set command completely untracked - even
+# an otherwise-allowlisted argv reaching it is a real bypass, since a
+# tracked, bounded invocation would silently become an untracked one.
+assert_rejected_because "startdetached-allowed-lock-argv" "startDetached call found" 'Item {
+  Process { id: p; command: ["omanixy-shell", "lock", "lock"]; Component.onCompleted: p.startDetached() }
+}'
+assert_rejected_because "startdetached-allowed-probe-argv" "startDetached call found" 'Item {
+  Process { id: p; command: ["omanixy-idle-state", "probe"]; Component.onCompleted: p.startDetached() }
+}'
+assert_rejected_because "startdetached-bare" "startDetached call found" \
+  'Item { Process { Component.onCompleted: startDetached() } }'
+assert_rejected_because "startdetached-multiline" "startDetached call found" 'Item {
+  Process { id: p; command: ["omanixy-idle-state", "set", "awake"]; Component.onCompleted: p.startDetached(
+  ) }
+}'
+assert_accepted_raw "startdetached-fake-comment" 'Item {
+  // p.startDetached()
+  Process { command: ["omanixy-shell", "lock", "lock"] }
+}'
+assert_accepted_raw "startdetached-fake-block-comment" 'Item {
+  /* p.startDetached() */
+  Process { command: ["omanixy-idle-state", "probe"] }
+}'
+assert_accepted_raw "startdetached-fake-string" 'Item {
+  property string note: "p.startDetached()"
+  Process { command: ["omanixy-idle-state", "set", "idle"] }
+}'
+assert_rejected_because "startdetached-fake-comment-then-real" "startDetached call found" 'Item {
+  // p.startDetached()
+  Process { id: p; command: ["omanixy-shell", "lock", "lock"]; Component.onCompleted: p.startDetached() }
 }'
 
 printf '%s\n' 'idle executable surface checks passed'
