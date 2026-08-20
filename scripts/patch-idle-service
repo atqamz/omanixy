@@ -1,0 +1,589 @@
+#!/usr/bin/env python3
+"""Narrow post-patch to the pinned shell/plugins/services/idle/{Service.qml,
+IdleModel.js} for the Quattro idle owner.
+
+Layer 6 owns user-session idle detection and bounded lock-on-idle
+orchestration only. It deliberately removes everything the pinned source
+does beyond that:
+
+- the terminal screensaver path (omarchy-launch-screensaver, its Hyprland
+  raw-event window tracking, and the screensaver launch-grace timer) -
+  presentation policy, not required for a secure lock-on-idle capability;
+- omarchy-system-lock/omarchy-system-wake (incidental host policy - keyboard
+  layout reset, 1Password locking, DPMS/backlight/clamshell mutation - none
+  of which Layer 6 owns), replaced by the already-audited Layer-3 lock IPC
+  (["omanixy-shell", "lock", "lock"], direct argv) and no wake action at
+  all, since Layer 6 never blanks the display in the first place;
+- the bash -c/-lc stay-awake marker probe and writer, replaced by the
+  narrow, fixed-domain omanixy-idle-state helper (probe / set awake / set
+  idle, direct argv only).
+
+The lock request itself gains a bounded, deterministic retry policy
+(packages/omanixy-shell/IdlePolicy.js) in place of the pinned source's
+single fire-and-forget lockSystem() call, since Layer 6 must not lose
+lock-on-idle to one transient IPC failure, nor retry unboundedly.
+"""
+
+from pathlib import Path
+import sys
+
+
+def block(lines: list[str]) -> str:
+    return "\n".join(lines) + "\n"
+
+
+def replace_once(text: str, old: str, new: str, label: str) -> str:
+    count = text.count(old)
+    if count != 1:
+        raise SystemExit(f"{label}: expected one pinned block, found {count}")
+    return text.replace(old, new, 1)
+
+
+def apply_qml(text: str) -> str:
+    imports_old = block([
+        "import QtQuick",
+        "import Quickshell",
+        "import Quickshell.Hyprland",
+        "import Quickshell.Io",
+        "import Quickshell.Wayland",
+        'import "IdleModel.js" as IdleModel',
+    ])
+    imports_new = block([
+        "import QtQuick",
+        "import Quickshell",
+        "import Quickshell.Io",
+        "import Quickshell.Wayland",
+        'import "IdleModel.js" as IdleModel',
+        'import "IdlePolicy.js" as IdlePolicy',
+    ])
+    text = replace_once(text, imports_old, imports_new, "import block")
+
+    properties_old = block([
+        '  readonly property string home: Quickshell.env("HOME")',
+        '  readonly property string stayAwakeStateDir: home + "/.local/state/omarchy/indicators"',
+        '  readonly property string stayAwakeStatePath: stayAwakeStateDir + "/stay-awake"',
+        "  readonly property int defaultScreensaverSeconds: 150",
+        "  readonly property int defaultLockSeconds: 300",
+        "  readonly property var idleConfig: shell && shell.shellConfig && shell.shellConfig.idle ? shell.shellConfig.idle : ({})",
+        "  readonly property int screensaverTimeoutSeconds: secondsFromConfig(idleConfig.screensaver, defaultScreensaverSeconds)",
+        "  readonly property int lockTimeoutSeconds: secondsFromConfig(idleConfig.lock, defaultLockSeconds)",
+        "  readonly property int firstIdleTimeoutSeconds: Math.min(screensaverTimeoutSeconds, lockTimeoutSeconds)",
+        "  readonly property int screensaverDelaySeconds: Math.max(0, screensaverTimeoutSeconds - firstIdleTimeoutSeconds)",
+        "  readonly property int lockDelaySeconds: Math.max(0, lockTimeoutSeconds - firstIdleTimeoutSeconds)",
+        "  readonly property bool idleEnabled: stayAwakeStateLoaded && !stayAwake",
+        '  readonly property string screensaverClass: "org.omarchy.screensaver"',
+        "",
+        "  property bool stayAwake: false",
+        "  property bool stayAwakeStateLoaded: false",
+        "  property bool hasPendingStayAwakePersist: false",
+        "  property bool pendingStayAwakePersist: false",
+        "  property bool idledThisCycle: false",
+        "  property bool screensaverStartedThisCycle: false",
+        '  property string lastEvent: "starting"',
+        '  property string lastEventAt: ""',
+        "  property var screensaverWindows: ({})",
+        "  property int screensaverWindowCount: 0",
+    ])
+    properties_new = block([
+        '  readonly property string home: Quickshell.env("HOME")',
+        '  readonly property string stayAwakeStateDir: home + "/.local/state/omarchy/indicators"',
+        '  readonly property string stayAwakeStatePath: stayAwakeStateDir + "/stay-awake"',
+        "  readonly property int defaultLockSeconds: 300",
+        "  readonly property var idleConfig: shell && shell.shellConfig && shell.shellConfig.idle ? shell.shellConfig.idle : ({})",
+        "  readonly property int lockTimeoutSeconds: secondsFromConfig(idleConfig.lock, defaultLockSeconds)",
+        "  readonly property bool idleEnabled: stayAwakeStateLoaded && !stayAwake",
+        "  readonly property int lockMaxAttempts: 3",
+        "",
+        "  property bool stayAwake: false",
+        "  property bool stayAwakeStateLoaded: false",
+        "  property bool hasPendingStayAwakePersist: false",
+        "  property bool pendingStayAwakePersist: false",
+        "  property bool idledThisCycle: false",
+        "  property bool lockAccepted: false",
+        "  property bool lockTerminalFailure: false",
+        "  property int lockAttempts: 0",
+        '  property string lastEvent: "starting"',
+        '  property string lastEventAt: ""',
+    ])
+    text = replace_once(text, properties_old, properties_new, "idle/lock timeout and cycle state properties")
+
+    run_process_and_screensaver_old = block([
+        "  function runProcess(process, label, command) {",
+        "    if (process.running) {",
+        '      logEvent("process-skip", label + " already running")',
+        "      return false",
+        "    }",
+        '    logEvent("process-start", label + " " + command)',
+        '    process.command = ["bash", "-lc", command]',
+        "    process.running = true",
+        "    return true",
+        "  }",
+        "",
+        "  function launchScreensaver() {",
+        "    root.screensaverStartedThisCycle = true",
+        "    screensaverLaunchGraceTimer.restart()",
+        '    runProcess(screensaverProcess, "screensaver", "[[ $(omarchy-shell lock isLocked 2>/dev/null) == \\"true\\" ]] || omarchy-launch-screensaver")',
+        "  }",
+        "",
+    ])
+    text = replace_once(text, run_process_and_screensaver_old, "", "runProcess helper and launchScreensaver function")
+
+    cycle_functions_old = block([
+        "  function lockSystem(reason) {",
+        '    logEvent("lock-system", reason || "requested")',
+        "    screensaverTimer.stop()",
+        "    lockTimer.stop()",
+        "    screensaverLaunchGraceTimer.stop()",
+        "    root.idledThisCycle = false",
+        "    root.screensaverStartedThisCycle = false",
+        "    resetScreensaverWindows()",
+        '    runProcess(lockProcess, "lock", "omarchy-system-lock")',
+        "  }",
+        "",
+        "  function startIdleCycle() {",
+        "    if (root.idledThisCycle) {",
+        '      logEvent("idle-cycle-already-running")',
+        "      return",
+        "    }",
+        "",
+        '    logEvent("idle-cycle-start", "screensaver=" + root.screensaverTimeoutSeconds + " lock=" + root.lockTimeoutSeconds)',
+        "    root.idledThisCycle = true",
+        "    root.screensaverStartedThisCycle = false",
+        "    resetScreensaverWindows()",
+        "",
+        "    if (root.screensaverDelaySeconds === 0) launchScreensaver()",
+        "    else screensaverTimer.restart()",
+        "",
+        '    if (root.lockDelaySeconds === 0) lockSystem("lock-timeout-immediate")',
+        "    else lockTimer.restart()",
+        "  }",
+        "",
+        "  function cancelIdleCycle(reason) {",
+        '    logEvent("idle-cycle-cancel", reason || "requested")',
+        "    screensaverTimer.stop()",
+        "    lockTimer.stop()",
+        "    screensaverLaunchGraceTimer.stop()",
+        "",
+        '    if (root.idledThisCycle) runProcess(wakeProcess, "wake", "omarchy-system-wake")',
+        "",
+        "    root.idledThisCycle = false",
+        "    root.screensaverStartedThisCycle = false",
+        "    resetScreensaverWindows()",
+        "  }",
+        "",
+        "  function resetScreensaverWindows() {",
+        "    root.screensaverWindows = ({})",
+        "    root.screensaverWindowCount = 0",
+        "  }",
+        "",
+        "  function setScreensaverWindow(address, visible) {",
+        "    var next = IdleModel.screensaverWindowsAfter(root.screensaverWindows, address, visible)",
+        "    root.screensaverWindows = next.windows",
+        "    root.screensaverWindowCount = next.count",
+        "  }",
+        "",
+        "  function handleScreensaverWindowOpened(address) {",
+        "    setScreensaverWindow(address, true)",
+        "    screensaverLaunchGraceTimer.stop()",
+        "  }",
+        "",
+        "  function handleScreensaverWindowClosed(address) {",
+        "    setScreensaverWindow(address, false)",
+        "",
+        "    if (!root.idleEnabled || !root.idledThisCycle || !root.screensaverStartedThisCycle) return",
+        "    if (root.screensaverWindowCount > 0) return",
+        "",
+        "    // The user dismissed the screensaver before the lock deadline. Treat that",
+        "    // as activity and cancel the pending lock; the lock timer is only allowed",
+        "    // to fire while the screensaver remains up.",
+        '    root.cancelIdleCycle("screensaver-dismissed")',
+        "  }",
+        "",
+        "  function eventParts(event, count) {",
+        "    return IdleModel.eventParts(event, count)",
+        "  }",
+        "",
+        "  function handleHyprlandEvent(event) {",
+        '    var name = String(event && event.name ? event.name : "")',
+        '    if (name === "openwindow") {',
+        "      var open = eventParts(event, 4)",
+        '      if (String(open[2] || "") === root.screensaverClass) root.handleScreensaverWindowOpened(open[0])',
+        '    } else if (name === "closewindow") {',
+        "      var close = eventParts(event, 1)",
+        '      var address = String(close[0] || "")',
+        "      if (root.screensaverWindows[address]) root.handleScreensaverWindowClosed(address)",
+        "    }",
+        "  }",
+        "",
+        "  function handleActiveSignal() {",
+        "    if (!root.idledThisCycle) return",
+        "",
+        "    // Starting the screensaver can make the compositor report activity. Keep",
+        "    // the lock timer running once the screensaver exists (or during its short",
+        "    // launch grace); Hyprland window events cancel the cycle if it exits before",
+        "    // the normal lock deadline.",
+        "    if (root.screensaverStartedThisCycle && (root.screensaverWindowCount > 0 || screensaverLaunchGraceTimer.running)) {",
+        '      logEvent("idle-monitor-active", "screensaver cycle remains armed")',
+        "      return",
+        "    }",
+        "",
+        '    cancelIdleCycle("activity")',
+        "  }",
+    ])
+    cycle_functions_new = block([
+        "  function requestLock() {",
+        "    if (!IdlePolicy.canRequestLock({",
+        "      idleEnabled: root.idleEnabled,",
+        "      idle: idleMonitor.isIdle,",
+        "      cycleActive: root.idledThisCycle,",
+        "      lockAccepted: root.lockAccepted,",
+        "      terminalFailure: root.lockTerminalFailure,",
+        "      lockRunning: lockProcess.running,",
+        "      attempts: root.lockAttempts,",
+        "      maxAttempts: root.lockMaxAttempts",
+        "    })) return",
+        "",
+        "    root.lockAttempts += 1",
+        '    logEvent("lock-attempt", "attempt " + root.lockAttempts + "/" + root.lockMaxAttempts)',
+        '    lockProcess.command = ["omanixy-shell", "lock", "lock"]',
+        "    lockProcess.running = true",
+        "  }",
+        "",
+        "  function handleLockExited(exitCode, output) {",
+        "    var result = IdlePolicy.classifyLockResult(exitCode, output)",
+        '    logEvent("lock-result", result)',
+        "",
+        '    if (result === "ACCEPTED") {',
+        "      root.lockAccepted = true",
+        "      return",
+        "    }",
+        '    if (result === "TERMINAL_UNAVAILABLE") {',
+        "      root.lockTerminalFailure = true",
+        "      return",
+        "    }",
+        "",
+        "    if (IdlePolicy.shouldRetryLockResult({",
+        "      idleEnabled: root.idleEnabled,",
+        "      idle: idleMonitor.isIdle,",
+        "      cycleActive: root.idledThisCycle,",
+        "      lockAccepted: root.lockAccepted,",
+        "      terminalFailure: root.lockTerminalFailure,",
+        "      lockRunning: lockProcess.running,",
+        "      attempts: root.lockAttempts,",
+        "      maxAttempts: root.lockMaxAttempts",
+        "    })) {",
+        "      lockRetryTimer.restart()",
+        "    }",
+        "  }",
+        "",
+        "  function startIdleCycle() {",
+        "    if (root.idledThisCycle) {",
+        '      logEvent("idle-cycle-already-running")',
+        "      return",
+        "    }",
+        "",
+        '    logEvent("idle-cycle-start", "lock=" + root.lockTimeoutSeconds)',
+        "    root.idledThisCycle = true",
+        "    root.lockAccepted = false",
+        "    root.lockTerminalFailure = false",
+        "    root.lockAttempts = 0",
+        "    requestLock()",
+        "  }",
+        "",
+        "  function cancelIdleCycle(reason) {",
+        '    logEvent("idle-cycle-cancel", reason || "requested")',
+        "    lockRetryTimer.stop()",
+        "    root.idledThisCycle = false",
+        "  }",
+        "",
+        "  function handleActiveSignal() {",
+        "    if (!root.idledThisCycle) return",
+        '    cancelIdleCycle("activity")',
+        "  }",
+    ])
+    text = replace_once(text, cycle_functions_old, cycle_functions_new, "idle-cycle/lock/screensaver/Hyprland-event functions")
+
+    status_json_old = block([
+        "  function statusJson() {",
+        "    return JSON.stringify({",
+        "      enabled: root.idleEnabled,",
+        "      stayAwake: root.stayAwake,",
+        "      stayAwakeStateLoaded: root.stayAwakeStateLoaded,",
+        "      stayAwakeStatePath: root.stayAwakeStatePath,",
+        "      idle: idleMonitor.isIdle,",
+        "      inIdleCycle: root.idledThisCycle,",
+        "      screensaverStarted: root.screensaverStartedThisCycle,",
+        "      screensaver: root.screensaverTimeoutSeconds,",
+        "      lock: root.lockTimeoutSeconds,",
+        "      screensaverDelay: root.screensaverDelaySeconds,",
+        "      lockDelay: root.lockDelaySeconds,",
+        "      screensaverWindows: root.screensaverWindowCount,",
+        "      timers: {",
+        "        screensaver: screensaverTimer.running,",
+        "        lock: lockTimer.running,",
+        "        screensaverLaunchGrace: screensaverLaunchGraceTimer.running",
+        "      },",
+        "      processes: {",
+        "        screensaver: screensaverProcess.running,",
+        "        lock: lockProcess.running,",
+        "        wake: wakeProcess.running",
+        "      },",
+        "      lastEvent: root.lastEvent,",
+        "      lastEventAt: root.lastEventAt",
+        "    })",
+        "  }",
+    ])
+    status_json_new = block([
+        "  function statusJson() {",
+        "    return JSON.stringify({",
+        "      enabled: root.idleEnabled,",
+        "      stayAwake: root.stayAwake,",
+        "      stayAwakeStateLoaded: root.stayAwakeStateLoaded,",
+        "      stayAwakeStatePath: root.stayAwakeStatePath,",
+        "      idle: idleMonitor.isIdle,",
+        "      inIdleCycle: root.idledThisCycle,",
+        "      lockAccepted: root.lockAccepted,",
+        "      lockTerminalFailure: root.lockTerminalFailure,",
+        "      lockAttempts: root.lockAttempts,",
+        "      lockMaxAttempts: root.lockMaxAttempts,",
+        "      lockRetryPending: lockRetryTimer.running,",
+        "      lockProcessRunning: lockProcess.running,",
+        "      lockTimeoutSeconds: root.lockTimeoutSeconds,",
+        "      lastEvent: root.lastEvent,",
+        "      lastEventAt: root.lastEventAt",
+        "    })",
+        "  }",
+    ])
+    text = replace_once(text, status_json_old, status_json_new, "statusJson function")
+
+    persist_old = block([
+        "  function persistStayAwake(value) {",
+        "    var command = value",
+        '      ? "mkdir -p \\"$HOME/.local/state/omarchy/indicators\\" && touch \\"$HOME/.local/state/omarchy/indicators/stay-awake\\""',
+        '      : "rm -f \\"$HOME/.local/state/omarchy/indicators/stay-awake\\""',
+        "",
+        "    if (stayAwakeStateWriter.running) {",
+        "      root.pendingStayAwakePersist = !!value",
+        "      root.hasPendingStayAwakePersist = true",
+        "      return",
+        "    }",
+        "",
+        '    stayAwakeStateWriter.command = ["bash", "-lc", command]',
+        "    stayAwakeStateWriter.running = true",
+        "  }",
+    ])
+    persist_new = block([
+        "  function persistStayAwake(value) {",
+        "    if (stayAwakeStateWriter.running) {",
+        "      root.pendingStayAwakePersist = !!value",
+        "      root.hasPendingStayAwakePersist = true",
+        "      return",
+        "    }",
+        "",
+        "    if (value) stayAwakeStateWriter.command = [\"omanixy-idle-state\", \"set\", \"awake\"]",
+        "    else stayAwakeStateWriter.command = [\"omanixy-idle-state\", \"set\", \"idle\"]",
+        "    stayAwakeStateWriter.running = true",
+        "  }",
+    ])
+    text = replace_once(text, persist_old, persist_new, "persistStayAwake function")
+
+    idle_monitor_old = block([
+        "  IdleMonitor {",
+        "    id: idleMonitor",
+        "    enabled: root.idleEnabled",
+        "    timeout: root.firstIdleTimeoutSeconds",
+        "    respectInhibitors: true",
+        "    onIsIdleChanged: root.handleIdleChanged()",
+        "  }",
+    ])
+    idle_monitor_new = block([
+        "  IdleMonitor {",
+        "    id: idleMonitor",
+        "    enabled: root.idleEnabled",
+        "    timeout: root.lockTimeoutSeconds",
+        "    respectInhibitors: true",
+        "    onIsIdleChanged: root.handleIdleChanged()",
+        "  }",
+    ])
+    text = replace_once(text, idle_monitor_old, idle_monitor_new, "IdleMonitor timeout binding")
+
+    timers_old = block([
+        "  Timer {",
+        "    id: screensaverTimer",
+        "    interval: root.screensaverDelaySeconds * 1000",
+        "    repeat: false",
+        "    onTriggered: root.launchScreensaver()",
+        "  }",
+        "",
+        "  Timer {",
+        "    id: lockTimer",
+        "    interval: root.lockDelaySeconds * 1000",
+        "    repeat: false",
+        '    onTriggered: if (root.idleEnabled && root.idledThisCycle) root.lockSystem("lock-timeout")',
+        "  }",
+        "",
+        "  Timer {",
+        "    id: screensaverLaunchGraceTimer",
+        "    interval: 3000",
+        "    repeat: false",
+        "    onTriggered: {",
+        "      if (root.idleEnabled && root.idledThisCycle && root.screensaverStartedThisCycle && root.screensaverWindowCount === 0 && !idleMonitor.isIdle) {",
+        '        root.cancelIdleCycle("screensaver-not-running")',
+        "      }",
+        "    }",
+        "  }",
+        "",
+        "  Connections {",
+        "    target: Hyprland",
+        "    function onRawEvent(event) { root.handleHyprlandEvent(event) }",
+        "  }",
+        "",
+        "  Process {",
+        "    id: screensaverProcess",
+        '    onExited: function(exitCode, exitStatus) { root.logEvent("process-exit", "screensaver exitCode=" + exitCode + " status=" + exitStatus) }',
+        "  }",
+        "  Process {",
+        "    id: lockProcess",
+        '    onExited: function(exitCode, exitStatus) { root.logEvent("process-exit", "lock exitCode=" + exitCode + " status=" + exitStatus) }',
+        "  }",
+        "  Process {",
+        "    id: wakeProcess",
+        '    onExited: function(exitCode, exitStatus) { root.logEvent("process-exit", "wake exitCode=" + exitCode + " status=" + exitStatus) }',
+        "  }",
+    ])
+    timers_new = block([
+        "  Timer {",
+        "    id: lockRetryTimer",
+        "    interval: 1000",
+        "    repeat: false",
+        "    onTriggered: root.requestLock()",
+        "  }",
+        "",
+        "  Process {",
+        "    id: lockProcess",
+        "    stdout: StdioCollector { id: lockProcessOut; waitForEnd: true }",
+        '    onExited: function(exitCode, exitStatus) { root.handleLockExited(exitCode, String(lockProcessOut.text || "")) }',
+        "  }",
+    ])
+    text = replace_once(text, timers_old, timers_new, "screensaver/lock/wake timers and Hyprland connections and processes")
+
+    probe_old = block([
+        "  Process {",
+        "    id: stayAwakeStateProbe",
+        '    command: ["bash", "-c", "mkdir -p \\"$HOME/.local/state/omarchy/indicators\\"; if [[ -f $HOME/.local/state/omarchy/indicators/stay-awake ]]; then echo yes; else echo no; fi"]',
+        "    stdout: SplitParser {",
+        '      onRead: function(line) { root.applyStayAwake(String(line).trim() === "yes", false, "state-file") }',
+        "    }",
+        "    onExited: function() { stayAwakeStateDirWatcher.reload() }",
+        "  }",
+    ])
+    probe_new = block([
+        "  Process {",
+        "    id: stayAwakeStateProbe",
+        '    command: ["omanixy-idle-state", "probe"]',
+        "    onExited: function(exitCode) {",
+        '      if (exitCode === 0) root.applyStayAwake(true, false, "state-file")',
+        '      else if (exitCode === 1) root.applyStayAwake(false, false, "state-file")',
+        "      stayAwakeStateDirWatcher.reload()",
+        "    }",
+        "  }",
+    ])
+    text = replace_once(text, probe_old, probe_new, "stay-awake state probe Process")
+
+    return text
+
+
+def apply_js(text: str) -> str:
+    seconds_from_config_old = block([
+        "function secondsFromConfig(value, fallback) {",
+        "  var n = Number(value)",
+        "  if (!isFinite(n) || n < 0) return fallback",
+        "  return Math.floor(n)",
+        "}",
+    ])
+    seconds_from_config_new = block([
+        "function secondsFromConfig(value, fallback) {",
+        "  var n = Number(value)",
+        "  if (!isFinite(n) || n <= 0) return fallback",
+        "  var floored = Math.floor(n)",
+        "  return floored > 0 ? floored : fallback",
+        "}",
+    ])
+    text = replace_once(text, seconds_from_config_old, seconds_from_config_new, "secondsFromConfig timeout parsing")
+
+    event_parts_and_windows_old = block([
+        "",
+        "function eventParts(event, count) {",
+        "  try {",
+        "    if (event && event.parse) return event.parse(count)",
+        "  } catch (error) {",
+        "  }",
+        '  return String(event && event.data ? event.data : "").split(",")',
+        "}",
+        "",
+        "function screensaverWindowsAfter(windows, address, visible) {",
+        '  var key = String(address || "")',
+        "  if (!key) {",
+        "    var current = windows || {}",
+        "    var existingCount = 0",
+        "    for (var currentKey in current) {",
+        "      if (current[currentKey]) existingCount++",
+        "    }",
+        "    return { windows: current, count: existingCount }",
+        "  }",
+        "",
+        "  var next = {}",
+        "  var count = 0",
+        "  for (var existing in windows || {}) {",
+        "    if (existing !== key && windows[existing]) {",
+        "      next[existing] = true",
+        "      count++",
+        "    }",
+        "  }",
+        "",
+        "  if (visible) {",
+        "    next[key] = true",
+        "    count++",
+        "  }",
+        "",
+        "  return {",
+        "    windows: next,",
+        "    count: count",
+        "  }",
+        "}",
+    ])
+    text = replace_once(text, event_parts_and_windows_old, "", "dead eventParts/screensaverWindowsAfter helpers")
+
+    exports_old = block([
+        "  module.exports = {",
+        "    secondsFromConfig: secondsFromConfig,",
+        "    eventParts: eventParts,",
+        "    screensaverWindowsAfter: screensaverWindowsAfter",
+        "  }",
+    ])
+    exports_new = block([
+        "  module.exports = {",
+        "    secondsFromConfig: secondsFromConfig",
+        "  }",
+    ])
+    text = replace_once(text, exports_old, exports_new, "module.exports surface")
+
+    return text
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) != 2:
+        print(f"usage: {sys.argv[0]} SERVICE_QML IDLE_MODEL_JS", file=sys.stderr)
+        return 2
+
+    qml_path = Path(argv[0])
+    qml_path.write_text(apply_qml(qml_path.read_text()))
+
+    js_path = Path(argv[1])
+    js_path.write_text(apply_js(js_path.read_text()))
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

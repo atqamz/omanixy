@@ -45,5 +45,6 @@ case "$compatibility_command" in
   omarchy-remove-launcher-entry) remove_launcher_entry "$@" ;;
   omarchy-hyprland-session-locked) hyprland_session_locked "$@" ;;
   omarchy-lock-fingerprint-ready) lock_fingerprint_ready "$@" ;;
+  omanixy-idle-state) idle_state "$@" ;;
   *) fail "$compatibility_command: unsupported compatibility command" 127 ;;
 esac

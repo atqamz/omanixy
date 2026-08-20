@@ -49,8 +49,19 @@ let
   # Independent of lock/fingerprint entirely - polkit-agent selection never
   # implies or requires the native lock.
   polkitAgentEnabled = security != null && (security.polkitAgent or false);
+  # Unlike polkit, idle DOES require the native lock: Layer 6 owns no lock
+  # provider of its own, only bounded orchestration of the already-audited
+  # Layer-3 lock IPC. Home Manager's own assertion already prevents an
+  # idle-without-lock configuration from evaluating, but this package-level
+  # invariant closes the gap for any hypothetical caller that builds this
+  # derivation directly with a hand-constructed security attrset.
+  idleEnabled = security != null && (security.idle or false);
+  idleRequiresLockValid = lib.assertMsg
+    (!idleEnabled || lockEnabled)
+    "omanixy idle security requires security.lock to also be true - Layer 6 owns no lock provider of its own";
   managedEnabledSecurityPlugins = lib.optionals lockEnabled [ "omarchy.lock" ]
-    ++ lib.optionals polkitAgentEnabled [ "omarchy.polkit" ];
+    ++ lib.optionals polkitAgentEnabled [ "omarchy.polkit" ]
+    ++ lib.optionals idleEnabled [ "omarchy.idle" ];
   managedSecurityPluginIds = builtins.toJSON managedEnabledSecurityPlugins;
   externalExecutableCapabilities = contractSource.externalExecutableCapabilities or { };
   helperCapabilities = contractSource.helperCapabilities or { };
@@ -194,6 +205,17 @@ let
               "$out/shell/plugins/polkit/PolkitAgent.qml" \
               "$out/shell/plugins/polkit/PolkitModel.js"
             ''}
+            ${lib.optionalString idleEnabled ''
+            mkdir -p "$out/shell/plugins/services/idle"
+            install -Dm644 ${omarchySource}/shell/plugins/services/idle/manifest.json "$out/shell/plugins/services/idle/manifest.json"
+            install -Dm644 ${omarchySource}/shell/plugins/services/idle/Service.qml "$out/shell/plugins/services/idle/Service.qml"
+            install -Dm644 ${omarchySource}/shell/plugins/services/idle/IdleModel.js "$out/shell/plugins/services/idle/IdleModel.js"
+            install -Dm644 ${./IdlePolicy.js} "$out/shell/plugins/services/idle/IdlePolicy.js"
+            chmod u+w "$out/shell/plugins/services/idle/Service.qml" "$out/shell/plugins/services/idle/IdleModel.js"
+            ${pkgs.python3}/bin/python3 ${../../scripts/patch-idle-service} \
+              "$out/shell/plugins/services/idle/Service.qml" \
+              "$out/shell/plugins/services/idle/IdleModel.js"
+            ''}
 
             chmod u+w "$out/shell" "$out/shell/shell.qml" "$out/shell/services" "$out/shell/services/PluginRegistry.qml" "$out/shell/services/AppLibrary.qml" "$out/shell/plugins/menu" "$out/shell/plugins/menu/BarWidget.qml"
             ${lib.optionalString (!builtins.elem "launcher" selectedFeatures) ''
@@ -321,11 +343,11 @@ let
             done
     '';
     passthru = {
-      inherit omarchySource safeMenu safeShellConfig selectedFeatures compatibilityHelpers runtimeBlockedPlugins lockEnabled fingerprintEnabled polkitAgentEnabled managedEnabledSecurityPlugins;
+      inherit omarchySource safeMenu safeShellConfig selectedFeatures compatibilityHelpers runtimeBlockedPlugins lockEnabled fingerprintEnabled polkitAgentEnabled idleEnabled managedEnabledSecurityPlugins;
     };
   };
 
-  runtimeInputs = assert featureNamesValid; assert fingerprintPackageValid; lib.unique (
+  runtimeInputs = assert featureNamesValid; assert fingerprintPackageValid; assert idleRequiresLockValid; lib.unique (
     (lib.concatMap (capability: capabilityRuntimeInputs.${capability}) selectedCapabilities)
     ++ lib.optional fingerprintEnabled fingerprintPackage
   );
@@ -469,6 +491,7 @@ let
     ./adapters/notification.bash
     ./adapters/clipboard.bash
     ./adapters/lock.bash
+    ./adapters/idle.bash
     ./compat-adapter.bash
   ];
   adapterSourceText = builtins.concatStringsSep "\n" (map builtins.readFile adapterSources);
@@ -510,6 +533,9 @@ let
       ''}
       ${lib.optionalString fingerprintEnabled ''
       ln -s ${compatAdapter}/bin/omanixy-compat-adapter "$out/bin/omarchy-lock-fingerprint-ready"
+      ''}
+      ${lib.optionalString idleEnabled ''
+      ln -s ${compatAdapter}/bin/omanixy-compat-adapter "$out/bin/omanixy-idle-state"
       ''}
       ${pkgs.python3}/bin/python3 ${../../scripts/generate-postpatch-runtime-surface} \
         ${omarchyCompatibilityRoot} "$out" "$probes" ${quickshell}/bin/quickshell ${fontconfigFile} ${pkgs.bash}/bin/bash ${lib.escapeShellArg (builtins.toJSON helperConsumers)} ${lib.escapeShellArg featureSurface}
@@ -557,10 +583,13 @@ pkgs.symlinkJoin {
     ${lib.optionalString fingerprintEnabled ''
     ln -s ${compatibilityBin}/bin/omarchy-lock-fingerprint-ready "$out/bin/omarchy-lock-fingerprint-ready"
     ''}
+    ${lib.optionalString idleEnabled ''
+    ln -s ${compatibilityBin}/bin/omanixy-idle-state "$out/bin/omanixy-idle-state"
+    ''}
     ln -s ${theme} "$out/share/omarchy-theme"
   '';
   passthru = {
-    inherit omarchyRevision quickshellRevision nixpkgsRevision omarchySource omarchyCompatibilityRoot compatibilityBin compatibilityProbes quickshell theme supportedSystems safeMenu safeShellConfig selectedFeatures selectedCapabilities compatibilityHelpers runtimeBlockedPlugins adapterSources adapterSourceHash featureSurface lockEnabled fingerprintEnabled polkitAgentEnabled managedEnabledSecurityPlugins declaredRuntimeInputs;
+    inherit omarchyRevision quickshellRevision nixpkgsRevision omarchySource omarchyCompatibilityRoot compatibilityBin compatibilityProbes quickshell theme supportedSystems safeMenu safeShellConfig selectedFeatures selectedCapabilities compatibilityHelpers runtimeBlockedPlugins adapterSources adapterSourceHash featureSurface lockEnabled fingerprintEnabled polkitAgentEnabled idleEnabled managedEnabledSecurityPlugins declaredRuntimeInputs;
     # Exposed only so closure-independence tests can name the exact set of
     # Omanixy-owned derivations expected to change identity when the
     # compatibility root's contents change (e.g. a security capability
