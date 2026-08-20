@@ -1,0 +1,97 @@
+#!/usr/bin/env python3
+"""Fail-closed scan proving the final generated PolkitAgent.qml has no
+external Process.command executable surface at all.
+
+Unlike security.lock's executable-surface scanner (which allowlists a small
+set of literal, audited commands), the Layer-5 polkit adaptation needs no
+external Process command whatsoever: patch-polkit-agent already removes the
+only Process the pinned upstream source had (the omarchy-hw-laptop-closed lid
+probe) along with the FileView that read /etc/pam.d/polkit-1. This scanner
+proves that invariant holds for the actual generated artifact, not just for
+the patcher's own transformation - a future edit that reintroduces a Process
+block, a bash -c shape, or any dynamic command binding must fail this check
+even if it did not touch patch-polkit-agent at all.
+
+Discovery reuses the shared QML source-discovery primitives
+(scripts/source_discovery.py), exactly as scan-lock-executable-surface does:
+comments are lexically masked out first, then quoted-string and template-
+literal content is lexically masked a second time, so a comment or string
+cannot spoof or hide a real command binding. Any live backtick template
+literal that survives both masking passes is rejected outright, for the same
+reason scan-lock-executable-surface rejects one: QML/JS template-literal
+interpolation cannot be proven safe by regex alone.
+
+Where security.lock's scanner treats zero matches as "unverifiable" (some
+command binding is expected to exist and be provably safe), this scanner
+inverts that: finding zero command bindings of any shape is the desired,
+passing state, and finding even one - allowlisted-looking or not - is a
+failure, since the audited invariant here is absence, not a bounded allowlist.
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import source_discovery
+
+
+def fail(message: str) -> None:
+    print(f"polkit executable surface: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def line_of(text: str, offset: int) -> int:
+    return text.count("\n", 0, offset) + 1
+
+
+PATTERNS = (
+    ("command: [...] array binding", source_discovery.ARRAY_COMMAND_RE),
+    ("dynamic command: binding", source_discovery.DYNAMIC_COMMAND_RE),
+    ("dynamic procedural .command = assignment", source_discovery.DYNAMIC_ASSIGNMENT_RE),
+    ("dynamic exec(...) call", source_discovery.DYNAMIC_CALL_RE),
+    ("dynamic .run(...) call", source_discovery.DYNAMIC_RUN_RE),
+)
+
+
+def scan(text: str) -> int:
+    try:
+        stripped = source_discovery.strip_comments(text, shell=False)
+        masked = source_discovery.mask_string_literals(stripped)
+    except source_discovery.UnsafeSource as exc:
+        fail(f"unsafe source, cannot prove executable surface is empty: {exc}")
+        raise  # unreachable, fail() always raises SystemExit
+
+    if "`" in masked:
+        fail("template literals are unsupported in security.polkit executable source")
+
+    matches: list[tuple[int, str, "re.Match[str]"]] = []
+    for label, pattern in PATTERNS:
+        for match in pattern.finditer(masked):
+            matches.append((match.start(), label, match))
+    matches.sort(key=lambda item: item[0])
+
+    if matches:
+        start, label, match = matches[0]
+        context = f"line {line_of(stripped, start)}"
+        found = stripped[match.start():match.end()].strip()
+        fail(
+            f"{context}: {label} found ({found!r}) - the final polkit agent must have "
+            "no external Process.command executable surface"
+        )
+
+    print("polkit executable surface: 0 command bindings found (expected)", file=sys.stderr)
+    return 0
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) != 1:
+        print(f"usage: {sys.argv[0]} POLKIT_AGENT_QML", file=sys.stderr)
+        return 2
+
+    path = Path(argv[0])
+    return scan(path.read_text())
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

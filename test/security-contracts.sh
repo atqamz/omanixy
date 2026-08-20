@@ -49,7 +49,12 @@ for item in security:
         assert "promoted_at_layer" not in item
 
 promoted_ids = {item["id"] for item in security if "promoted_at_layer" in item}
-assert promoted_ids == {"security.pam-password", "security.lock", "security.pam-fingerprint"}
+assert promoted_ids == {
+    "security.pam-password",
+    "security.lock",
+    "security.pam-fingerprint",
+    "security.polkit-agent",
+}
 
 lock = next(item for item in security if item["id"] == "security.lock")
 assert lock["classification"] == "adapted"
@@ -62,6 +67,12 @@ assert pam_fingerprint["classification"] == "adapted"
 assert pam_fingerprint["support"] == "experimental"
 assert pam_fingerprint["target"] == {"classification": "adapted", "support": "experimental"}
 assert pam_fingerprint["promoted_at_layer"] == "4/8"
+
+polkit_agent = next(item for item in security if item["id"] == "security.polkit-agent")
+assert polkit_agent["classification"] == "adapted"
+assert polkit_agent["support"] == "experimental"
+assert polkit_agent["target"] == {"classification": "adapted", "support": "experimental"}
+assert polkit_agent["promoted_at_layer"] == "5/8"
 
 notification_client = next(item for item in items if item["id"] == "notification.client")
 notification_daemon = next(item for item in security if item["id"] == "security.notification-daemon")
@@ -118,8 +129,10 @@ test ! -e "$compatibility_root/shell/plugins/services/idle"
 # Layers 2 and 4 own every declarative PAM capability, in exactly one place:
 # the NixOS security module. Home Manager and the runtime package must never
 # declare a PAM service themselves - only reference the fingerprint readiness
-# adapter's helper name, which is not a PAM declaration - and polkit/idle/
-# notification ownership remains out of scope until their own stack layers.
+# adapter's helper name, which is not a PAM declaration. Layer 5 owns
+# security.polkit (the native NixOS capability only, never a PAM service of
+# its own); idle and notification daemon ownership remain out of scope until
+# their own stack layers.
 if rg -n 'security\.pam\.services|/etc/pam\.d/omarchy-lock-(password|fingerprint)\b|pam_fprintd|pam_unix' \
   "$repo/modules/home" "$repo/packages"; then
   printf '%s\n' 'PAM declaration found outside the layer-2/4 NixOS security module' >&2
@@ -132,9 +145,23 @@ if rg -n 'security\.pam\.services|/etc/pam\.d/omarchy-lock-(password|fingerprint
   exit 1
 fi
 
-if rg -n 'security\.polkit|IdleMonitor|NotificationServer|org\.freedesktop\.Notifications' \
+if rg -n 'IdleMonitor|NotificationServer|org\.freedesktop\.Notifications' \
   "$repo/modules/nixos"; then
-  printf '%s\n' 'polkit/idle/notification ownership is out of scope for the layer-2 PAM module' >&2
+  printf '%s\n' 'idle/notification ownership is out of scope for the layer-2/5 security modules' >&2
+  exit 1
+fi
+
+# Layer 5 (polkit) must never imperatively mutate a known-conflicting
+# session polkit agent - it may only assert against one being enabled
+# alongside the Quattro agent, never set, stop, or kill it.
+if rg -n 'services\.(hyprpolkitagent|polkit-gnome)\.enable\s*=\s*(false|true)' \
+  "$repo/modules/home"; then
+  printf '%s\n' 'Omanixy must not imperatively set a competing polkit agent service' >&2
+  exit 1
+fi
+if rg -n 'systemctl.*(hyprpolkitagent|polkit-gnome)|kill.*(hyprpolkitagent|polkit-gnome)' \
+  "$repo/modules" "$repo/packages" "$repo/scripts"; then
+  printf '%s\n' 'Omanixy must not stop or kill a competing polkit agent' >&2
   exit 1
 fi
 

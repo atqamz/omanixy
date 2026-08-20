@@ -917,3 +917,167 @@ fprintd package is absent from the fingerprint-disabled closure and
 reachable from the fingerprint-enabled one, since that package carries its
 own transitive closure and a claim of an exact path-count difference across
 the full closure would overstate what is actually checked.
+
+## Layer 5 implementation note
+
+`4-05-security-polkit` implements the `security.polkit-agent` ledger entry
+only, as two independent options: `programs.omanixy.security.polkit.system.enable`
+in the NixOS module (`modules/nixos/default.nix`) and
+`programs.omanixy.security.polkit.agent.enable` in the Home Manager module
+(`modules/home/default.nix`). Both default to `false` and are kept
+structurally separate from `programs.omanixy.features`, matching the
+independent-dimension model this ADR already records. Unlike layers 3/4,
+this layer introduces no PAM service of its own at all.
+
+### System and session ownership split
+
+The system option declares `security.polkit.enable = true` using an
+ordinary (non-forced) assignment - deliberately not `lib.mkForce` - so that
+a genuine, stronger consumer override is still possible; a resolved-state
+assertion (`config.security.polkit.enable == true`) then fails the build
+closed if such an override actually contests the capability, rather than
+silently leaving it unfulfilled. This differs from layers 2/4's PAM
+ownership contract on purpose: `security.polkit` is a whole-subsystem
+capability NixOS's own `security.polkit` module already owns completely
+(`polkitd`, its D-Bus/systemd integration, `polkit-agent-helper`, and the
+`polkit-1` PAM service), so Omanixy's only job is turning that module on,
+never re-declaring or forcing any part of what it produces.
+`security-polkit-system` proves the resolved systemd/D-Bus/PAM surface is
+identical whether `security.polkit.enable` is set by Omanixy's option or
+directly by a host with no Omanixy involvement at all, and proves the
+resolved-state assertion actually fails `config.system.build.toplevel`
+closed against a `lib.mkForce false` adversary.
+
+The agent option is the session-side half: enabling it makes the Quattro
+`shell/plugins/polkit` agent reachable as a managed security plugin,
+exactly parallel to `omarchy.lock` in layer 3. It requires an integrated
+Home Manager + NixOS installation (standalone fails closed, for the same
+`osConfig`-availability reason layer 3's lock option does) and additionally
+requires the paired `programs.omanixy.security.polkit.system.enable` to be
+`true` - the explicit system/session ownership handshake this ADR's
+"Independent ownership and support model" section already calls for.
+`security-polkit-hm` proves the full 12-case matrix this crossing produces,
+including that `security.lock` and `security.polkit-agent` are mutually
+independent in both directions: polkit reachable with the lock left
+disabled, and the lock reachable with polkit left disabled.
+
+### Known declarative agent conflicts, and the unknown-agent boundary
+
+Pinned Home Manager exposes at least two other declarative session polkit
+agents, `services.hyprpolkitagent.enable` and `services.polkit-gnome.enable`.
+Enabling the Quattro agent alongside either fails Home Manager evaluation
+closed with an actionable message; Omanixy never sets, stops, or kills
+either service itself, and leaves both fully alone whenever the Quattro
+agent is off. `security-polkit-hm`'s matrix proves both conflict directions
+and both agent-off pass-through cases, and `security-contracts` statically
+guards that neither service is ever imperatively assigned, `systemctl
+stop`-ed, or killed anywhere in this repository.
+
+An *unknown* external agent - one this repository has no way to detect
+declaratively - is a different, narrower claim. The pinned Quickshell
+`PolkitAgentListener` registers exactly once per agent construction
+(`PolkitAgentImpl`'s constructor calls `qs_polkit_agent_register` once,
+unconditionally); `registerComplete(false)` only logs a warning and never
+re-registers, so there is no retry loop to runaway against a competing
+registration. `PolkitAgentImpl::tryTakeoverOrCreate` exists to hand a
+previous QML engine generation's registration to a new one during
+Quickshell's own hot-reload, which is that pinned implementation's internal
+behavior, not an Omanixy process killer, and this layer adds nothing on top
+of it. `security-polkit-quickshell-contract` proves all of this as static
+source-contract evidence against the pinned revision
+(`quickshell-mirror/quickshell@28771c7c74b42e20afca0b1b63980cb46515537c`):
+one registration attempt per construction, no retry on failure, agent- and
+user-initiated cancellation never start a replacement session, ordinary
+(non-cancelled) authentication failure emits `authenticationFailed` and then
+does automatically start a fresh session for the same request/identity -
+the pinned ABI's own support boundary, which this layer does not add a
+restart loop on top of - and destruction cancels queued/active requests
+while unregistering only the listener's own registration handle. A real,
+live D-Bus registration collision is not exercised here; it remains a
+required-before-promotion item, deferred to the layer 8 recovery/support
+gate rather than hidden as resolved.
+
+### Method-neutral QML adaptation
+
+The pinned `PolkitAgent.qml` infers fingerprint availability by watching a
+`FileView` on `/etc/pam.d/polkit-1` and gates it behind a laptop-lid helper
+Process (`omarchy-hw-laptop-closed`, invoked via `bash -c`). Layer 5 removes
+both entirely, along with the `fingerprintConfigured`/`laptopClosed`
+properties and the `loadPamConfig()`/`refreshLidState()` functions that fed
+them - Omanixy does not infer, and does not take over, the host's own
+`polkit-1` PAM authentication policy the way the earlier ledger wording
+implied. `polkit-1` is not merely a file the pinned QML reads for
+fingerprint UI policy; it is the actual PAM service the native
+`polkit-agent-helper` authentication path consumes, and Layer 5 leaves it
+entirely to whatever the host's `security.polkit.system.enable` capability
+(or an entirely separate host configuration) already resolves.
+
+The resulting presentation is authentication-method-neutral: a single
+`waitingForAuthentication` property (`dialogVisible && !responseRequired &&
+!submitted && !errorFlash`) replaces the pinned `fingerprintMode`
+computation, driven only by the pinned Quickshell `AuthFlow.
+isResponseRequired` signal - it never assumes fingerprint, smartcard,
+another PAM module, or a transient noninteractive phase, and shows a
+generic waiting icon rather than a fingerprint glyph. `scripts/patch-polkit-agent`
+performs this adaptation as the same exact-source, fail-on-drift
+`replace_once` discipline `scripts/patch-lock-service` established -
+every pinned block it touches must match verbatim exactly once, or the
+build fails closed rather than silently producing a partially-adapted
+plugin. `security-polkit-qml-behavior` proves the adapted, patched
+`PolkitAgent.qml` behaviorally against a deterministic fake agent, following
+`test/qml-patch-behavior.sh`'s offscreen-Quickshell pattern: inactive,
+generic-waiting, response-required, submit, escape/cancel, ordinary
+failure, success, and daemon-initiated cancellation, all against the real
+generated source with only two harness-only, exact-match transforms
+(`PanelWindow` to a plain `Item`, and the real `PolkitAgent` listener to an
+inline fake `QtObject` exposing the identical property/signal surface) -
+neither of which the reviewed production adaptation itself contains.
+`security-polkit-model` drives the trimmed `PolkitModel.js` directly via
+`require()`, proving `authorizationLabel` is unchanged while the now-dead
+`promptLooksFingerprint`/`fingerprintConfiguredFromPamConfig` helpers are
+gone from both the module body and its `module.exports` surface.
+
+### Executable surface scanning
+
+`scripts/scan-polkit-executable-surface` proves a different invariant than
+`scan-lock-executable-surface`: where the lock scanner allowlists a bounded
+set of literal, audited commands and treats zero bindings as unverifiable,
+the polkit scanner's audited invariant is *absence* - the adapted agent
+needs no external `Process` command at all, so finding zero bindings of any
+shape (array, dynamic, procedural `.command =`, or `Quickshell.exec`/`.run`
+call) is the passing state, and finding even one allowlisted-looking
+command is a failure. It reuses the same shared `source_discovery`
+comment/string-masking primitives the lock scanner does, for the same
+reason: consistent lexical discovery everywhere in this repository, with a
+fresh, narrow policy layered on top per audited surface.
+`security-polkit-executable-surface` proves the real generated
+`PolkitAgent.qml` passes with zero bindings, and that adversarial fixtures
+covering a bare unknown-executable array, a `bash -c` shape, a dynamic
+command expression, a procedural assignment, a multiline variant, and a
+reintroduced `omarchy-hw-laptop-closed` invocation are all rejected.
+
+### Scope
+
+This layer promotes `security.polkit-agent` from `blocked`/`blocked` to its
+already-declared target of `adapted`/`experimental`, and no other
+`security.*` ledger entry; `security.idle`, `security.notification-daemon`,
+and `security.recovery` remain `blocked`. `experimental`, not `supported`,
+because every proof in this layer is hermetic and fake-backend: no live
+D-Bus registration, no real polkit authentication success or wrong-password
+behavior against actual `polkit-agent-helper`/PAM, no daemon
+disappearance/reappearance, no Quickshell crash/restart during an active
+request, and no nested-session validation has been exercised. These remain
+the ledger's `required_before_promotion` items for this entry, and are the
+layer 8 recovery/support gate's responsibility, not a new follow-up issue.
+Omanixy still owns no idle or notification-daemon surface, adds no pkexec
+wrapper (`security.polkit.enablePkexecWrapper` stays at its NixOS default of
+`false`), adds no sudo/setuid helper, and
+`security-polkit-no-fingerprint-widening` proves enabling polkit alongside
+layer 4's fingerprint capability changes neither `services.fprintd.enable`
+nor the dedicated `omarchy-lock-fingerprint` PAM service (byte-identical to
+the fingerprint-only build), and that no policy is copied between the
+screen-lock and polkit PAM services in either direction.
+`security-polkit-core-only` and `security-polkit-closure` prove the
+adapted agent widens neither the declared runtime inputs nor the closure at
+all - a stronger claim than layer 3/4's "one new helper" proofs, since the
+adapted agent needs no compatibility-bin executable whatsoever.
