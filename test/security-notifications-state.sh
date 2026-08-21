@@ -188,4 +188,70 @@ assert_exit 'persist-history with a legitimate stem succeeds' 0 "$home" persist-
 [[ -f "$images_dir/3000-3-appIcon" ]] || { printf 'persist-history image copy did not land under the images dir\n' >&2; exit 1; }
 [[ ! -e "$test_root/home/3000-3-appIcon" ]] || { printf 'an image must never escape the derived images directory\n' >&2; exit 1; }
 
+# --- serialized state payload bound ---
+# Independently documented in the adapter (NOTIFICATION_STATE_MAX_PAYLOAD_BYTES) -
+# duplicated here as a literal the same way the 10-entry history limit
+# above is, not derived from the adapter source.
+max_payload=65536
+
+build_payload_of_size() {
+  local size=$1 prefix='{"id":1,"pad":"' suffix='"}'
+  local pad_len=$((size - ${#prefix} - ${#suffix}))
+  ((pad_len >= 0)) || { printf 'requested payload size %s too small for the fixed prefix/suffix\n' "$size" >&2; exit 1; }
+  printf '%s%s%s' "$prefix" "$(printf '%*s' "$pad_len" '' | tr ' ' 'x')" "$suffix"
+}
+
+payload_at_limit_minus_1=$(build_payload_of_size $((max_payload - 1)))
+payload_at_limit=$(build_payload_of_size "$max_payload")
+payload_over_limit=$(build_payload_of_size $((max_payload + 1)))
+# "Huge" is deliberately kept below Linux's own per-argument hard limit
+# (MAX_ARG_STRLEN, 32 pages = 128 KiB) - a payload at or beyond that fails
+# exec() itself with E2BIG before the adapter ever runs, which would prove
+# the kernel's incidental limit rejects it, not the adapter's own
+# documented 64 KiB bound. Comfortably between the two proves the latter.
+payload_huge=$(build_payload_of_size 98304)
+
+assert_exit 'persist-popup accepts a payload one byte under the limit' 0 "$home" persist-popup 2001-1 "$payload_at_limit_minus_1"
+[[ -f "$popup_dir/2001-1.json" ]] || { printf 'a within-bound payload must be persisted\n' >&2; exit 1; }
+run "$home" delete-popup 2001-1
+
+assert_exit 'persist-popup accepts a payload exactly at the limit' 0 "$home" persist-popup 2002-2 "$payload_at_limit"
+[[ -f "$popup_dir/2002-2.json" ]] || { printf 'an at-bound payload must be persisted\n' >&2; exit 1; }
+run "$home" delete-popup 2002-2
+
+assert_exit 'persist-popup rejects a payload one byte over the limit' 2 "$home" persist-popup 2003-3 "$payload_over_limit"
+[[ ! -e "$popup_dir/2003-3.json" ]] || { printf 'an over-bound payload must never be persisted\n' >&2; exit 1; }
+
+assert_exit 'persist-popup rejects a very large payload without hanging' 2 "$home" persist-popup 2004-4 "$payload_huge"
+[[ ! -e "$popup_dir/2004-4.json" ]] || { printf 'a huge payload must never be persisted\n' >&2; exit 1; }
+
+assert_exit 'persist-history also enforces the payload bound' 2 "$home" persist-history 2004-5 "$payload_over_limit"
+[[ ! -e "$history_dir/2004-5.json" ]] || { printf 'an over-bound history payload must never be persisted\n' >&2; exit 1; }
+
+# The queue continues after an oversized persistence failure: an ordinary
+# persist-popup call after the rejected ones above must still succeed, and
+# no partial/corrupt JSON is ever left behind by a rejected call.
+assert_exit 'persist-popup still works after an oversized-payload rejection' 0 "$home" persist-popup 2005-6 '{"id":6}'
+[[ -f "$popup_dir/2005-6.json" ]] || { printf 'persistence must continue working after a bounded rejection\n' >&2; exit 1; }
+run "$home" delete-popup 2005-6
+
+# --- transactional validation: an invalid later pair leaves zero artifacts ---
+# (Section 6 hardening: validate the complete argument structure before any
+# image-copy side effect, so an earlier valid pair's image is never
+# orphaned by a later invalid one.)
+assert_exit 'persist-popup: valid first pair + invalid second pair leaves no artifacts' 2 \
+  "$home" persist-popup 9001-1 '{"id":1}' appIcon "$small_source" bogus "$small_source"
+[[ ! -e "$images_dir/9001-1-appIcon" ]] || { printf 'an invalid later pair must not leave an orphaned image from an earlier valid pair\n' >&2; exit 1; }
+[[ ! -e "$popup_dir/9001-1.json" ]] || { printf 'an invalid later pair must not leave a JSON artifact\n' >&2; exit 1; }
+
+assert_exit 'persist-popup: valid first pair + duplicate second role leaves no artifacts' 2 \
+  "$home" persist-popup 9002-2 '{"id":2}' appIcon "$small_source" appIcon "$small_source"
+[[ ! -e "$images_dir/9002-2-appIcon" ]] || { printf 'a duplicate-role rejection must not leave an orphaned image\n' >&2; exit 1; }
+[[ ! -e "$popup_dir/9002-2.json" ]] || { printf 'a duplicate-role rejection must not leave a JSON artifact\n' >&2; exit 1; }
+
+assert_exit 'persist-history: valid first pair + invalid second pair leaves no artifacts' 2 \
+  "$home" persist-history 9003-3 '{"id":3}' appIcon "$small_source" bogus "$small_source"
+[[ ! -e "$images_dir/9003-3-appIcon" ]] || { printf 'an invalid later pair must not leave an orphaned image (history)\n' >&2; exit 1; }
+[[ ! -e "$history_dir/9003-3.json" ]] || { printf 'an invalid later pair must not leave a JSON artifact (history)\n' >&2; exit 1; }
+
 printf '%s\n' 'security notifications state adapter ABI checks passed'

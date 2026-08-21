@@ -1718,6 +1718,72 @@ Enabling the daemon alongside every other experimental security capability
 (lock, fingerprint, polkit, idle) changes nothing about their own generated
 source byte content.
 
+### Remediation: queue provenance, the full generated-QML matrix, and payload bounds
+
+A follow-up pass to this same layer closes a set of hermetic audit gaps a
+hostile review of the initial implementation found, without changing the
+architecture this ADR already accepted.
+
+The executable-surface scanner's queue-plumbing exemption was, at first,
+a bare text match: any occurrence anywhere in the file of `command:
+command` or `popupFileProc.command = job.command` was accepted, which
+bounded neither how many times the exemption could appear nor proved the
+dequeued value ever came from a reviewed literal command. The scanner now
+requires the three canonical queue functions (`enqueuePopupFileJob`,
+`enqueueHistoryRead`, `runNextPopupFileJob`) to match pinned, reviewed
+text exactly once each - the same drift discipline the production patcher
+itself uses - and only accepts the two queue-plumbing shapes when they
+fall inside one of those three verified blocks. Every `popupFileQueue`
+mutation must likewise fall inside one of those blocks, and every
+`enqueuePopupFileJob` call site must pass the bare identifier `command`
+(never a function call, a property access, or any other expression),
+traced back to its nearest preceding construction, which must itself be
+one of the exec/verb-validated literal arrays this scanner independently
+audits - a dynamic reassignment sitting closer to the call than the
+literal array fails closed. A six-case adversarial matrix
+(test/security-notifications-executable-surface.sh) proves a second copy
+of either queue-plumbing shape, an attacker-controlled call argument, a
+dead literal shadowed by a dynamic reassignment, a duplicated canonical
+block, and a renamed canonical block are all rejected, alongside a
+baseline proving the canonical skeleton itself is not a false positive.
+
+The generated-QML behavior proof now exercises the complete lettered
+matrix rather than a subset: replacement identity and content, DND
+persistence across a second real service instance sharing the same HOME,
+dismiss/expiration archiving driven through the same functions the real
+UI calls, a live hostile `omarchy-exec` click actually exercised through
+`invokePopupDefault` (not only a structural schema assertion), history
+replay built through the real queue/helper, and a corrupt/torn persisted
+line skipped without losing either valid neighbor via the real
+`restorePopups(raw)` function. A second exact-transform harness fakes
+only the three state-persistence `Process` objects' signal/state surface -
+every `onExited`/`onRunningChanged` handler, and every reconciliation
+function they call (`finishPopupFileJob`,
+`reconcilePopupFileJobFailedToStart`, `reconcileReadHistoryFailedToStart`,
+`reconcileRestorePopupsFailedToStart`, `runNextPopupFileJob`), is the real
+generated production code - and proves FailedToStart handling for all
+three Processes, ordering-independent exactly-once completion under both
+the pinned and a hostile-reversed `runningChanged`/`exited` ordering, and
+a 100-job synthetic FailedToStart stress run that always drains the queue
+to zero with no autonomous retry or runaway loop. This is hermetic
+Layer-7 evidence, not a Layer-8 concern: Layer 8 owns live session
+failure/recovery evidence, not missing offscreen coverage of Layer-7's
+own state-machine code.
+
+The `omanixy-notification-state` helper now enforces an explicit 64 KiB
+bound on the serialized popup/history payload - independent of, and kept
+well clear of, Linux's own separate `MAX_ARG_STRLEN` (32 pages = 128 KiB),
+which the boundary tests deliberately stay under so an oversized rejection
+proves this bound, not an incidental kernel `exec()` limit. An oversized
+payload fails closed (exit 2, no partial JSON artifact); the shared queue
+already advances after any non-`FailedToStart` failure exactly as it does
+for any other rejected verb, so a bounded rejection never blocks later
+notifications. Validation is now fully transactional: HOME, stem, payload
+bound, and the complete role/source pair structure are all validated
+before any image is copied, so an invalid or duplicate-role later pair in
+the same call can never leave an earlier, valid pair's image orphaned with
+no corresponding JSON artifact.
+
 ### Scope
 
 This layer promotes `security.notification-daemon` from `blocked`/`blocked`

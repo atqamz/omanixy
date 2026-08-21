@@ -18,18 +18,42 @@ never a third dynamic executable or verb reachable any other way. Trailing
 positions may be literal or dynamic without further constraint here, since
 the ABI itself defines them as opaque data.
 
-As with every other audited plugin in this repository, this scanner also
-rejects exec/execDetached/run/startDetached calls outright, anywhere in the
-file regardless of arguments, since the pinned Quickshell Process type
-exposes those as untracked execution paths beyond `command:`/`.command =`
-bindings - the adapted notification daemon's own code never calls any of
-them, only ever declares command arrays and toggles `running`.
+The pinned notification plugin's popup-file persistence uses one generic
+serialized job queue (popupFileQueue/enqueuePopupFileJob/
+enqueueHistoryRead/runNextPopupFileJob) that necessarily re-plumbs an
+already-constructed literal command array through two shapes an executable-
+surface scanner must otherwise treat as unauditable: wrapping it in a
+"command" object-literal key for FIFO storage, and dequeuing it back onto
+the one shared Process via `popupFileProc.command = job.command`. A prior
+version of this scanner exempted those two shapes by bare text match
+anywhere in the file - which does not actually prove queue provenance: it
+neither bounds how many times the exemption may appear, nor proves the
+dequeued value ever came from a reviewed literal command, nor rejects a
+caller that swaps in dynamic or attacker-influenced data. This version
+proves it mechanically instead:
+
+1. The three canonical queue functions (enqueuePopupFileJob,
+   enqueueHistoryRead, runNextPopupFileJob) must each match pinned,
+   reviewed text exactly once - any rename, restructure, or duplication
+   fails closed, the same discipline the production patcher itself uses.
+2. The two dynamic-looking shapes above are only ever accepted when they
+   fall inside one of those three verified blocks; the identical text
+   appearing anywhere else in the file is rejected.
+3. Every mutation of `popupFileQueue` itself must fall inside one of those
+   same three blocks - the queue has no other write path.
+4. Every call to `enqueuePopupFileJob` must pass the bare identifier
+   `command` (optionally with a second bare identifier for `done`) - never
+   a function call, a property access, or any other expression - and the
+   nearest preceding construction of that identifier must be one of the
+   literal, exec/verb-validated command arrays this scanner independently
+   audits. A dynamic reassignment of `command` closer to the call than its
+   literal construction, or no literal construction at all, fails closed.
 
 Discovery reuses the shared QML source-discovery lexical primitives
 (scripts/source_discovery.py) for comment/string masking and the shared
 ARRAY_COMMAND_RE/DYNAMIC_*_RE regexes for locating command bindings, exactly
-as the lock/polkit/idle scanners do; the verb-allowlist and exec/run-
-rejection policy are local to this script.
+as the lock/polkit/idle scanners do; the verb-allowlist, queue-provenance,
+and exec/run-rejection policy are local to this script.
 """
 
 from __future__ import annotations
@@ -75,23 +99,110 @@ DYNAMIC_PATTERNS = (
     ("dynamic procedural .command = assignment", source_discovery.DYNAMIC_ASSIGNMENT_RE),
 )
 
-# The pinned notification plugin's popup-file persistence already used one
-# generic serialized job queue (popupFileQueue/enqueuePopupFileJob/
-# runNextPopupFileJob) before Layer 7 touched any of it, and every literal
-# argv this patch builds (persistPopupFile, deletePopupFileFor,
-# archivePopupFileFor, writeHistoryFile, clearHistory, sweepOrphanImages)
-# flows through it. That queue necessarily re-plumbs an already-constructed
-# array through two non-literal shapes this scanner would otherwise flag:
-# wrapping it in a "command" object-literal key for FIFO storage, and
-# dequeuing it back onto the one shared Process. Both are reviewed here by
-# exact text, not loosened generally - every literal construction site that
-# feeds this queue is still independently checked above via ARRAY_COMMAND_RE
-# (the "array" match kind), so this is a re-audit of the queue plumbing
-# itself, not an exemption from it.
-ALLOWED_DYNAMIC_EXPRESSIONS = {
-    "command: command",
-    "popupFileProc.command = job.command",
+
+def block(lines: list[str]) -> str:
+    return "\n".join(lines) + "\n"
+
+
+# The three canonical queue functions, pinned verbatim to the production
+# patcher's own output (scripts/patch-notification-service). Each must
+# occur in the source exactly once - this is the same "exact text, fail on
+# drift" discipline the patcher itself applies, used here to prove
+# provenance rather than to transform text.
+CANONICAL_BLOCKS = {
+    "enqueuePopupFileJob": block([
+        "  function enqueuePopupFileJob(command, done) {",
+        "    popupFileQueue = popupFileQueue.concat([{ command: command, done: done || null }])",
+        "    runNextPopupFileJob()",
+        "  }",
+    ]),
+    "enqueueHistoryRead": block([
+        "  function enqueueHistoryRead() {",
+        "    popupFileQueue = popupFileQueue.concat([{ read: true }])",
+        "    runNextPopupFileJob()",
+        "  }",
+    ]),
+    "runNextPopupFileJob": block([
+        "  function runNextPopupFileJob() {",
+        "    if (readHistoryProc.running || popupFileProc.running) return",
+        "    if (popupFileQueue.length === 0) return",
+        "",
+        "    var job = popupFileQueue[0]",
+        "    popupFileQueue = popupFileQueue.slice(1)",
+        "",
+        "    if (job.read) {",
+        "      startHistoryRead()",
+        "      return",
+        "    }",
+        "",
+        "    popupFileProc.command = job.command",
+        "    service.runningPopupFileJobDone = job.done || null",
+        "    service.popupFileJobAwaitingResult = true",
+        "    popupFileProc.running = true",
+        "  }",
+    ]),
 }
+
+# The bare `command` identifier, assigned (not compared, not a property
+# access like `job.command` or `popupFileProc.command`). Used to trace each
+# enqueuePopupFileJob call site's argument back to its nearest preceding
+# construction - literal array (good) or anything else (bad).
+BARE_COMMAND_ASSIGN_RE = re.compile(r"(?<![.\w])\bcommand\s*=(?!=)")
+BARE_COMMAND_ARRAY_ASSIGN_RE = re.compile(r"(?<![.\w])\bcommand\s*=\s*\[")
+POPUP_FILE_QUEUE_ASSIGN_RE = re.compile(r"(?<![.\w])\bpopupFileQueue\s*=(?!=)")
+# Excludes the function's own definition header ("function
+# enqueuePopupFileJob(command, done) {") - every other match is a real call
+# site, since enqueuePopupFileJob never calls itself.
+ENQUEUE_CALL_OPEN_RE = re.compile(r"(?<!function )\benqueuePopupFileJob\(")
+ENQUEUE_CALL_ARGS_RE = re.compile(r"^command(?:\s*,\s*[A-Za-z_][A-Za-z0-9_]*)?$")
+
+
+def find_call_close_paren(text: str, open_paren_pos: int) -> int:
+    """Given the position of the opening '(' of a call, return the position
+    of its matching ')', tracking nested (), [], {} and string/backtick
+    literals so an argument expression containing its own parens (a
+    function call, a grouped expression) is walked correctly rather than
+    matched against a naive non-nested-paren regex - which would otherwise
+    silently fail to match at all, hiding the call site from every check
+    below instead of flagging it."""
+
+    depth = 0
+    pos = open_paren_pos
+    length = len(text)
+    quote = ""
+    while pos < length:
+        char = text[pos]
+        if quote:
+            if char == "\\" and pos + 1 < length:
+                pos += 2
+                continue
+            if char == quote:
+                quote = ""
+            pos += 1
+            continue
+        if char in "\"'`":
+            quote = char
+        elif char in "([{":
+            depth += 1
+        elif char in ")]}":
+            depth -= 1
+            if depth == 0:
+                return pos
+        pos += 1
+    fail(f"line {line_of(text, open_paren_pos)}: unterminated enqueuePopupFileJob(...) call")
+    raise AssertionError("unreachable")  # fail() always raises SystemExit
+
+
+def find_enqueue_calls(text: str) -> list[tuple[int, str]]:
+    """Returns (call_start, argument_text) for every real enqueuePopupFileJob
+    call site (excluding its own function definition header)."""
+
+    calls: list[tuple[int, str]] = []
+    for open_match in ENQUEUE_CALL_OPEN_RE.finditer(text):
+        open_paren_pos = open_match.end() - 1
+        close_paren_pos = find_call_close_paren(text, open_paren_pos)
+        calls.append((open_match.start(), text[open_paren_pos + 1:close_paren_pos]))
+    return calls
 
 
 def fail(message: str) -> None:
@@ -177,6 +288,77 @@ def check_command(tokens: list[tuple[str, bool]], context: str) -> None:
             fail(f"{context}: shell interpreter literal found in a data position ({value!r})")
 
 
+def locate_canonical_blocks(stripped: str) -> dict[str, tuple[int, int]]:
+    ranges: dict[str, tuple[int, int]] = {}
+    for name, canonical_text in CANONICAL_BLOCKS.items():
+        count = stripped.count(canonical_text)
+        if count != 1:
+            fail(
+                f"queue provenance block {name!r}: expected exactly one pinned occurrence, found {count} "
+                "- the canonical queue plumbing has drifted and provenance can no longer be proven"
+            )
+        start = stripped.index(canonical_text)
+        ranges[name] = (start, start + len(canonical_text))
+    return ranges
+
+
+def within_any(position: int, ranges: dict[str, tuple[int, int]]) -> bool:
+    return any(start <= position < end for start, end in ranges.values())
+
+
+def check_queue_provenance(stripped: str, canonical_ranges: dict[str, tuple[int, int]]) -> int:
+    # Every mutation of popupFileQueue itself must live inside one of the
+    # three verified canonical blocks - the queue has no other write path.
+    queue_assignments = list(POPUP_FILE_QUEUE_ASSIGN_RE.finditer(stripped))
+    for match in queue_assignments:
+        if not within_any(match.start(), canonical_ranges):
+            fail(
+                f"line {line_of(stripped, match.start())}: popupFileQueue is mutated outside the "
+                "canonical enqueuePopupFileJob/enqueueHistoryRead/runNextPopupFileJob plumbing"
+            )
+
+    # Every call site must pass the bare `command` identifier (never a
+    # function call, property access, or any other expression), and the
+    # identifier's nearest preceding construction must be a literal array -
+    # never a dynamic reassignment sitting closer to the call.
+    array_command_starts = {
+        match.start()
+        for match in BARE_COMMAND_ARRAY_ASSIGN_RE.finditer(stripped)
+    }
+    checked_calls = 0
+    for call_start, args_text in find_enqueue_calls(stripped):
+        # A call site inside the canonical enqueuePopupFileJob definition
+        # itself is the recursive-looking `runNextPopupFileJob()` line, not
+        # a real enqueue call - enqueuePopupFileJob never calls itself, so
+        # every real match here is an external call site by construction.
+        args = args_text.strip()
+        context = f"line {line_of(stripped, call_start)}"
+        if not ENQUEUE_CALL_ARGS_RE.match(args):
+            fail(
+                f"{context}: enqueuePopupFileJob called with {args!r} - only the bare "
+                "identifier `command` (optionally with a second bare identifier for `done`) is allowed"
+            )
+
+        preceding_assignments = [
+            m for m in BARE_COMMAND_ASSIGN_RE.finditer(stripped, 0, call_start)
+        ]
+        if not preceding_assignments:
+            fail(f"{context}: enqueuePopupFileJob(command) called with no prior construction of `command`")
+        nearest = preceding_assignments[-1]
+        if nearest.start() not in array_command_starts:
+            fail(
+                f"{context}: the nearest construction of `command` before this call "
+                f"(line {line_of(stripped, nearest.start())}) is not a literal array - "
+                "queue provenance cannot be proven"
+            )
+        checked_calls += 1
+
+    if checked_calls == 0:
+        fail("no enqueuePopupFileJob call sites found - the queue-provenance invariant is unverifiable")
+
+    return checked_calls
+
+
 def scan(text: str) -> int:
     try:
         stripped = source_discovery.strip_comments(text, shell=False)
@@ -187,6 +369,23 @@ def scan(text: str) -> int:
 
     if "`" in masked:
         fail("template literals are unsupported in security.notifications executable source")
+
+    # The queue-provenance machinery only applies to files that actually
+    # reference the queue at all - small, isolated fixtures exercising the
+    # executable/verb allowlist in isolation (this scanner's own test suite)
+    # have no queue to prove provenance over, and must not be forced to
+    # reproduce the entire canonical skeleton just to test an unrelated
+    # dimension. Any file that DOES mention enqueuePopupFileJob - by its
+    # exact reviewed name or a drifted/renamed variant containing it as a
+    # substring - is held to the full proof, with no partial credit for a
+    # rename.
+    has_queue = "enqueuePopupFileJob" in stripped
+    if has_queue:
+        canonical_ranges = locate_canonical_blocks(stripped)
+        checked_calls = check_queue_provenance(stripped, canonical_ranges)
+    else:
+        canonical_ranges = {}
+        checked_calls = 0
 
     matches: list[tuple[int, str, re.Match[str]]] = []
     for match in source_discovery.ARRAY_COMMAND_RE.finditer(masked):
@@ -217,9 +416,13 @@ def scan(text: str) -> int:
             found = stripped[match.start():match.end()].strip()
             fail(f"{context}: {kind} found ({found!r}) - the notification daemon must never call exec/execDetached/run/startDetached")
         if kind != "array":
-            found = stripped[match.start():match.end()].strip()
-            if found in ALLOWED_DYNAMIC_EXPRESSIONS:
+            # The two queue-plumbing shapes (`command: command` and
+            # `popupFileProc.command = job.command`) are only ever proven
+            # safe by falling inside one of the three verified canonical
+            # blocks above - never by bare text match anywhere in the file.
+            if within_any(start, canonical_ranges):
                 continue
+            found = stripped[match.start():match.end()].strip()
             fail(f"{context}: {kind} ({found!r})")
         real_body = stripped[match.start(1):match.end(1)]
         check_command(tokenize(real_body), context)
@@ -227,6 +430,7 @@ def scan(text: str) -> int:
 
     print(
         f"notification executable surface: {allowed_count} command binding(s) passed, "
+        f"{checked_calls} enqueuePopupFileJob call site(s) with proven literal-array provenance, "
         f"executable always {ALLOWED_EXECUTABLE!r}, verb always one of the reviewed fixed-domain set, "
         "0 exec/execDetached/run/startDetached calls found (expected)",
         file=sys.stderr,

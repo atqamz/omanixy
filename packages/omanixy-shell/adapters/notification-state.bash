@@ -36,6 +36,26 @@ notification_state_role_valid() {
   [[ $1 == appIcon || $1 == image ]]
 }
 
+# A conservative, independently-chosen fixed bound on the serialized
+# popup/history JSON payload - not derived from (and never to be confused
+# with) the kernel's own incidental ARG_MAX, which varies by host and by
+# how much of it the rest of the argv/environment has already consumed.
+# 64 KiB comfortably covers any legitimate notification's summary, body,
+# app name, icon reference, and glyph (FreeDesktop notification bodies are
+# realistically at most a few KiB of text) while staying well under half of
+# Linux's own separate, harder per-argument ceiling (MAX_ARG_STRLEN, 32
+# pages = 128 KiB - exceeding that fails exec() itself with E2BIG before
+# this helper ever runs, which test/security-notifications-state.sh's own
+# boundary fixtures deliberately stay clear of, to prove this bound - not
+# the kernel's - is what rejects an oversized payload).
+readonly NOTIFICATION_STATE_MAX_PAYLOAD_BYTES=65536
+
+notification_state_payload_within_bound() {
+  local size
+  size=$(printf '%s' "$1" | wc -c) || return 1
+  ((size <= NOTIFICATION_STATE_MAX_PAYLOAD_BYTES))
+}
+
 # Bounded, best-effort image copy. A missing/unreadable/oversized/non-regular
 # source degrades to "no persisted image" - it never fails the caller, which
 # is always in the middle of persisting the notification's own JSON and must
@@ -65,16 +85,18 @@ notification_state_copy_image() {
   return 0
 }
 
-# Shared arg-walk for persist-popup/persist-history: stem, json, then zero to
-# two "<role> <source>" pairs (bounded by the two roles Notifications ever
-# persists images under - appIcon and image - each accepted at most once).
-notification_state_persist_common() {
-  local stem=$1 json=$2 seen_appicon=0 seen_image=0
-  shift 2
-
+# Shared arg-walk for persist-popup/persist-history: zero to two "<role>
+# <source>" pairs (bounded by the two roles Notifications ever persists
+# images under - appIcon and image - each accepted at most once). Pure
+# validation, no filesystem side effects at all - callers must run this to
+# completion (validating the ENTIRE argument structure) before copying any
+# image, so an invalid later pair can never leave an earlier, valid pair's
+# image copied with no corresponding JSON artifact ever written.
+notification_state_validate_pairs() {
+  local seen_appicon=0 seen_image=0
   while (($#)); do
     (($# >= 2)) || return 2
-    local role=$1 source=$2
+    local role=$1
     shift 2
     notification_state_role_valid "$role" || return 2
     if [[ $role == appIcon ]]; then
@@ -84,11 +106,21 @@ notification_state_persist_common() {
       ((seen_image == 0)) || return 2
       seen_image=1
     fi
+  done
+  return 0
+}
+
+# Copies every already-validated "<role> <source>" pair. Must only be
+# called after notification_state_validate_pairs has accepted the complete
+# argument structure - never incrementally interleaved with validation.
+notification_state_copy_pairs() {
+  local stem=$1
+  shift
+  while (($#)); do
+    local role=$1 source=$2
+    shift 2
     notification_state_copy_image "$stem" "$role" "$source"
   done
-
-  printf '%s\n' "$json"
-  return 0
 }
 
 notification_state_trim_history() {
@@ -135,35 +167,45 @@ notification_state_init() {
   return 0
 }
 
+# Transactional validation order (narrowest-cost-first, no side effects
+# until everything is proven valid): HOME, then stem, then the payload
+# size bound, then the complete role/source pair structure. Only once all
+# four pass does any image get copied, and only after that is the JSON
+# artifact written - an invalid or oversized input leaves zero new
+# filesystem artifacts, not a partially-applied one.
 notification_state_persist_popup() {
   (($# >= 2)) || return 2
   notification_state_home_valid || return 2
-  local stem=$1
+  local stem=$1 json=$2
   notification_state_stem_valid "$stem" || return 2
+  notification_state_payload_within_bound "$json" || return 2
+  shift 2
+  notification_state_validate_pairs "$@" || return 2
 
-  local payload
-  payload=$(notification_state_persist_common "$@") || return $?
+  notification_state_copy_pairs "$stem" "$@"
 
   local popup_dir
   popup_dir=$(notification_state_popup_dir)
   mkdir -p -- "$popup_dir" 2>/dev/null || return 2
-  printf '%s\n' "$payload" >"$popup_dir/$stem.json" || return 2
+  printf '%s\n' "$json" >"$popup_dir/$stem.json" || return 2
   return 0
 }
 
 notification_state_persist_history() {
   (($# >= 2)) || return 2
   notification_state_home_valid || return 2
-  local stem=$1
+  local stem=$1 json=$2
   notification_state_stem_valid "$stem" || return 2
+  notification_state_payload_within_bound "$json" || return 2
+  shift 2
+  notification_state_validate_pairs "$@" || return 2
 
-  local payload
-  payload=$(notification_state_persist_common "$@") || return $?
+  notification_state_copy_pairs "$stem" "$@"
 
   local history_dir
   history_dir=$(notification_state_history_dir)
   mkdir -p -- "$history_dir" 2>/dev/null || return 2
-  printf '%s\n' "$payload" >"$history_dir/$stem.json" || return 2
+  printf '%s\n' "$json" >"$history_dir/$stem.json" || return 2
   notification_state_trim_history
   return 0
 }
