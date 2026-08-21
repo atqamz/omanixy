@@ -1381,11 +1381,12 @@ items:
       - The configured lock timeout is bounded above by 2147483 seconds, the largest whole-second value that survives the pinned Quickshell backend's own signed-32-bit-millisecond conversion (`static_cast<int>(timeout * 1000)` in src/wayland/idle_notify/monitor.cpp) - this ceiling is derived from that pinned arithmetic range, not an Omanixy policy preference, and any value past it falls back to the pinned 300-second default exactly like any other invalid input.
 
   - id: security.notification-daemon
-    classification: blocked
-    support: blocked
+    classification: adapted
+    support: experimental
     maturity: audited
     owner: atqamz/omanixy#4
     planned_stack_layer: 7/8
+    promoted_at_layer: 7/8
     audit_layer: 1/8
     target:
       classification: adapted
@@ -1395,10 +1396,10 @@ items:
       revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
       paths:
         - path: shell/plugins/notifications/
-          role: freedesktop notification daemon, lifecycle, DND, history, and persistence
+          role: freedesktop notification daemon, popup presentation, DND, and bounded local history/popup persistence - only optional org.freedesktop.Notifications ownership, popup lifecycle, DND, and bounded history/popup persistence are ported; the omarchy-exec hint's persisted exec role and its Util.execDetached execution, the compositor-focus fallback, and every bash -c/-lc file-state job are all deliberately not ported (see notes)
           consumption: audited-reference
         - path: bin/omarchy-hyprland-focus-app
-          role: notification action focus helper
+          role: notification action focus helper, deliberately not ported - FDO notification ownership does not require notification-driven compositor focus mutation; a click with no live default action simply dismisses the toast
           consumption: audited-reference
     native_quickshell:
       project: quickshell-mirror/quickshell
@@ -1409,34 +1410,64 @@ items:
     ownership:
       presentation: omarchy
       adapter: "issue #4"
-      system: consumer D-Bus session and notification service policy
-      session: consumer or external daemon by default; explicitly selected Quattro daemon later
+      system: consumer D-Bus session and notification service policy - Layer 7 owns no system capability, only a session D-Bus name claim
+      session: consumer or external daemon by default; explicitly selected pinned Quickshell NotificationServer, owned by the same Quattro shell process, when programs.omanixy.security.notifications.daemon.enable is true
     helpers:
-      - omarchy-hyprland-focus-app
+      - omanixy-notification-state
       - omarchy-notification-send
     filesystem:
       - ~/.local/state/omarchy/notifications.json
       - ~/.local/state/omarchy/notifications/
+      - ~/.local/state/omarchy/notifications/history/
+      - ~/.local/state/omarchy/notifications/images/
     dbus_services:
       - org.freedesktop.Notifications
     failure_sensitive:
-      - replacement IDs must update the tracked notification object
+      - replacement IDs must update the tracked notification object, never create a duplicate live row
       - DND, actions, history, popup state, and images persist according to the selected owner
-      - shell restart must not silently claim an existing daemon name
+      - shell restart must not silently claim an existing daemon name, and must never kill or replace a known or unknown external owner
+      - a restored (cross-restart) popup row must never resolve to a live action, even under old-generation id reuse by a fresh notification
+      - the historical omarchy-exec hint, or any other arbitrary command/argument carried in notification hints, must never become executable state or a shell invocation
+      - a state-persistence Process that fails to start must advance the popup-file job queue exactly once, never deadlocking later notifications
     evidence:
       available:
-        - exact NotificationServer and lifecycle source audit
-        - existing notification-send client adapter evidence
-        - runtime proof that the notification daemon plugin is absent
+        - declarative programs.omanixy.security.notifications.daemon.enable Home Manager option, disabled by default, structurally independent of programs.omanixy.security.lock(.fingerprint)/polkit.agent/idle.enable and of programs.omanixy.features = [ "notification" ] in both directions, with known-conflict assertions against services.mako.enable/services.dunst.enable/services.swaync.enable/services.fnott.enable and no NixOS pairing required at all (pure session D-Bus ownership)
+        - exact-source, fail-on-drift patcher (scripts/patch-notification-service) removing the pinned omarchy-exec hint's persisted exec role and its Util.execDetached execution, the focusApp/focusAppProc compositor-focus fallback, and every bash -c/-lc file-state job, replacing the latter with direct-argv calls to the narrow, fixed-domain omanixy-notification-state helper, proven against the real pinned source
+        - a narrow, fixed-domain omanixy-notification-state compatibility helper (packages/omanixy-shell/adapters/notification-state.bash) owning HOME/stem validation, bounded (<=5 MiB) image copying with no caller-controlled destination, and history trimming to 10 entries internally - no eval, no bash -c, no arbitrary executable name or destination directory
+        - fail-closed executable-surface scan (scripts/scan-notification-executable-surface) proving the adapted Service.qml's only reachable executable is omanixy-notification-state, always invoked with a literal verb from the reviewed fixed-domain set, and unconditionally rejecting every exec/execDetached/run/startDetached call regardless of argument shape
+        - NotificationLogic.js behavior tests (test/security-notifications-logic.sh), driving the real patched module, proving the exec role is structurally absent from every schema it produces (snapshot, history, popup, replacement) even when fed a hostile omarchy-exec hint, that persistablePopup's copy descriptors carry a role rather than a caller-facing destination path, and that history trimming/malformed-line skipping and DND-bypass/ephemeral classification are unchanged from pinned
+        - hermetic omanixy-notification-state adapter test (test/security-notifications-state.sh) covering HOME/stem/arity validation, every verb's success and not-found paths, the 10-entry history limit, clear-history never touching live popups, a torn/missing directory degrading to bounded failure, and image-copy bounds (oversized rejected, FIFO source never blocks, traversal/escape structurally impossible since the destination is always derived internally)
+        - hermetic offscreen Quickshell behavior proof (test/security-notifications-qml-behavior.sh) driving the real generated Service.qml (with only the popup PanelWindow and the native NotificationServer test-doubled, exactly as the spec permits) through popup creation, DND suppression, a live default FDO action invoking exactly once, no live action performing no execution, and a restored/hostile-coincidental-id row never resolving to a live action - plus real on-disk proof, via the real omanixy-notification-state adapter against a real temporary HOME, that a persisted popup file structurally excludes the exec field and never leaks an omarchy-exec hint's value under any other name
+        - static ABI contract evidence against the pinned Quickshell NotificationServer source (server.cpp/server.hpp/qml.cpp) that registration targets exactly /org/freedesktop/Notifications and org.freedesktop.Notifications, that a registration conflict is a bounded, one-shot diagnostic with no replace/kill/terminate vocabulary anywhere in the file, that retry is driven purely by the serviceUnregistered signal with no timer/loop construct in the registration path, that replacesId reuses the existing idMap object, and that keepOnReload is immutable once the server has been started
+        - shell.json and managed-plugin ownership proofs mirroring the Layer-3/5/6 lock/polkit/idle model exactly, including the reserved omarchy.notifications namespace never being revivable via a hand-edited shell.json or a third-party plugin shadowing it
+        - core-vs-core+notification-daemon closure proof at raw store-path granularity: declaredRuntimeInputs is exact-equal (the daemon adds no package of its own), the compat-bin entry set gains exactly one helper (omanixy-notification-state), and after excluding the exact, named set of Omanixy-owned derivations expected to change identity, every remaining external dependency store path is byte-identical
+        - client/daemon closure independence proof: the notification-send client feature alone never packages the daemon plugin tree, the daemon alone never packages the notify-send client helper, and selecting both together yields exactly their union
+        - lower-layer independence proof: enabling the daemon alongside every other experimental security capability (lock, fingerprint, polkit, idle) changes nothing about their own generated source byte content
       required_before_promotion:
-        - explicit daemon ownership and conflict test
-        - DND, replacement, action, history, persistence, and restart tests
-        - nested D-Bus notification ownership validation
+        - actual ownership of org.freedesktop.Notifications on a real session bus, and real notify-send delivery end to end
+        - a real replacement-id update, close/action round-trip, and DND behavior against a live client
+        - history and image persistence proven over a real shell process restart, not only the offscreen harness's synthetic queue-drain
+        - a real collision with a known external daemon (mako/dunst/swaync/fnott actually running) and with an unknown, independently-started daemon
+        - external owner disappearance followed by real event-driven Quickshell re-registration
+        - session D-Bus disappearance/recovery, monitor hotplug with popups visible, and failure/log-volume behavior under a real notification burst
     tests:
       - test/quattro-contract-audit.sh
       - test/security-contracts.sh
+      - test/security-notifications-hm.sh
+      - test/security-notifications-shell-json.sh
+      - test/security-notifications-managed-plugin.sh
+      - test/security-notifications-logic.sh
+      - test/security-notifications-state.sh
+      - test/security-notifications-executable-surface.sh
+      - test/security-notifications-closure.sh
+      - test/security-notifications-client-independence.sh
+      - test/security-notifications-lower-layer-independence.sh
+      - test/security-notifications-quickshell-contract.sh
+      - test/security-notifications-qml-behavior.sh
     notes:
       - This entry is distinct from notification.client, which remains an adapted client contract and does not supervise a notification daemon.
+      - The client presentation feature (programs.omanixy.features = [ "notification" ]) and this daemon-ownership option are independent axes in both directions; neither enables, requires, or implies the other.
+      - The historical omarchy-exec hint and the compositor-focus fallback are intentionally, permanently unsupported in the native daemon - this is a hard security boundary, not deferred follow-up work.
 
   - id: security.recovery
     classification: blocked

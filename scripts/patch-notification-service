@@ -1,0 +1,623 @@
+#!/usr/bin/env python3
+"""Narrow post-patch to the pinned shell/plugins/notifications/{Service.qml,
+NotificationLogic.js} for the Quattro notification daemon.
+
+Layer 7 owns optional org.freedesktop.Notifications ownership, popup
+presentation, DND, bounded local history/popup persistence, and standard
+live freedesktop notification actions. It deliberately removes everything
+the pinned source does beyond that:
+
+- the `omarchy-exec` hint and its persisted `exec` role (snapshot, history,
+  popup) - carrying an arbitrary shell command through persisted state and
+  later running it via Util.execDetached is a real execution path from
+  untrusted notification content, and the native daemon must never restore
+  it under any name;
+- the compositor-focus fallback (omarchy-hyprland-focus-app) - a click with
+  no live "default" FDO action simply dismisses the toast now, since FDO
+  notification ownership does not require notification-driven compositor
+  focus mutation;
+- every `bash -c`/`bash -lc` file-state job (mkdir/awk/mv/rm/head/stat/sort
+  pipelines) - replaced by direct-argv calls to the narrow, fixed-domain
+  `omanixy-notification-state` helper, which owns HOME/stem validation,
+  bounded image copying, and history trimming internally. No shell
+  interpreter is reachable from the adapted Service.qml at all.
+
+Every state-owning Process this patch introduces or touches gains the same
+FailedToStart-safe awaiting-result pattern Layer 6 established: the pinned
+Quickshell Process ABI's onErrorOccurred(QProcess::FailedToStart) only ever
+emits runningChanged(), never exited(), so a boolean awaiting-result flag
+plus Qt.callLater is the only correct way to reconcile a start failure
+without double-processing a normal exit or leaving the popup-file job queue
+deadlocked.
+"""
+
+from pathlib import Path
+import sys
+
+
+def block(lines: list[str]) -> str:
+    return "\n".join(lines) + "\n"
+
+
+def replace_once(text: str, old: str, new: str, label: str) -> str:
+    count = text.count(old)
+    if count != 1:
+        raise SystemExit(f"{label}: expected one pinned block, found {count}")
+    return text.replace(old, new, 1)
+
+
+def apply_qml(text: str) -> str:
+    invoke_default_and_focus_old = block([
+        "  function invokePopupDefault(index) {",
+        "    if (index < 0 || index >= popupModel.count) return",
+        "    var entry = popupModel.get(index)",
+        '    var command = entry ? String(entry.exec || "") : ""',
+        "    if (command) {",
+        "      // Detached so the launched command outlives the shell process, which the",
+        "      // installer toasts depend on: they restart the shell as their first act.",
+        "      Util.execDetached(command)",
+        "      dismissPopup(index)",
+        "      return",
+        "    }",
+        "    // Restored rows have no live actions, and looking up liveRefs by their",
+        "    // old-generation id could fire an unrelated fresh notification's action.",
+        "    var ref = entry && !isRestoredRow(entry) ? liveRefs[entry.originalId] : null",
+        "    var invoked = false",
+        "    try {",
+        "      if (ref && ref.actions) {",
+        "        for (var i = 0; i < ref.actions.length; i++) {",
+        "          var action = ref.actions[i]",
+        '          if (action && action.identifier === "default") {',
+        "            action.invoke()",
+        "            invoked = true",
+        "            break",
+        "          }",
+        "        }",
+        "      }",
+        "    } catch (e) {",
+        "      // Notification already torn down by the server — fall through to focus.",
+        '      console.warn("invoke default failed:", e)',
+        "    }",
+        "    // Chat apps (Slack, Discord, Vesktop, etc.) rarely register a \"default\"",
+        "    // libnotify action — they just expect clicking the notification to",
+        "    // focus their window. Fall back to focusing the sending app by class so",
+        "    // that click-to-jump actually works.",
+        "    if (!invoked) focusApp(entry)",
+        "    dismissPopup(index)",
+        "  }",
+        "",
+        "  // Try to focus an existing Hyprland window matching the notification's",
+        "  // sender. The helper handles case-insensitive class matching.",
+        "  function focusApp(entry) {",
+        "    if (!entry || !entry.app) return",
+        "    focusAppProc.command = [",
+        "      service.omarchyPath + \"/bin/omarchy-hyprland-focus-app\",",
+        "      String(entry.app)",
+        "    ]",
+        "    focusAppProc.running = true",
+        "  }",
+        "",
+        "  Process { id: focusAppProc; running: false }",
+    ])
+    invoke_default_and_focus_new = block([
+        "  // No custom omarchy-exec hint execution and no compositor-focus",
+        "  // fallback: a click with no live \"default\" FDO action simply",
+        "  // dismisses the toast. This is the standard sender-owned D-Bus action",
+        "  // contract, never shell command execution.",
+        "  function invokePopupDefault(index) {",
+        "    if (index < 0 || index >= popupModel.count) return",
+        "    var entry = popupModel.get(index)",
+        "    // Restored rows have no live actions, and looking up liveRefs by their",
+        "    // old-generation id could fire an unrelated fresh notification's action.",
+        "    var ref = entry && !isRestoredRow(entry) ? liveRefs[entry.originalId] : null",
+        "    try {",
+        "      if (ref && ref.actions) {",
+        "        for (var i = 0; i < ref.actions.length; i++) {",
+        "          var action = ref.actions[i]",
+        '          if (action && action.identifier === "default") {',
+        "            action.invoke()",
+        "            break",
+        "          }",
+        "        }",
+        "      }",
+        "    } catch (e) {",
+        "      // Notification already torn down by the server — nothing left to invoke.",
+        '      console.warn("invoke default failed:", e)',
+        "    }",
+        "    dismissPopup(index)",
+        "  }",
+    ])
+    text = replace_once(text, invoke_default_and_focus_old, invoke_default_and_focus_new, "invokePopupDefault/focusApp")
+
+    ensure_dirs_old = block([
+        "  Process {",
+        "    id: ensureDirsProc",
+        '    command: ["mkdir", "-p", service.stateDir, service.popupStateDir, service.historyDir, service.imagesDir]',
+        "    running: false",
+        "  }",
+    ])
+    ensure_dirs_new = block([
+        "  Process {",
+        "    id: ensureDirsProc",
+        '    command: ["omanixy-notification-state", "init"]',
+        "    running: false",
+        "  }",
+    ])
+    text = replace_once(text, ensure_dirs_old, ensure_dirs_new, "ensureDirsProc command")
+
+    queue_done_property_old = block([
+        "  // Done callback of the job popupFileProc is currently running.",
+        "  property var runningPopupFileJobDone: null",
+        "",
+        "  function enqueuePopupFileJob(command, done) {",
+    ])
+    queue_done_property_new = block([
+        "  // Done callback of the job popupFileProc is currently running.",
+        "  property var runningPopupFileJobDone: null",
+        "  property bool popupFileJobAwaitingResult: false",
+        "",
+        "  function enqueuePopupFileJob(command, done) {",
+    ])
+    text = replace_once(text, queue_done_property_old, queue_done_property_new, "popupFileJobAwaitingResult property")
+
+    run_next_job_old = block([
+        "    popupFileProc.command = job.command",
+        "    service.runningPopupFileJobDone = job.done || null",
+        "    popupFileProc.running = true",
+        "  }",
+    ])
+    run_next_job_new = block([
+        "    popupFileProc.command = job.command",
+        "    service.runningPopupFileJobDone = job.done || null",
+        "    service.popupFileJobAwaitingResult = true",
+        "    popupFileProc.running = true",
+        "  }",
+    ])
+    text = replace_once(text, run_next_job_old, run_next_job_new, "runNextPopupFileJob awaiting-result set")
+
+    copy_images_script_old = block([
+        "  readonly property string copyImagesScript:",
+        '    "while (( $# >= 2 )); do\\n" +',
+        '    "  if [[ -f $1 ]] && timeout 5 head -c 5242881 -- \\"$1\\" > \\"$2.tmp\\" 2>/dev/null &&\\n" +',
+        '    "     (( $(stat -c%s -- \\"$2.tmp\\") <= 5242880 )); then mv -f -- \\"$2.tmp\\" \\"$2\\"; else rm -f -- \\"$2.tmp\\"; fi\\n" +',
+        '    "  shift 2\\n" +',
+        '    "done\\n"',
+        "",
+    ])
+    text = replace_once(text, copy_images_script_old, "", "copyImagesScript dead property")
+
+    popup_file_proc_old = block([
+        "  Process {",
+        "    id: popupFileProc",
+        "    running: false",
+        "    onExited: {",
+        "      var done = service.runningPopupFileJobDone",
+        "      service.runningPopupFileJobDone = null",
+        "      if (done) {",
+        "        try {",
+        "          done()",
+        "        } catch (e) {",
+        '          console.warn("notifications: file job callback failed:", e)',
+        "        }",
+        "      }",
+        "      service.runNextPopupFileJob()",
+        "    }",
+        "  }",
+    ])
+    popup_file_proc_new = block([
+        "  function finishPopupFileJob() {",
+        "    var done = service.runningPopupFileJobDone",
+        "    service.runningPopupFileJobDone = null",
+        "    if (done) {",
+        "      try {",
+        "        done()",
+        "      } catch (e) {",
+        '        console.warn("notifications: file job callback failed:", e)',
+        "      }",
+        "    }",
+        "    service.runNextPopupFileJob()",
+        "  }",
+        "",
+        "  function reconcilePopupFileJobFailedToStart() {",
+        "    if (!popupFileProc.running && service.popupFileJobAwaitingResult) {",
+        "      service.popupFileJobAwaitingResult = false",
+        "      service.finishPopupFileJob()",
+        "    }",
+        "  }",
+        "",
+        "  Process {",
+        "    id: popupFileProc",
+        "    running: false",
+        "    onExited: {",
+        "      service.popupFileJobAwaitingResult = false",
+        "      service.finishPopupFileJob()",
+        "    }",
+        "    onRunningChanged: {",
+        "      if (!running && service.popupFileJobAwaitingResult) Qt.callLater(service.reconcilePopupFileJobFailedToStart)",
+        "    }",
+        "  }",
+    ])
+    text = replace_once(text, popup_file_proc_old, popup_file_proc_new, "popupFileProc FailedToStart handling")
+
+    persist_popup_old = block([
+        "  function persistPopupFile(snapshot) {",
+        "    // The JSON travels as an argument, not through shell interpolation, so",
+        "    // summaries/bodies with quotes or backticks can't break the command. The",
+        "    // mkdir guards notifications that arrive before ensureDirsProc has run.",
+        "    // Copies run before the JSON referencing them, while the source exists.",
+        "    var persistable = NotificationLogic.persistablePopup(snapshot, imagesDir)",
+        '    var command = ["bash", "-c",',
+        '      "mkdir -p \\"$1\\" \\"$2\\" || exit 0\\n" +',
+        '      "dir=\\"$1\\" json=\\"$3\\" name=\\"$4\\"\\n" +',
+        '      "shift 4\\n" +',
+        "      copyImagesScript +",
+        '      "printf \'%s\\\\n\' \\"$json\\" > \\"$dir/$name\\"", "--",',
+        "      popupStateDir,",
+        "      imagesDir,",
+        "      NotificationLogic.serializePopup(persistable.entry, NotificationUrgency.Normal),",
+        "      NotificationLogic.popupFileName(snapshot)]",
+        "    for (var i = 0; i < persistable.copies.length; i++)",
+        "      command.push(persistable.copies[i].from, persistable.copies[i].to)",
+        "    enqueuePopupFileJob(command)",
+        "  }",
+    ])
+    persist_popup_new = block([
+        "  function persistPopupFile(snapshot) {",
+        "    // The JSON and every image source travel as argv elements, not through",
+        "    // shell interpolation - omanixy-notification-state owns HOME/stem",
+        "    // validation, the images directory, and bounded copying internally.",
+        "    var persistable = NotificationLogic.persistablePopup(snapshot, imagesDir)",
+        "    var command = [\"omanixy-notification-state\", \"persist-popup\", NotificationLogic.imageStem(snapshot),",
+        "      NotificationLogic.serializePopup(persistable.entry, NotificationUrgency.Normal)]",
+        "    for (var i = 0; i < persistable.copies.length; i++)",
+        "      command.push(persistable.copies[i].role, persistable.copies[i].from)",
+        "    enqueuePopupFileJob(command)",
+        "  }",
+    ])
+    text = replace_once(text, persist_popup_old, persist_popup_new, "persistPopupFile")
+
+    delete_popup_old = block([
+        "  function deletePopupFileFor(row) {",
+        "    if (!row) return",
+        "    // History replays and the \"no recent notifications\" placeholder never",
+        "    // had a file — rm -f on the computed paths is a harmless no-op there.",
+        '    enqueuePopupFileJob(["bash", "-c",',
+        '      "rm -f \\"$1/$2.json\\" \\"$3/$2\\"-*", "--",',
+        "      popupStateDir, NotificationLogic.imageStem(row), imagesDir])",
+        "  }",
+    ])
+    delete_popup_new = block([
+        "  function deletePopupFileFor(row) {",
+        "    if (!row) return",
+        "    // History replays and the \"no recent notifications\" placeholder never",
+        "    // had a file - delete-popup on a nonexistent stem is a harmless no-op.",
+        '    var command = ["omanixy-notification-state", "delete-popup", NotificationLogic.imageStem(row)]',
+        "    enqueuePopupFileJob(command)",
+        "  }",
+    ])
+    text = replace_once(text, delete_popup_old, delete_popup_new, "deletePopupFileFor")
+
+    trim_history_script_old = block([
+        "  readonly property string trimHistoryScript:",
+        '    "ls -1 \\"$hist\\" 2>/dev/null | sort -n | head -n \\"-$limit\\" | while IFS= read -r stale; do rm -f \\"$hist/$stale\\" \\"$imgs/${stale%.json}\\"-*; done"',
+        "",
+    ])
+    text = replace_once(text, trim_history_script_old, "", "trimHistoryScript dead property")
+
+    archive_popup_old = block([
+        "  function archivePopupFileFor(row) {",
+        "    if (!row) return",
+        "    // A history replay or the empty-history placeholder has no file to move;",
+        "    // the failed mv leaves the history untouched, trimming included. Image",
+        "    // copies stay put — live and archived entries share imagesDir.",
+        '    enqueuePopupFileJob(["bash", "-c",',
+        '      "mkdir -p \\"$1\\" || exit 0\\n" +',
+        '      "hist=\\"$1\\" limit=\\"$2\\" imgs=\\"$5\\"\\n" +',
+        '      "mv -f \\"$4/$3\\" \\"$1/$3\\" 2>/dev/null || exit 0\\n" +',
+        "      trimHistoryScript, \"--\",",
+        "      historyDir,",
+        "      String(historyLimit),",
+        "      NotificationLogic.popupFileName(row),",
+        "      popupStateDir,",
+        "      imagesDir])",
+        "  }",
+    ])
+    archive_popup_new = block([
+        "  function archivePopupFileFor(row) {",
+        "    if (!row) return",
+        "    // A history replay or the empty-history placeholder has no file to move;",
+        "    // archive-popup on a nonexistent stem leaves the history untouched.",
+        "    // Image copies stay put - live and archived entries share imagesDir.",
+        '    var command = ["omanixy-notification-state", "archive-popup", NotificationLogic.imageStem(row)]',
+        "    enqueuePopupFileJob(command)",
+        "  }",
+    ])
+    text = replace_once(text, archive_popup_old, archive_popup_new, "archivePopupFileFor")
+
+    write_history_old = block([
+        "  function writeHistoryFile(entry, done) {",
+        "    if (!entry) {",
+        "      if (done) done()",
+        "      return",
+        "    }",
+        "    var persistable = NotificationLogic.persistablePopup(entry, imagesDir)",
+        '    var command = ["bash", "-c",',
+        '      "mkdir -p \\"$1\\" \\"$5\\" || exit 0\\n" +',
+        '      "hist=\\"$1\\" limit=\\"$2\\" name=\\"$3\\" json=\\"$4\\" imgs=\\"$5\\"\\n" +',
+        '      "shift 5\\n" +',
+        "      copyImagesScript +",
+        '      "printf \'%s\\\\n\' \\"$json\\" > \\"$hist/$name\\" || exit 0\\n" +',
+        "      trimHistoryScript, \"--\",",
+        "      historyDir,",
+        "      String(historyLimit),",
+        "      NotificationLogic.popupFileName(entry),",
+        "      NotificationLogic.serializePopup(persistable.entry, NotificationUrgency.Normal),",
+        "      imagesDir]",
+        "    for (var i = 0; i < persistable.copies.length; i++)",
+        "      command.push(persistable.copies[i].from, persistable.copies[i].to)",
+        "    enqueuePopupFileJob(command, done)",
+        "  }",
+    ])
+    write_history_new = block([
+        "  function writeHistoryFile(entry, done) {",
+        "    if (!entry) {",
+        "      if (done) done()",
+        "      return",
+        "    }",
+        "    var persistable = NotificationLogic.persistablePopup(entry, imagesDir)",
+        "    var command = [\"omanixy-notification-state\", \"persist-history\", NotificationLogic.imageStem(entry),",
+        "      NotificationLogic.serializePopup(persistable.entry, NotificationUrgency.Normal)]",
+        "    for (var i = 0; i < persistable.copies.length; i++)",
+        "      command.push(persistable.copies[i].role, persistable.copies[i].from)",
+        "    enqueuePopupFileJob(command, done)",
+        "  }",
+    ])
+    text = replace_once(text, write_history_old, write_history_new, "writeHistoryFile")
+
+    clear_history_old = block([
+        "  function clearHistory() {",
+        '    enqueuePopupFileJob(["bash", "-c",',
+        '      "for f in \\"$1\\"/*.json; do\\n" +',
+        '      "  [[ -e $f ]] || continue\\n" +',
+        '      "  stale=\\"${f##*/}\\"\\n" +',
+        '      "  rm -f \\"$f\\" \\"$2/${stale%.json}\\"-*\\n" +',
+        '      "done", "--", historyDir, imagesDir])',
+        "  }",
+    ])
+    clear_history_new = block([
+        "  function clearHistory() {",
+        '    var command = ["omanixy-notification-state", "clear-history"]',
+        "    enqueuePopupFileJob(command)",
+        "  }",
+    ])
+    text = replace_once(text, clear_history_old, clear_history_new, "clearHistory")
+
+    sweep_images_old = block([
+        "  function sweepOrphanImages() {",
+        '    enqueuePopupFileJob(["bash", "-c",',
+        '      "for img in \\"$3\\"/*; do\\n" +',
+        '      "  [[ -e $img ]] || continue\\n" +',
+        '      "  [[ $img == *.tmp ]] && { rm -f -- \\"$img\\"; continue; }\\n" +',
+        '      "  stem=\\"${img##*/}\\"\\n" +',
+        '      "  stem=\\"${stem%-*}\\"\\n" +',
+        '      "  [[ -e $1/$stem.json || -e $2/$stem.json ]] || rm -f \\"$img\\"\\n" +',
+        '      "done", "--", popupStateDir, historyDir, imagesDir])',
+        "  }",
+    ])
+    sweep_images_new = block([
+        "  function sweepOrphanImages() {",
+        '    var command = ["omanixy-notification-state", "sweep-images"]',
+        "    enqueuePopupFileJob(command)",
+        "  }",
+    ])
+    text = replace_once(text, sweep_images_old, sweep_images_new, "sweepOrphanImages")
+
+    read_history_proc_old = block([
+        "  Process {",
+        "    id: readHistoryProc",
+        "    running: false",
+        "    // Let the file queue go again, whatever the read did — a failed or empty",
+        "    // read must not leave archives and clears parked behind it forever.",
+        "    onExited: service.runNextPopupFileJob()",
+        "    stdout: StdioCollector {",
+        "      waitForEnd: true",
+        "      onStreamFinished: service.replayHistory(text)",
+        "    }",
+        "  }",
+    ])
+    read_history_proc_new = block([
+        "  property bool readHistoryAwaitingResult: false",
+        "",
+        "  function reconcileReadHistoryFailedToStart() {",
+        "    if (!readHistoryProc.running && service.readHistoryAwaitingResult) {",
+        "      service.readHistoryAwaitingResult = false",
+        '      service.replayHistory("")',
+        "      service.runNextPopupFileJob()",
+        "    }",
+        "  }",
+        "",
+        "  Process {",
+        "    id: readHistoryProc",
+        "    running: false",
+        "    // Let the file queue go again, whatever the read did — a failed or empty",
+        "    // read must not leave archives and clears parked behind it forever.",
+        "    onExited: {",
+        "      service.readHistoryAwaitingResult = false",
+        "      service.runNextPopupFileJob()",
+        "    }",
+        "    onRunningChanged: {",
+        "      if (!running && service.readHistoryAwaitingResult) Qt.callLater(service.reconcileReadHistoryFailedToStart)",
+        "    }",
+        "    stdout: StdioCollector {",
+        "      waitForEnd: true",
+        "      onStreamFinished: service.replayHistory(text)",
+        "    }",
+        "  }",
+    ])
+    text = replace_once(text, read_history_proc_old, read_history_proc_new, "readHistoryProc FailedToStart handling")
+
+    start_history_read_old = block([
+        "  function startHistoryRead() {",
+        "    service.historyReadQueued = false",
+        '    readHistoryProc.command = ["bash", "-c",',
+        '      "awk 1 \\"$1\\"/*.json 2>/dev/null || true", "--", historyDir]',
+        "    readHistoryProc.running = true",
+        "  }",
+    ])
+    start_history_read_new = block([
+        "  function startHistoryRead() {",
+        "    service.historyReadQueued = false",
+        '    readHistoryProc.command = ["omanixy-notification-state", "read-history"]',
+        "    service.readHistoryAwaitingResult = true",
+        "    readHistoryProc.running = true",
+        "  }",
+    ])
+    text = replace_once(text, start_history_read_old, start_history_read_new, "startHistoryRead")
+
+    restore_popups_proc_old = block([
+        "  Process {",
+        "    id: restorePopupsProc",
+        "    running: false",
+        "    stdout: StdioCollector {",
+        "      waitForEnd: true",
+        "      onStreamFinished: service.restorePopups(text)",
+        "    }",
+        "  }",
+    ])
+    restore_popups_proc_new = block([
+        "  property bool restorePopupsAwaitingResult: false",
+        "",
+        "  function reconcileRestorePopupsFailedToStart() {",
+        "    if (!restorePopupsProc.running && service.restorePopupsAwaitingResult) {",
+        "      service.restorePopupsAwaitingResult = false",
+        "    }",
+        "  }",
+        "",
+        "  Process {",
+        "    id: restorePopupsProc",
+        "    running: false",
+        "    onExited: {",
+        "      service.restorePopupsAwaitingResult = false",
+        "    }",
+        "    onRunningChanged: {",
+        "      if (!running && service.restorePopupsAwaitingResult) Qt.callLater(service.reconcileRestorePopupsFailedToStart)",
+        "    }",
+        "    stdout: StdioCollector {",
+        "      waitForEnd: true",
+        "      onStreamFinished: service.restorePopups(text)",
+        "    }",
+        "  }",
+    ])
+    text = replace_once(text, restore_popups_proc_old, restore_popups_proc_new, "restorePopupsProc FailedToStart handling")
+
+    on_completed_old = block([
+        "      // Re-show popups that were on screen when the previous shell died.",
+        "      // The glob-through-bash tolerates a missing/empty dir (first run).",
+        "      // awk 1 (not cat) so a torn file missing its trailing newline can't",
+        "      // glue itself onto the next file and take a valid popup down with it.",
+        '      restorePopupsProc.command = ["bash", "-c",',
+        '        "awk 1 \\"$1\\"/*.json 2>/dev/null || true", "--", service.popupStateDir]',
+        "      restorePopupsProc.running = true",
+    ])
+    on_completed_new = block([
+        "      // Re-show popups that were on screen when the previous shell died.",
+        "      // omanixy-notification-state tolerates a missing/empty state directory",
+        "      // (first run) and always returns complete, newline-terminated entries.",
+        '      restorePopupsProc.command = ["omanixy-notification-state", "read-popups"]',
+        "      service.restorePopupsAwaitingResult = true",
+        "      restorePopupsProc.running = true",
+    ])
+    text = replace_once(text, on_completed_old, on_completed_new, "Component.onCompleted restorePopupsProc invocation")
+
+    return text
+
+
+def apply_js(text: str) -> str:
+    exec_from_hints_old = block([
+        "// Shell command to run when the card is clicked, sent by",
+        "// omarchy-notification-send --exec. Carrying the action as data means it",
+        "// travels with the popup through the persistence files, so a toast restored",
+        "// after a shell restart clicks through exactly like a live one. A libnotify",
+        "// action can't: its sender is still waiting on an id from a server generation",
+        "// that no longer exists.",
+        "function execFromHints(hints) {",
+        '  return stringHint(hints, "omarchy-exec")',
+        "}",
+        "",
+    ])
+    text = replace_once(text, exec_from_hints_old, "", "execFromHints helper")
+
+    snapshot_of_old = block([
+        "    body: n.body || \"\",",
+        "    image: n.image || \"\",",
+        "    glyph: glyphFromHints(n.hints),",
+        "    exec: execFromHints(n.hints),",
+        "    urgency: n.urgency,",
+    ])
+    snapshot_of_new = block([
+        "    body: n.body || \"\",",
+        "    image: n.image || \"\",",
+        "    glyph: glyphFromHints(n.hints),",
+        "    urgency: n.urgency,",
+    ])
+    text = replace_once(text, snapshot_of_old, snapshot_of_new, "snapshotOf exec role")
+
+    popup_roles_old = 'var POPUP_ROLES = ["app", "appIcon", "summary", "body", "image", "glyph", "exec", "urgency", "expireTimeout"]\n'
+    popup_roles_new = 'var POPUP_ROLES = ["app", "appIcon", "summary", "body", "image", "glyph", "urgency", "expireTimeout"]\n'
+    text = replace_once(text, popup_roles_old, popup_roles_new, "POPUP_ROLES exec role")
+
+    history_entry_old = block([
+        '    appIcon: e.appIcon || "",',
+        '    summary: e.summary || "",',
+        '    body: e.body || "",',
+        '    image: e.image || "",',
+        '    glyph: e.glyph || "",',
+        '    exec: e.exec || "",',
+        "    urgency: typeof e.urgency === \"number\" ? e.urgency : normalUrgency,",
+    ])
+    history_entry_new = block([
+        '    appIcon: e.appIcon || "",',
+        '    summary: e.summary || "",',
+        '    body: e.body || "",',
+        '    image: e.image || "",',
+        '    glyph: e.glyph || "",',
+        "    urgency: typeof e.urgency === \"number\" ? e.urgency : normalUrgency,",
+    ])
+    text = replace_once(text, history_entry_old, history_entry_new, "historyEntry exec role")
+
+    persistable_copy_old = '      if (source !== copy) copies.push({ from: source, to: copy })\n'
+    persistable_copy_new = '      if (source !== copy) copies.push({ from: source, role: role })\n'
+    text = replace_once(text, persistable_copy_old, persistable_copy_new, "persistablePopup copy descriptor")
+
+    exports_old = block([
+        "    stringHint: stringHint,",
+        "    glyphFromHints: glyphFromHints,",
+        "    execFromHints: execFromHints,",
+        "    shouldRenderCompactGlyph: shouldRenderCompactGlyph,",
+    ])
+    exports_new = block([
+        "    stringHint: stringHint,",
+        "    glyphFromHints: glyphFromHints,",
+        "    shouldRenderCompactGlyph: shouldRenderCompactGlyph,",
+    ])
+    text = replace_once(text, exports_old, exports_new, "module.exports execFromHints entry")
+
+    return text
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) != 2:
+        print(f"usage: {sys.argv[0]} SERVICE_QML NOTIFICATION_LOGIC_JS", file=sys.stderr)
+        return 2
+
+    qml_path = Path(argv[0])
+    qml_path.write_text(apply_qml(qml_path.read_text()))
+
+    js_path = Path(argv[1])
+    js_path.write_text(apply_js(js_path.read_text()))
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

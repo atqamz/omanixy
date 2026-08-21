@@ -1521,3 +1521,225 @@ Omanixy still owns no suspend-on-idle, pre-suspend locking, notification
 daemon, or recovery surface, and adds no new systemd unit; the native lock
 this layer requests continues to run in-process inside the existing
 `omanixy-shell` user service exactly as layer 3 left it.
+
+## Layer 7 implementation note
+
+`4-07-security-notifications` implements the `security.notification-daemon`
+ledger entry only, as
+`programs.omanixy.security.notifications.daemon.enable` in the Home Manager
+module (`modules/home/default.nix`).
+Disabled by default, and kept structurally independent of
+`programs.omanixy.features` (specifically the existing
+`"notification"` client presentation feature) in both directions, matching
+the independent-dimension model this ADR already records.
+Like layer 6, this layer introduces no new PAM service or system capability
+at all - claiming a session D-Bus name is a session-only concern, so there
+is no NixOS-side option and no `osConfig` handshake of any kind.
+
+### Bounded ownership split: D-Bus name claim, popup presentation, DND, and bounded history - nothing else
+
+The pinned notification plugin does several things this layer does not want
+as one bundle: own `org.freedesktop.Notifications`, present popups, track
+DND, persist bounded local history, execute a sender-supplied
+`omarchy-exec` shell command hint on click, and fall back to focusing the
+sending application's compositor window when no live `default` action
+exists.
+Layer 7 owns exactly the first four - D-Bus ownership (optional, explicit),
+popup presentation, DND, and bounded local history/popup persistence - and
+deliberately omits the last two outright, permanently:
+
+- **No `omarchy-exec` execution.** The pinned source reads a
+  `hints["omarchy-exec"]` string into a persisted `exec` role, and later
+  runs it via `Util.execDetached(command)` when a popup with no live
+  `default` action is clicked. This is a real execution path from
+  untrusted notification content (any application on the session bus can
+  set arbitrary hints) into a shell command, made worse by persistence:
+  the command survives shell restarts and can be replayed from disk. The
+  adapted `NotificationLogic.js` and `Service.qml` structurally exclude the
+  `exec` role from every schema they produce (snapshot, history, popup,
+  replacement) - not merely "never called", but never present as a field
+  at all - and `Util.execDetached` does not appear anywhere in the adapted
+  source. A notification carrying `hints["omarchy-exec"]` still arrives as
+  ordinary untrusted data; the daemon simply never reads that hint for any
+  purpose.
+- **No compositor-focus fallback.** FDO notification ownership does not
+  require notification-driven compositor focus mutation. A click with no
+  live `default` action now simply dismisses the toast;
+  `omarchy-hyprland-focus-app` is not packaged, invoked, or referenced
+  anywhere in the adapted source.
+
+Everything else the pinned source does - live tracked notifications,
+`replaces_id` update semantics, popup snapshots and expiration,
+critical/non-expiring behavior, DND and DND history capture, the 10-entry
+history limit, cross-restart popup persistence with restored-row generation
+separation, image persistence, clear/dismiss operations, popup placement,
+and passive/no-keyboard-focus popup surfaces - is preserved.
+
+### Home Manager option and the daemon-conflict handshake
+
+`security.notifications.daemon.enable` follows the same shape as
+`security.idle.enable`: a long-form description documenting session
+ownership, independence, and the conflict/unknown-owner boundary, plus a
+resolved-state assertion pattern - except there is no prerequisite
+assertion at all (unlike idle's `security.lock.enable` requirement),
+because claiming a D-Bus name has no dependency on any other Omanixy
+security capability.
+Four known-conflict assertions - one each for `services.mako.enable`,
+`services.dunst.enable`, `services.swaync.enable`, and
+`services.fnott.enable` - mirror layer 5/6's own conflict-assertion
+pattern exactly: `!cfg.security.notifications.daemon.enable ||
+!(config.services.X.enable or false)`, each message ending "Omanixy will
+not stop or kill the other daemon for you."
+Omanixy does not stop, mask, kill, or otherwise mutate any of the four
+known daemons, and does not attempt to detect a daemon it has no
+declarative option for; an already-running, undeclared external daemon is
+left entirely to the pinned Quickshell `NotificationServer`'s own bounded,
+diagnostic registration-conflict behavior (see below), never fought over.
+
+### Pinned Quickshell `NotificationServer` ABI: registration, conflict, and event-driven retry
+
+Static source evidence against `server.cpp`/`server.hpp`/`qml.cpp` proves
+the properties the ledger and this ADR rely on: the constructor connects to
+the session bus, registers the object at exactly
+`/org/freedesktop/Notifications`, watches exactly
+`org.freedesktop.Notifications` for unregistration, and calls
+`tryRegister()` once; `tryRegister()` calls `registerService(...)` - the
+only registration primitive used, with no "replace existing owner" flag -
+logs a bounded, one-shot diagnostic on failure, and commits only to
+retrying "if the active service is unregistered"; `onServiceUnregistered`
+does exactly one thing, call `tryRegister()` again, with no
+timer/polling/loop construct anywhere in the registration path; `Notify()`
+reuses the existing `idMap` object on a nonzero `replacesId`; and
+`keepOnReload` is immutable once the server has gone live.
+Omanixy never kills, replaces, or masks another daemon to make its own
+daemon win - a live D-Bus collision with a known or unknown external
+daemon, and the reverse (an external daemon's disappearance triggering this
+daemon's own event-driven re-registration), are real-session behaviors this
+ADR does not claim have been exercised; both are `required_before_promotion`
+Layer-8 gates.
+
+### Executable surface scanning: literal executable, literal verb, data everywhere else
+
+Unlike lock's bounded-allowlist model (which allowlists exact, complete
+argv arrays) or polkit's zero-tolerance model (no `Process` at all), the
+adapted notification daemon's commands always carry genuine dynamic data
+after a literal executable and verb - a stem, a JSON payload, an image
+role, a source path.
+`scripts/scan-notification-executable-surface` proves a narrower, ABI-
+shaped invariant instead: position 0 must always be the literal string
+`"omanixy-notification-state"`, position 1 must always be a literal string
+from the fixed, reviewed verb set (`init`, `persist-popup`,
+`persist-history`, `archive-popup`, `delete-popup`, `read-popups`,
+`read-history`, `clear-history`, `sweep-images`), and every trailing
+position may be literal or dynamic without further constraint, since the
+adapter's own ABI defines those positions as opaque data it validates
+itself at runtime.
+As with every other audited plugin, `exec`/`execDetached`/`run`/
+`startDetached` are rejected outright, anywhere, regardless of arguments -
+the adapted source never calls any of them.
+
+### The `omanixy-notification-state` compatibility adapter
+
+Replacing the pinned source's `bash -c`/`bash -lc` file-state machinery
+(`mkdir`, `awk`, `mv`, `rm`, `head`, `stat`, `timeout`, `sort`, one dynamic
+`Process` job per mutation) is a single narrow, fixed-domain Omanixy-owned
+helper (`packages/omanixy-shell/adapters/notification-state.bash`), reached
+only through the fixed verb domain above.
+It derives the state root internally from `HOME`
+(`$HOME/.local/state/omarchy/notifications{,/history,/images}`, matching
+the pinned compatibility path exactly) - no destination or root path is
+ever supplied by QML.
+A stem is accepted only in the exact generated identity format
+(`^[0-9]+-[0-9]+$`, i.e. `<timestamp>-<originalId>`), which alone rules out
+a leading slash, `..`, glob metacharacters, and an empty stem.
+Image copying is bounded (5 MiB), requires an absolute, readable, regular
+source file (a FIFO or device is rejected outright, not blocked on), writes
+through an atomic temp-then-`mv`, and always writes beneath the internally-
+derived images directory - there is no caller-selected destination, so no
+symlink/traversal escape is structurally possible.
+A failed or oversized image copy degrades to "no persisted image" and never
+fails the surrounding `persist-popup`/`persist-history` call.
+History trimming to 10 entries happens inside the adapter itself, keyed by
+the same numeric-timestamp-prefixed filename sort the pinned source used.
+Exit codes are a strict, documented 0/1/2 ABI (success / not-found-but-
+valid / invalid-or-failure) - no backend-specific exit code ever leaks
+through it.
+
+### Serialized job queue and `Process` `FailedToStart` handling
+
+The pinned popup-file queue (`popupFileQueue`/`enqueuePopupFileJob`/
+`runNextPopupFileJob`/`popupFileProc`) is retained structurally unchanged -
+still one shared, serialized `Process`, still a write-then-delete ordering
+guarantee - with every command it now runs replaced by a call into the
+adapter above.
+Applying the layer-6 lesson: the pinned Quickshell `Process` ABI's
+`onErrorOccurred(QProcess::FailedToStart)` only ever emits
+`runningChanged()`, never `exited()`, so `popupFileProc`, `readHistoryProc`,
+and `restorePopupsProc` each gained an explicit `*AwaitingResult` boolean
+paired with a real `onRunningChanged` handler plus a single
+`Qt.callLater` reconciliation function - a normal `onExited` clears the
+flag synchronously first, so a real exit's own `runningChanged()` can never
+be misclassified as a `FailedToStart`, regardless of signal ordering.
+A failed popup-file job still advances the queue exactly once (via the same
+`finishPopupFileJob` path a normal exit uses); a failed history read
+degrades to an empty replay and still advances the queue; a failed popup
+restore at startup simply restores nothing.
+No operation retries autonomously, and no operation is left pending
+indefinitely by a start failure.
+
+### `shell.json` and managed-plugin ownership
+
+Mirrors layers 3/5/6 exactly: `omarchy.notifications` is added to
+`managedEnabledSecurityPlugins` only when the daemon is selected, forcing
+`PluginRegistry.isEnabled("omarchy.notifications")` to `true` regardless of
+`disabledPlugins`, and `setEnabled(..., false)` to fail/no-op with the
+existing "managed by Omanixy/Nix configuration" diagnostic; a third-party
+plugin manifest claiming the reserved `omarchy.notifications` id is
+rejected by the real `PluginRegistry.rescan()` merge in favor of the real
+first-party manifest.
+Enabling or disabling the daemon never mutates `shell.json` under any
+starting-state fixture (absent, canonical seed, user-re-enabled, store-
+backed symlink, broken symlink) - byte-identical either way.
+
+### Client/daemon and lower-layer closure independence
+
+`security.notifications.daemon.enable` adds exactly one new compatibility
+helper (`omanixy-notification-state`) and the notifications plugin tree to
+the compatibility root; `declaredRuntimeInputs` is exact-equal to the
+daemon-off build (no new package - the adapter rides entirely on the
+coreutils/bash the core capability set already provides), and after
+excluding the exact, named set of Omanixy-owned derivations expected to
+change identity, every remaining external dependency store path is
+byte-identical.
+The notification-send client feature alone never packages the daemon
+plugin tree; the daemon alone never packages the `omarchy-notification-send`
+client helper; selecting both together yields exactly their union.
+Enabling the daemon alongside every other experimental security capability
+(lock, fingerprint, polkit, idle) changes nothing about their own generated
+source byte content.
+
+### Scope
+
+This layer promotes `security.notification-daemon` from `blocked`/`blocked`
+to its already-declared target of `adapted`/`experimental`, and no other
+`security.*` ledger entry; `security.recovery` remains `blocked`.
+After this layer, the promoted `security.*` entries are exactly
+`security.pam-password`, `security.lock`, `security.pam-fingerprint`,
+`security.polkit-agent`, `security.idle`, and
+`security.notification-daemon`.
+`experimental`, not `supported`, because every proof in this layer is
+hermetic: no real ownership of `org.freedesktop.Notifications` on a live
+session bus, no real `notify-send` delivery, no real replacement-id/close/
+action round-trip or DND behavior against a live client, no history/image
+persistence proven over a real shell process restart, no real collision
+with a known or unknown external daemon, no real external-owner-
+disappearance-then-reregistration, and no session D-Bus disappearance/
+monitor-hotplug/notification-burst behavior has been exercised.
+These remain the ledger's `required_before_promotion` items for this
+entry, and are the layer 8 recovery/support gate's responsibility, not a
+new follow-up issue.
+Omanixy still owns no recovery surface and adds no new systemd unit; the
+adapted daemon continues to run in-process inside the existing
+`omanixy-shell` user service, and D-Bus ownership when selected belongs to
+the Quickshell `NotificationServer` inside that same process - there is no
+second lifecycle supervisor.

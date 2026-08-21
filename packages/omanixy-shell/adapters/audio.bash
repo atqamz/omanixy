@@ -79,10 +79,10 @@ audio_set_default() {
   local media_class pulse_kind default_command old_name old_id streams stream_id stream_sink moved=0 rollback_status
   if [[ $direction == output ]]; then
     media_class=Audio/Sink
-    pulse_kind=sink-inputs
+    pulse_kind="sink-inputs"
   else
     media_class=Audio/Source
-    pulse_kind=source-outputs
+    pulse_kind="source-outputs"
   fi
   need wpctl
   need pw-dump

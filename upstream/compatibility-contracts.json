@@ -79,7 +79,7 @@
     "omarchy-weather-status": "weather-network"
   },
   "adapter": "packages/omanixy-shell/compat-adapter.bash",
-  "adapterHash": "d321b1a3cd4f82c2470b96833d5259d62019cd2cced071694eefe185f1c6b674",
+  "adapterHash": "a87707e51c6a5710f39b6fd66ddd5cd0518d7a7bef6a39b4f5a2130e92860cca",
   "adapterSources": [
     "packages/omanixy-shell/adapters/common.bash",
     "packages/omanixy-shell/adapters/weather.bash",
@@ -91,6 +91,7 @@
     "packages/omanixy-shell/adapters/clipboard.bash",
     "packages/omanixy-shell/adapters/lock.bash",
     "packages/omanixy-shell/adapters/idle.bash",
+    "packages/omanixy-shell/adapters/notification-state.bash",
     "packages/omanixy-shell/compat-adapter.bash"
   ],
   "behavioralTests": "test/compat-adapters.sh",

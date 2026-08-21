@@ -89,6 +89,33 @@
           corePolkitRuntime = runtimeForSecurity system [ "core" ] { polkitAgent = true; };
           idleRuntime = runtimeForSecurity system null { lock = true; idle = true; };
           coreLockIdleRuntime = runtimeForSecurity system [ "core" ] { lock = true; idle = true; };
+          # Layer 7 (notifications): unlike idle, the daemon requires no
+          # lock/polkit prerequisite and no NixOS pairing at all - session
+          # D-Bus ownership only - so its closure baseline is plain core,
+          # mirroring corePolkitRuntime rather than coreLockIdleRuntime.
+          notificationDaemonRuntime = runtimeForSecurity system null { notificationDaemon = true; };
+          coreNotificationDaemonRuntime = runtimeForSecurity system [ "core" ] { notificationDaemon = true; };
+          # Section 38 client/daemon independence: the client presentation
+          # feature plus the daemon together, proving the union is exactly
+          # what each yields alone with nothing substituted or dropped.
+          notificationClientAndDaemonRuntime = runtimeForSecurity system [ "notification" ] { notificationDaemon = true; };
+          # Section 39 lower-layer independence: every prior experimental
+          # security capability on at once, crossed with the daemon on/off.
+          allSecurityWithoutNotificationDaemonRuntime = runtimeForSecurity system null {
+            lock = true;
+            fingerprint = true;
+            fingerprintPackage = pkgs.fprintd;
+            polkitAgent = true;
+            idle = true;
+          };
+          allSecurityWithNotificationDaemonRuntime = runtimeForSecurity system null {
+            lock = true;
+            fingerprint = true;
+            fingerprintPackage = pkgs.fprintd;
+            polkitAgent = true;
+            idle = true;
+            notificationDaemon = true;
+          };
           # Section 15/30-31 of the Layer-6 remediation: proves
           # packages/omanixy-shell/default.nix's own idleRequiresLockValid
           # assertion fires for a caller that constructs the security
@@ -141,6 +168,7 @@
           corePolkitRuntimeClosureInfo = pkgs.closureInfo { rootPaths = [ corePolkitRuntime ]; };
           coreRuntimeClosureInfo = pkgs.closureInfo { rootPaths = [ coreRuntime ]; };
           coreLockIdleRuntimeClosureInfo = pkgs.closureInfo { rootPaths = [ coreLockIdleRuntime ]; };
+          coreNotificationDaemonRuntimeClosureInfo = pkgs.closureInfo { rootPaths = [ coreNotificationDaemonRuntime ]; };
           compatibilityRoot = runtime.passthru.omarchyCompatibilityRoot;
           baselineConfigForTests = builtins.removeAttrs
             (builtins.fromJSON (builtins.readFile ./upstream/shell-baseline.json))
@@ -666,6 +694,78 @@
               }).activationPackage.drvPath
               true
           );
+          # Layer 7 (notifications): unlike lock/fingerprint/polkit, the
+          # daemon requires no NixOS pairing at all - it is pure session
+          # D-Bus ownership - so standalone Home Manager alone (no osConfig)
+          # is a complete, valid configuration whether or not it is enabled.
+          # mako/dunst/swaync/fnott are themselves ordinary Home
+          # Manager-managed services, so the whole conflict matrix is
+          # provable standalone too, with no NixOS+Home Manager integration
+          # needed at all.
+          standaloneNotificationDaemonEnabledEval = builtins.tryEval (
+            builtins.seq
+              (homeConfigurationFor system {
+                programs.omanixy.security.notifications.daemon.enable = true;
+              }).activationPackage.drvPath
+              true
+          );
+          standaloneNotificationDaemonMakoConflictEval = builtins.tryEval (
+            builtins.deepSeq
+              (homeConfigurationFor system {
+                programs.omanixy.security.notifications.daemon.enable = true;
+                services.mako.enable = true;
+              }).activationPackage
+              true
+          );
+          standaloneNotificationDaemonDunstConflictEval = builtins.tryEval (
+            builtins.deepSeq
+              (homeConfigurationFor system {
+                programs.omanixy.security.notifications.daemon.enable = true;
+                services.dunst.enable = true;
+              }).activationPackage
+              true
+          );
+          standaloneNotificationDaemonSwayncConflictEval = builtins.tryEval (
+            builtins.deepSeq
+              (homeConfigurationFor system {
+                programs.omanixy.security.notifications.daemon.enable = true;
+                services.swaync.enable = true;
+              }).activationPackage
+              true
+          );
+          standaloneNotificationDaemonFnottConflictEval = builtins.tryEval (
+            builtins.deepSeq
+              (homeConfigurationFor system {
+                programs.omanixy.security.notifications.daemon.enable = true;
+                services.fnott.enable = true;
+              }).activationPackage
+              true
+          );
+          # The conflict assertions are vacuous while the daemon itself is
+          # off - Omanixy never touches any of the four known daemons.
+          standaloneNotificationDaemonOffAllConflictsOnEval = builtins.tryEval (
+            builtins.seq
+              (homeConfigurationFor system {
+                services.mako.enable = true;
+                services.dunst.enable = true;
+                services.swaync.enable = true;
+                services.fnott.enable = true;
+              }).activationPackage.drvPath
+              true
+          );
+          # Independence from lock/fingerprint/polkit/idle and from the
+          # notification client presentation feature: the daemon on, every
+          # other experimental security capability's own prerequisites
+          # unmet (all left at their defaults) alongside it, plus the
+          # client feature explicitly present, must still evaluate cleanly.
+          standaloneNotificationDaemonWithClientFeatureEval = builtins.tryEval (
+            builtins.seq
+              (homeConfigurationFor system {
+                programs.omanixy.features = [ "notification" ];
+                programs.omanixy.security.notifications.daemon.enable = true;
+              }).activationPackage.drvPath
+              true
+          );
           # Layer 5 (polkit): integrated NixOS + Home Manager matrix, crossed
           # over the NixOS system capability, the Home Manager agent option,
           # and the two known-conflicting Home Manager-managed polkit agents.
@@ -869,6 +969,14 @@
           # above.
           idleEnabledActivationScript = pkgs.writeShellScript "omanixy-shell-idle-state-activation"
             integratedIdleOnLockOnNixosConfiguration.config.home-manager.users."omanixy-test".home.activation.omanixyShellState.data;
+          # Standalone, unlike lock/polkit/idle above, since the notification
+          # daemon requires no NixOS pairing to evaluate at all - proves
+          # enabling it never changes shell.json handling either.
+          notificationDaemonHomeConfiguration = homeConfigurationFor system {
+            programs.omanixy.security.notifications.daemon.enable = true;
+          };
+          notificationDaemonEnabledActivationScript = pkgs.writeShellScript "omanixy-shell-notification-daemon-state-activation"
+            notificationDaemonHomeConfiguration.config.home.activation.omanixyShellState.data;
           serviceUnit = pkgs.writeText "omanixy-shell.service" ''
             [Unit]
             Description=${service.Unit.Description}
@@ -1660,6 +1768,140 @@
             } ''
             PYTHON=${pkgs.python3}/bin/python3 ${pkgs.bash}/bin/bash ${./test/security-idle-qml-behavior.sh} \
               ${idleRuntime.passthru.omarchyCompatibilityRoot} ${idleRuntime}/bin/quickshell
+            touch "$out"
+          '';
+          security-notifications-hm = pkgs.runCommand "omanixy-security-notifications-hm"
+            {
+              daemonOffOk = if standaloneLockDisabledEval.success then "true" else "false";
+              daemonOnOk = if standaloneNotificationDaemonEnabledEval.success then "true" else "false";
+              makoConflictOk = if standaloneNotificationDaemonMakoConflictEval.success then "true" else "false";
+              dunstConflictOk = if standaloneNotificationDaemonDunstConflictEval.success then "true" else "false";
+              swayncConflictOk = if standaloneNotificationDaemonSwayncConflictEval.success then "true" else "false";
+              fnottConflictOk = if standaloneNotificationDaemonFnottConflictEval.success then "true" else "false";
+              offAllConflictsOnOk = if standaloneNotificationDaemonOffAllConflictsOnEval.success then "true" else "false";
+              withClientFeatureOk = if standaloneNotificationDaemonWithClientFeatureEval.success then "true" else "false";
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-notifications-hm.sh} \
+              "$daemonOffOk" "$daemonOnOk" \
+              "$makoConflictOk" "$dunstConflictOk" "$swayncConflictOk" "$fnottConflictOk" \
+              "$offAllConflictsOnOk" "$withClientFeatureOk"
+            touch "$out"
+          '';
+          security-notifications-shell-json = pkgs.runCommand "omanixy-security-notifications-shell-json"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.diffutils pkgs.jq ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-notifications-shell-json.sh} \
+              ${activationScript} ${notificationDaemonEnabledActivationScript} ${storeConfig}
+            touch "$out"
+          '';
+          security-notifications-managed-plugin = pkgs.runCommand "omanixy-security-notifications-managed-plugin"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.findutils ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-notifications-managed-plugin.sh} \
+              ${notificationDaemonRuntime.passthru.omarchyCompatibilityRoot} ${notificationDaemonRuntime}/bin/quickshell \
+              ${compatibilityRoot} ${runtime}/bin/quickshell
+            touch "$out"
+          '';
+          security-notifications-logic = pkgs.runCommand "omanixy-security-notifications-logic"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.nodejs ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-notifications-logic.sh} \
+              ${notificationDaemonRuntime.passthru.omarchyCompatibilityRoot}/shell/plugins/notifications/NotificationLogic.js
+            touch "$out"
+          '';
+          security-notifications-state = pkgs.runCommand "omanixy-security-notifications-state"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.util-linux ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-notifications-state.sh} \
+              ${./packages/omanixy-shell/adapters/notification-state.bash}
+            touch "$out"
+          '';
+          security-notifications-executable-surface = pkgs.runCommand "omanixy-security-notifications-executable-surface"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.python3 ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-notifications-executable-surface.sh} \
+              ${./scripts/scan-notification-executable-surface} \
+              ${notificationDaemonRuntime.passthru.omarchyCompatibilityRoot}/shell/plugins/notifications/Service.qml \
+              ${pkgs.python3}/bin/python3 ${./scripts}
+            touch "$out"
+          '';
+          security-notifications-closure = pkgs.runCommand "omanixy-security-notifications-closure"
+            {
+              coreClosurePaths = "${coreRuntimeClosureInfo}/store-paths";
+              coreNotificationDaemonClosurePaths = "${coreNotificationDaemonRuntimeClosureInfo}/store-paths";
+              coreDeclaredRuntimeInputs = pkgs.writeText "omanixy-core-declared-runtime-inputs-for-notifications.json" coreRuntime.passthru.declaredRuntimeInputs;
+              coreNotificationDaemonDeclaredRuntimeInputs = pkgs.writeText "omanixy-core-notification-daemon-declared-runtime-inputs.json" coreNotificationDaemonRuntime.passthru.declaredRuntimeInputs;
+              coreExpectedChanged = pkgs.writeText "omanixy-core-expected-changed-for-notifications" (nixpkgs.lib.concatMapStringsSep "\n" toString [
+                coreRuntime
+                coreRuntime.passthru.omarchyCompatibilityRoot
+                coreRuntime.passthru.compatibilityBin
+                coreRuntime.passthru.ipc
+                coreRuntime.passthru.compatAdapter
+                coreRuntime.passthru.runtime
+              ]);
+              coreNotificationDaemonExpectedChanged = pkgs.writeText "omanixy-core-notification-daemon-expected-changed" (nixpkgs.lib.concatMapStringsSep "\n" toString [
+                coreNotificationDaemonRuntime
+                coreNotificationDaemonRuntime.passthru.omarchyCompatibilityRoot
+                coreNotificationDaemonRuntime.passthru.compatibilityBin
+                coreNotificationDaemonRuntime.passthru.ipc
+                coreNotificationDaemonRuntime.passthru.compatAdapter
+                coreNotificationDaemonRuntime.passthru.runtime
+              ]);
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.findutils pkgs.diffutils pkgs.jq ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-notifications-closure.sh} \
+              ${coreRuntime.passthru.compatibilityBin} ${coreNotificationDaemonRuntime.passthru.compatibilityBin} \
+              "$coreClosurePaths" "$coreNotificationDaemonClosurePaths" \
+              "$coreDeclaredRuntimeInputs" "$coreNotificationDaemonDeclaredRuntimeInputs" \
+              "$coreExpectedChanged" "$coreNotificationDaemonExpectedChanged"
+            touch "$out"
+          '';
+          security-notifications-client-independence = pkgs.runCommand "omanixy-security-notifications-client-independence"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-notifications-client-independence.sh} \
+              ${coreRuntime.passthru.omarchyCompatibilityRoot} \
+              ${coreNotificationDaemonRuntime.passthru.compatibilityBin} \
+              ${notificationRuntime.passthru.omarchyCompatibilityRoot} ${notificationRuntime.passthru.compatibilityBin} \
+              ${notificationClientAndDaemonRuntime.passthru.omarchyCompatibilityRoot} ${notificationClientAndDaemonRuntime.passthru.compatibilityBin}
+            touch "$out"
+          '';
+          security-notifications-lower-layer-independence = pkgs.runCommand "omanixy-security-notifications-lower-layer-independence"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.diffutils ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-notifications-lower-layer-independence.sh} \
+              ${allSecurityWithNotificationDaemonRuntime.passthru.omarchyCompatibilityRoot}/shell/plugins/lock/Service.qml \
+              ${allSecurityWithNotificationDaemonRuntime.passthru.omarchyCompatibilityRoot}/shell/plugins/lock/FingerprintPolicy.js \
+              ${allSecurityWithNotificationDaemonRuntime.passthru.omarchyCompatibilityRoot}/shell/plugins/polkit/PolkitAgent.qml \
+              ${allSecurityWithNotificationDaemonRuntime.passthru.omarchyCompatibilityRoot}/shell/plugins/services/idle/IdleModel.js \
+              ${allSecurityWithoutNotificationDaemonRuntime.passthru.omarchyCompatibilityRoot}/shell/plugins/lock/Service.qml \
+              ${allSecurityWithoutNotificationDaemonRuntime.passthru.omarchyCompatibilityRoot}/shell/plugins/lock/FingerprintPolicy.js \
+              ${allSecurityWithoutNotificationDaemonRuntime.passthru.omarchyCompatibilityRoot}/shell/plugins/polkit/PolkitAgent.qml \
+              ${allSecurityWithoutNotificationDaemonRuntime.passthru.omarchyCompatibilityRoot}/shell/plugins/services/idle/IdleModel.js
+            touch "$out"
+          '';
+          security-notifications-quickshell-contract = pkgs.runCommand "omanixy-security-notifications-quickshell-contract"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.gawk ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-notifications-quickshell-contract.sh} ${quickshell}
+            touch "$out"
+          '';
+          security-notifications-qml-behavior = pkgs.runCommand "omanixy-security-notifications-qml-behavior"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.python3 ];
+            } ''
+            PYTHON=${pkgs.python3}/bin/python3 ${pkgs.bash}/bin/bash ${./test/security-notifications-qml-behavior.sh} \
+              ${notificationDaemonRuntime.passthru.omarchyCompatibilityRoot} ${notificationDaemonRuntime}/bin/quickshell \
+              ${./packages/omanixy-shell/adapters/notification-state.bash}
             touch "$out"
           '';
           quattro-contract-audit = pkgs.runCommand "omanixy-quattro-contract-audit"

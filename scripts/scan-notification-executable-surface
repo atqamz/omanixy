@@ -1,0 +1,247 @@
+#!/usr/bin/env python3
+"""Fail-closed scan of the patched Service.qml's process-execution surface
+for the Quattro notification daemon.
+
+Unlike security.idle's scanner (which allowlists a small set of *exact,
+complete* argv arrays), the adapted notification daemon's own commands
+always carry genuinely dynamic DATA after a literal executable and a
+literal verb - a stem, a JSON payload, an image role, a source path. The
+fixed-domain omanixy-notification-state ABI (scripts/patch-notification-
+service, packages/omanixy-shell/adapters/notification-state.bash) defines
+exactly those trailing positions as data, validated and bounded by the
+helper itself at runtime, not by this static scan. This scanner therefore
+checks a narrower, ABI-shaped invariant: the executable (position 0) and the
+verb (position 1) of every command binding must both be literal strings,
+the executable must always be exactly "omanixy-notification-state", and the
+verb must always be one of the fixed, reviewed verbs - never neither, and
+never a third dynamic executable or verb reachable any other way. Trailing
+positions may be literal or dynamic without further constraint here, since
+the ABI itself defines them as opaque data.
+
+As with every other audited plugin in this repository, this scanner also
+rejects exec/execDetached/run/startDetached calls outright, anywhere in the
+file regardless of arguments, since the pinned Quickshell Process type
+exposes those as untracked execution paths beyond `command:`/`.command =`
+bindings - the adapted notification daemon's own code never calls any of
+them, only ever declares command arrays and toggles `running`.
+
+Discovery reuses the shared QML source-discovery lexical primitives
+(scripts/source_discovery.py) for comment/string masking and the shared
+ARRAY_COMMAND_RE/DYNAMIC_*_RE regexes for locating command bindings, exactly
+as the lock/polkit/idle scanners do; the verb-allowlist and exec/run-
+rejection policy are local to this script.
+"""
+
+from __future__ import annotations
+
+import re
+import sys
+from pathlib import Path
+
+import source_discovery
+
+STRING_RE = re.compile(r'"(?:\\.|[^"\\])*"')
+
+ALLOWED_EXECUTABLE = "omanixy-notification-state"
+
+# The complete, reviewed verb domain (section 16/29 of the Layer-7 spec).
+# Every verb here owns strict arity/stem/role validation inside the adapter
+# itself (packages/omanixy-shell/adapters/notification-state.bash) - this
+# scanner only proves the QML side never reaches this executable with a
+# verb outside this fixed set, and never with a dynamically computed verb.
+ALLOWED_VERBS = {
+    "init",
+    "persist-popup",
+    "persist-history",
+    "archive-popup",
+    "delete-popup",
+    "read-popups",
+    "read-history",
+    "clear-history",
+    "sweep-images",
+}
+
+# Zero tolerance, regardless of arguments - see module docstring and the
+# identical rationale in scan-idle-executable-surface/scan-polkit-
+# executable-surface: Process.startDetached() launches an already-set
+# `command` completely untracked, so even an otherwise-allowlisted argv
+# reaching it would silently become an unbounded, untracked invocation.
+EXEC_CALL_RE = re.compile(r"\b(?:[A-Za-z_][A-Za-z0-9_]*\.)?exec(?:Detached)?\s*\(")
+RUN_CALL_RE = re.compile(r"\b(?:[A-Za-z_][A-Za-z0-9_]*\.)?run\s*\(")
+START_DETACHED_CALL_RE = re.compile(r"\b(?:[A-Za-z_][A-Za-z0-9_]*\.)?startDetached\s*\(")
+
+DYNAMIC_PATTERNS = (
+    ("dynamic command: binding", source_discovery.DYNAMIC_COMMAND_RE),
+    ("dynamic procedural .command = assignment", source_discovery.DYNAMIC_ASSIGNMENT_RE),
+)
+
+# The pinned notification plugin's popup-file persistence already used one
+# generic serialized job queue (popupFileQueue/enqueuePopupFileJob/
+# runNextPopupFileJob) before Layer 7 touched any of it, and every literal
+# argv this patch builds (persistPopupFile, deletePopupFileFor,
+# archivePopupFileFor, writeHistoryFile, clearHistory, sweepOrphanImages)
+# flows through it. That queue necessarily re-plumbs an already-constructed
+# array through two non-literal shapes this scanner would otherwise flag:
+# wrapping it in a "command" object-literal key for FIFO storage, and
+# dequeuing it back onto the one shared Process. Both are reviewed here by
+# exact text, not loosened generally - every literal construction site that
+# feeds this queue is still independently checked above via ARRAY_COMMAND_RE
+# (the "array" match kind), so this is a re-audit of the queue plumbing
+# itself, not an exemption from it.
+ALLOWED_DYNAMIC_EXPRESSIONS = {
+    "command: command",
+    "popupFileProc.command = job.command",
+}
+
+
+def fail(message: str) -> None:
+    print(f"notification executable surface: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def line_of(text: str, offset: int) -> int:
+    return text.count("\n", 0, offset) + 1
+
+
+def unescape(literal: str) -> str:
+    return literal[1:-1].replace('\\"', '"').replace("\\\\", "\\")
+
+
+def tokenize(array_body: str) -> list[tuple[str, bool]]:
+    """Split a command array body into ordered (value, is_literal) tokens -
+    kept local and duplicated rather than shared, matching this repository's
+    convention of one bespoke policy (including its own lexing helpers where
+    needed) per audited security surface."""
+
+    tokens: list[tuple[str, bool]] = []
+    pos = 0
+    length = len(array_body)
+    while pos < length:
+        while pos < length and array_body[pos] in " \t\r\n,":
+            pos += 1
+        if pos >= length:
+            break
+        match = STRING_RE.match(array_body, pos)
+        if match:
+            tokens.append((unescape(match.group(0)), True))
+            pos = match.end()
+            continue
+        end = pos
+        depth = 0
+        quote = ""
+        while end < length:
+            char = array_body[end]
+            if quote:
+                if char == "\\" and end + 1 < length:
+                    end += 2
+                    continue
+                if char == quote:
+                    quote = ""
+                end += 1
+                continue
+            if char == "," and depth == 0:
+                break
+            if char in "\"'":
+                quote = char
+            elif char in "([":
+                depth += 1
+            elif char in ")]":
+                depth -= 1
+            end += 1
+        tokens.append((array_body[pos:end].strip(), False))
+        pos = end
+    return tokens
+
+
+def check_command(tokens: list[tuple[str, bool]], context: str) -> None:
+    if not tokens:
+        fail(f"{context}: empty command array")
+
+    executable, executable_literal = tokens[0]
+    if not executable_literal:
+        fail(f"{context}: dynamic executable ({executable!r})")
+    if executable != ALLOWED_EXECUTABLE:
+        fail(f"{context}: executable {executable!r} is not the allowed {ALLOWED_EXECUTABLE!r}")
+
+    if len(tokens) < 2:
+        fail(f"{context}: {ALLOWED_EXECUTABLE} invoked with no verb")
+
+    verb, verb_literal = tokens[1]
+    if not verb_literal:
+        fail(f"{context}: dynamic verb ({verb!r})")
+    if verb not in ALLOWED_VERBS:
+        fail(f"{context}: verb {verb!r} is not one of the reviewed fixed-domain verbs {sorted(ALLOWED_VERBS)!r}")
+
+    for value, literal in tokens[2:]:
+        if literal and value in ("bash", "sh"):
+            fail(f"{context}: shell interpreter literal found in a data position ({value!r})")
+
+
+def scan(text: str) -> int:
+    try:
+        stripped = source_discovery.strip_comments(text, shell=False)
+        masked = source_discovery.mask_string_literals(stripped)
+    except source_discovery.UnsafeSource as exc:
+        fail(f"unsafe source, cannot prove executable surface is closed: {exc}")
+        raise  # unreachable, fail() always raises SystemExit
+
+    if "`" in masked:
+        fail("template literals are unsupported in security.notifications executable source")
+
+    matches: list[tuple[int, str, re.Match[str]]] = []
+    for match in source_discovery.ARRAY_COMMAND_RE.finditer(masked):
+        matches.append((match.start(), "array", match))
+    for label, pattern in DYNAMIC_PATTERNS:
+        for match in pattern.finditer(masked):
+            matches.append((match.start(), label, match))
+    for match in EXEC_CALL_RE.finditer(masked):
+        matches.append((match.start(), "exec/execDetached call", match))
+    for match in RUN_CALL_RE.finditer(masked):
+        matches.append((match.start(), "run call", match))
+    for match in START_DETACHED_CALL_RE.finditer(masked):
+        matches.append((match.start(), "startDetached call", match))
+    # Sort exec/run/startDetached-call kinds first at a tied start position,
+    # mirroring scan-idle-executable-surface: a call wrapping an otherwise-
+    # allowlisted array argument must still be reported as an exec/run/
+    # startDetached violation, not masked by the array check.
+    exec_kinds = ("exec/execDetached call", "run call", "startDetached call")
+    matches.sort(key=lambda item: (item[0], item[1] not in exec_kinds))
+
+    if not matches:
+        fail("no command bindings of any shape found - the audited invariant is unverifiable")
+
+    allowed_count = 0
+    for start, kind, match in matches:
+        context = f"line {line_of(stripped, start)}"
+        if kind in exec_kinds:
+            found = stripped[match.start():match.end()].strip()
+            fail(f"{context}: {kind} found ({found!r}) - the notification daemon must never call exec/execDetached/run/startDetached")
+        if kind != "array":
+            found = stripped[match.start():match.end()].strip()
+            if found in ALLOWED_DYNAMIC_EXPRESSIONS:
+                continue
+            fail(f"{context}: {kind} ({found!r})")
+        real_body = stripped[match.start(1):match.end(1)]
+        check_command(tokenize(real_body), context)
+        allowed_count += 1
+
+    print(
+        f"notification executable surface: {allowed_count} command binding(s) passed, "
+        f"executable always {ALLOWED_EXECUTABLE!r}, verb always one of the reviewed fixed-domain set, "
+        "0 exec/execDetached/run/startDetached calls found (expected)",
+        file=sys.stderr,
+    )
+    return 0
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) != 1:
+        print(f"usage: {sys.argv[0]} SERVICE_QML", file=sys.stderr)
+        return 2
+
+    path = Path(argv[0])
+    return scan(path.read_text())
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))
