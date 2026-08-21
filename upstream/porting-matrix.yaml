@@ -1236,10 +1236,11 @@ items:
         - shell.json and managed-plugin ownership proofs mirroring the Layer-3 lock model exactly
         - core-only closure proof at raw store-path granularity: declaredRuntimeInputs and the compat-bin entry set are byte-identical, and after excluding the exact, named set of Omanixy-owned derivations expected to change identity because the compatibility root's contents differ, every remaining external dependency store path is byte-identical (not merely same-named)
         - layer 8 live evidence (test/security-recovery-polkit-vm.nix, upstream/security-recovery-matrix.yaml) of real D-Bus polkit agent registration against a live polkitd, real authentication success and wrong-password failure against a test-only policy, real user and daemon-initiated cancellation, real registration collision with an independent agent with neither process killed or stopped, and polkitd disappearance/reappearance mid-request with the requester never hanging
+        - layer 8 live evidence (test/security-recovery-cross-feature-vm.nix, recovery.polkit-crash-midauth) of killing the shell process mid-authentication against the real agent while a real pkcheck request is in flight, proving the stranded requester exits boundedly and a fresh process re-registers and authenticates cleanly
+        - layer 8 live evidence (test/security-recovery-polkit-vm.nix, recovery.polkit-stress-finite) of a finite 20-cycle real wrong-password stress run with bounded process count and log volume, followed by a fresh correct-password authentication
       required_before_supported:
-        - Quickshell crash/restart during an active authentication request against a live session - layer 8 proved this at the systemd/service level (see security.recovery), but not by killing the process mid-authentication against the real agent, which required the same live nested-compositor session recovery.lock-nested-compositor could not establish
-        - repeated-backend-failure/log-volume behavior at a larger scale (hundreds of cycles) than the bounded matrix layer 8 exercised
-        - nested session validation against a real Wayland/Hyprland compositor rather than an offscreen QPA platform (the PolkitAgent object itself does not require one; only its PanelWindow presentation does, and that presentation was not exercised live for the same nested-compositor reason as security.lock)
+        - repeated-backend-failure/log-volume behavior at a larger scale (hundreds of cycles) than the finite 20-cycle stress layer 8 proved (recovery.polkit-stress-finite)
+        - nested session validation against a real Wayland/Hyprland compositor rather than an offscreen QPA platform (the PolkitAgent object itself does not require one; only its PanelWindow presentation does; investigated at layer 8 and recorded as unsupported-environment in upstream/security-recovery-matrix.yaml, recovery.polkit-nested-compositor)
     tests:
       - test/quattro-contract-audit.sh
       - test/security-contracts.sh
@@ -1293,10 +1294,10 @@ items:
           role: wake/DPMS action contract, deliberately not ported - Layer 6 never blanks the display, so it has nothing of its own to wake
           consumption: audited-reference
         - path: bin/omarchy-system-sleep-monitor
-          role: pre-sleep inhibitor/lock contract, deliberately not ported in this layer - deferred to Layer 8's suspend/resume gate
+          role: pre-sleep inhibitor/lock contract, deliberately not ported - Layer 8 confirmed final that Omanixy never owns pre-suspend/sleep-monitor policy, by design, not a pending gate
           consumption: audited-reference
         - path: bin/omarchy-system-sleep-lock
-          role: pre-sleep lock contract, deliberately not ported in this layer - deferred to Layer 8's suspend/resume gate
+          role: pre-sleep lock contract, deliberately not ported - Layer 8 confirmed final that Omanixy never owns pre-suspend lock policy, by design, not a pending gate
           consumption: audited-reference
     native_quickshell:
       project: quickshell-mirror/quickshell
@@ -1308,7 +1309,7 @@ items:
       presentation: omarchy
       adapter: "issue #4"
       system: consumer host suspend, DPMS/display-blanking, and power policy - Layer 6 owns none of it
-      session: "Quickshell IdleMonitor detects idle -> the Layer-6 service decides when to request a lock -> Layer 3's native lock owns WlSessionLock+DPMS -> consumer/NixOS owns suspend/power policy -> Layer 8 owns suspend/resume/recovery"
+      session: "Quickshell IdleMonitor detects idle -> the Layer-6 service decides when to request a lock -> Layer 3's native lock owns WlSessionLock+DPMS -> consumer/NixOS owns suspend/power policy -> Layer 8 owns suspend/resume recovery evidence and investigation, never suspend policy itself"
     helpers:
       - omanixy-idle-state
     filesystem:
@@ -1344,7 +1345,7 @@ items:
         - a direct package-level evaluation proof (bypassing programs.omanixy.security.idle and the Home Manager assertion matrix entirely) that packages/omanixy-shell's own idleRequiresLockValid assertion fires for a hand-constructed idle=true/lock=false security attrset, and passes for idle=true/lock=true
       required_before_supported:
         - a real nested Wayland session idle transition against a live ext-idle-notify-v1 compositor, a real Wayland idle inhibitor, real activity cancelling a live cycle, monitor hotplug while idle detection is active, and Quickshell crash/restart during an active idle cycle - investigated at layer 8 and recorded as unsupported-environment in upstream/security-recovery-matrix.yaml (recovery.idle-nested-compositor); Quickshell's IdleMonitor requires the same live Wayland connection that recovery.lock-nested-compositor could not establish in this environment. The offscreen fake-monitor behavior proof (test/security-idle-qml-behavior.sh) remains the available evidence for the idle logic itself.
-        - suspend and resume while an idle cycle or a lock-on-idle request is in flight - depends on the same live nested session; recorded in upstream/security-recovery-matrix.yaml (recovery.suspend-resume)
+        - suspend and resume while an idle cycle or a lock-on-idle request is in flight - depends on the same live nested session; see security.recovery's own required_before_supported entry and upstream/security-recovery-matrix.yaml's recovery.suspend-resume row, owned there rather than here
         - the real ext-idle-notify-v1-unsupported fail-safe path against an actual compositor that lacks the protocol
         - a real declarative conflict scenario (hypridle or swayidle actually running alongside the Quattro idle owner), beyond the already-proven Home Manager assertion matrix
     tests:
@@ -1367,7 +1368,7 @@ items:
       - programs.omanixy.security.idle.enable is reachable only when programs.omanixy.security.lock.enable is also true; it remains off by default and structurally outside programs.omanixy.features.
       - The pinned Omarchy idle service drives a terminal screensaver (omarchy-launch-screensaver/omarchy-screensaver, ttfx, socat, Hyprland raw-event window tracking) before ever locking; Layer 6 deliberately omits the entire screensaver choreography as an intentional boundary decision, not a TODO - the final adapted service has no screensaver process, timer, tracking, or Hyprland connection of any kind.
       - omarchy-system-lock and omarchy-system-wake are not ported wholesale (keyboard layout reset, 1Password locking, pkill, brightness/clamshell monitor calls); the adapted service's only lock action is the direct argv `omanixy-shell lock lock`, and it never calls any wake/brightness/clamshell helper, since it never blanks the display in the first place.
-      - No pre-suspend/sleep-monitor service is added in this layer (omarchy-system-sleep-monitor, omarchy-system-sleep-lock, systemd-inhibit); that entire concern, including any claim of suspend safety, is deferred to Layer 8.
+      - No pre-suspend/sleep-monitor service is added in this layer (omarchy-system-sleep-monitor, omarchy-system-sleep-lock, systemd-inhibit); Layer 8 confirmed final that Omanixy never owns that concern or any claim of suspend safety - intentionally omitted, consumer-owned suspend policy, not a pending gate.
       - security.idle is independent of security.lock.fingerprint and security.polkit.agent: enabling either changes nothing about whether idle may be enabled, proven directly by the Home Manager assertion matrix.
       - No suspend-on-idle, notification-daemon, or recovery ownership is added by this layer.
       - Persisted stay-awake trust is revocable, not merely fail-safe at startup: an indeterminate probe (exit 2) or a probe/writer Process that fails to start disables automatic lock-on-idle immediately via the same stayAwakeStateLoaded=false path startup itself uses, and never infers stayAwake either way - "unknown" is a distinct state from "marker absent", proven at both the exit-code and the FailedToStart-transition level.
@@ -1440,10 +1441,10 @@ items:
         - client/daemon closure independence proof: the notification-send client feature alone never packages the daemon plugin tree, the daemon alone never packages the notify-send client helper, and selecting both together yields exactly their union
         - lower-layer independence proof: enabling the daemon alongside every other experimental security capability (lock, fingerprint, polkit, idle) changes nothing about their own generated source byte content
         - layer 8 live evidence (test/security-recovery-notifications-vm.nix, upstream/security-recovery-matrix.yaml) of real org.freedesktop.Notifications ownership and delivery on a real session bus, a real replacement/default-action/close round trip, real DND behavior with persistence hydrated back after a restart, a real unknown-owner runtime collision left non-destructive with event-driven reclaim once the other owner releases the name, and a bounded finite notification burst
+        - layer 8 live evidence (test/security-recovery-notifications-vm.nix, recovery.notifications-session-bus-lifecycle) that destroying this test user's real login session and D-Bus user-session bus (systemctl stop on the owning transient unit, confirmed by the user manager reaching SubState=dead, not simulated by sleeping) and then establishing a genuinely fresh session lets a fresh daemon instance claim org.freedesktop.Notifications and deliver again - the specifically-notification-daemon-scoped half of session D-Bus disappearance/recovery, distinct from the systemd-service-level restart bound proven for the shell as a whole (see security.recovery)
       required_before_supported:
-        - a real collision specifically with a known, by-name external daemon (mako/dunst/swaync/fnott actually running), as opposed to the unknown/runtime collision layer 8 did exercise
-        - session D-Bus disappearance/recovery specifically for the notification daemon (the systemd-service-level restart bound was proven for the shell as a whole; see security.recovery)
-        - monitor hotplug with popups visible on screen - depends on the same live nested-compositor presentation recovery.lock-nested-compositor could not establish
+        - "a real collision specifically with a known, by-name external daemon (mako/dunst/swaync/fnott actually running) - not attempted at layer 8, since mako/dunst are wlr-layer-shell/X11 daemons whose core service loop itself depends on the same live Wayland compositor connection this environment's nested-compositor investigation (recovery.polkit-nested-compositor and friends) already found unavailable, so a real attempt was not spent chasing an outcome that dependency already predicts; recorded honestly as recovery.notifications-known-daemon-collision rather than assumed without any recorded reasoning"
+        - monitor hotplug with popups visible on screen (recovery.notifications-monitor-hotplug) - depends on the same live nested-compositor presentation recovery.lock-nested-compositor could not establish
     tests:
       - test/quattro-contract-audit.sh
       - test/security-contracts.sh
@@ -1507,10 +1508,10 @@ items:
         - real polkit agent registration, authentication, cancellation, runtime collision, and daemon-disappearance/recovery evidence against a live polkitd in a booted NixOS VM (test/security-recovery-polkit-vm.nix)
         - real org.freedesktop.Notifications ownership, delivery, replacement/action/close, DND persistence, non-destructive runtime collision, and bounded-burst evidence against a live session bus in a booted NixOS VM (test/security-recovery-notifications-vm.nix)
         - a cross-feature boot and crash-recovery proof with PAM, polkit, and the notification daemon all selected together in one booted NixOS VM (test/security-recovery-cross-feature-vm.nix)
-        - an investigated, documented environment limitation for every case requiring a live nested Wayland compositor (native lock's WlSessionLock, idle's IdleMonitor, and suspend/resume while either is active): the pinned Hyprland 0.55.4/Aquamarine headless backend does not reach a usable compositor state in this KVM/QEMU host even with a DRM render node present, recorded as unsupported-environment rather than skipped or faked (upstream/security-recovery-matrix.yaml)
+        - an investigated, documented environment limitation for every case requiring a live nested Wayland compositor (native lock's WlSessionLock, idle's IdleMonitor, polkit's PanelWindow presentation, and suspend/resume while any of these is active): two independent topologies were attempted and both fail for genuinely distinct reasons - the pinned Hyprland 0.55.4/Aquamarine headless backend does not reach a usable compositor state in this KVM/QEMU host even with a DRM render node present, and a second attempt nesting the same pinned Hyprland inside a test-owned headless Weston (Aquamarine's Wayland backend, confirmed to exist and genuinely attempted at this pin) fails on a real Wayland protocol-version mismatch (Aquamarine hard-binds wl_compositor version 6, Weston 15.0.1 advertises only version 5) - both recorded as unsupported-environment rather than skipped or faked (upstream/security-recovery-matrix.yaml)
         - a hostile self-review of this layer's diff confirming no security option defaulted true, no new recovery daemon or public option, no pam_faillock, no pam_systemd_home, no automatic pre-suspend lock ownership, no broad sudo/setuid, and no competing agent/daemon killed
       required_before_supported:
-        - live nested-compositor evidence for the native lock and idle surfaces, and suspend/resume while either is active - see security.lock's and security.idle's own required_before_supported entries and upstream/security-recovery-matrix.yaml
+        - live nested-compositor evidence for the native lock and idle surfaces, and suspend/resume while either is active (recovery.lock-nested-compositor, recovery.idle-nested-compositor, recovery.suspend-resume) - see security.lock's and security.idle's own required_before_supported entries and upstream/security-recovery-matrix.yaml
         - enrolled physical fingerprint hardware and a real TOD driver - see security.pam-fingerprint's own required_before_supported entries
         - real laptop lid hardware validation - Omanixy does not own lid/clamshell policy and none is introduced here; recorded in upstream/security-recovery-matrix.yaml (recovery.lid-hardware)
     tests:

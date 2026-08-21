@@ -102,6 +102,9 @@ pkgs.testers.runNixOSTest {
     assert "HARNESS_DONE completed:Failed" in output, "wrong password must fail authentication, not succeed or hang"
 
     # --- Scenario 2: repeated wrong password (>=20 attempts), then still retryable ---
+    unix_chkpwd_baseline = int(machine.succeed("pgrep -c unix_chkpwd || true").strip() or "0")
+    print(f"unix_chkpwd baseline before repeat scenario: {unix_chkpwd_baseline}")
+
     t0 = time.time()
     status, output = run_harness(
         machine, uid, "repeat", "omarchy-lock-password",
@@ -113,15 +116,37 @@ pkgs.testers.runNixOSTest {
     print(f"status={status} elapsed={elapsed:.1f}s")
     print(output)
     assert "HARNESS_DONE repeat-final:Success" in output, "session must remain authenticatable after 20 wrong attempts (no faillock/lockout)"
+
     attempt_lines = [l for l in output.splitlines() if "HARNESS_EVENT attempt" in l]
     assert len(attempt_lines) >= 20, f"expected at least 20 attempts logged, got {len(attempt_lines)}"
+    # Bounded on both sides: a generous multiplier of the 20-attempt stimulus,
+    # not an arbitrary byte count - proves event volume stays proportional to
+    # what was actually asked for rather than merely "at least 20".
+    assert len(attempt_lines) <= 21, f"expected exactly one attempt line per requested attempt (<=21 incl. the final), got {len(attempt_lines)}"
+    event_lines = [l for l in output.splitlines() if "HARNESS_EVENT" in l]
+    max_events = 20 * 8 + 20
+    assert len(event_lines) <= max_events, (
+        f"total HARNESS_EVENT volume must stay proportional to the 20-attempt "
+        f"stimulus (<= {max_events}), got {len(event_lines)}"
+    )
 
-    proc_count = machine.succeed("pgrep -c unix_chkpwd || true").strip()
-    print(f"lingering unix_chkpwd helper processes after repeat scenario: {proc_count}")
-    log_size = machine.succeed(
-        f"du -sb /run/user/{uid}/quickshell 2>/dev/null | tail -1 | cut -f1 || echo 0"
-    ).strip()
-    print(f"quickshell log directory size after repeat scenario: {log_size} bytes")
+    proc_count = int(machine.succeed("pgrep -c unix_chkpwd || true").strip() or "0")
+    print(f"unix_chkpwd helper processes immediately after repeat scenario: {proc_count}")
+    assert proc_count <= unix_chkpwd_baseline, (
+        f"no unix_chkpwd helper process must linger beyond the pre-scenario baseline "
+        f"({unix_chkpwd_baseline}); found {proc_count}"
+    )
+
+    # A short observation window after the stimulus has already stopped:
+    # the count must not keep growing on its own (no repeating sub-second
+    # PAM/log loop left running).
+    time.sleep(2)
+    proc_count_after_wait = int(machine.succeed("pgrep -c unix_chkpwd || true").strip() or "0")
+    print(f"unix_chkpwd helper processes after a 2s post-stimulus observation window: {proc_count_after_wait}")
+    assert proc_count_after_wait == proc_count, (
+        f"unix_chkpwd process count must not keep growing after the stimulus stopped; "
+        f"{proc_count} immediately after, {proc_count_after_wait} after a 2s wait"
+    )
 
     # --- Scenario 3: PAM cancel mid-conversation ---
     t0 = time.time()

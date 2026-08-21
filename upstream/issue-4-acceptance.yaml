@@ -1,0 +1,198 @@
+# Final Layer 8 acceptance mapping for issue atqamz/omanixy#4.
+#
+# Maps every acceptance criterion issue #4 was opened against to exact
+# evidence, validated by test/security-issue-4-acceptance.sh. Two statuses
+# only:
+#
+#   satisfied            - a real test in this repo directly proves the
+#                           criterion; `tests` names the file(s), and the
+#                           contract requires each one to actually be wired
+#                           into flake.nix's checks.
+#   experimental-boundary - the criterion is honestly bounded rather than
+#                           proven: the native surface it concerns remains
+#                           experimental (never promoted to supported) or a
+#                           specific piece of live evidence is genuinely
+#                           unavailable in this environment. `matrix_case`
+#                           names the upstream/security-recovery-matrix.yaml
+#                           row whose non-passed status the contract
+#                           cross-checks, so this file can never claim a
+#                           checked-looking state for a test that did not
+#                           actually happen.
+#
+# No third status exists: a criterion is either backed by a real passing
+# test, or explicitly, machine-verifiably marked as a boundary - never
+# silently implied to be satisfied by omission.
+
+items:
+  - id: no-imperative-pam-mutation
+    status: satisfied
+    description: >-
+      No /etc/pam.d file is written imperatively outside
+      security.pam.services.<name>.text; every PAM capability is declared
+      through the NixOS security module only.
+    tests:
+      - test/lib/no-imperative-pam-write.sh
+      - test/security-contracts.sh
+      - test/security-pam-writer-guard.sh
+
+  - id: declarative-required-pam
+    status: satisfied
+    description: >-
+      programs.omanixy.security.pam.password.enable and
+      programs.omanixy.security.pam.fingerprint.enable are the only path to
+      PAM service generation, both declarative, both default false, and
+      real against a live pam_unix backend in a booted VM.
+    tests:
+      - test/security-pam.sh
+      - test/security-pam-composition.sh
+      - test/security-recovery-pam-vm.nix
+
+  - id: lock-polkit-independent
+    status: satisfied
+    description: >-
+      security.lock and security.polkit-agent are fully independent -
+      enabling one never implies or requires the other.
+    tests:
+      - test/security-polkit-hm.sh
+
+  - id: native-lock-experimental-default-false
+    status: satisfied
+    description: >-
+      programs.omanixy.security.lock.enable defaults to false and the
+      classification/support target never exceeds adapted/experimental.
+    tests:
+      - test/security-contracts.sh
+      - test/security-lock.sh
+
+  - id: consumer-external-lock-path-valid
+    status: satisfied
+    description: >-
+      A standalone build with every security.* option off remains a valid,
+      fully functional configuration - the native lock is additive, never a
+      replacement for a consumer-supplied external lock path.
+    tests:
+      - test/security-lock-core-only.sh
+      - test/feature-closure.sh
+
+  - id: no-fingerprint-system-works
+    status: satisfied
+    description: >-
+      With fingerprint disabled, and with fingerprint enabled but no reader
+      present, password authentication remains fully available - proven
+      hermetically and live against a real PAM backend with no device.
+    tests:
+      - test/security-pam-fingerprint.sh
+      - test/security-recovery-pam-vm.nix
+
+  - id: fingerprint-optional-bounded
+    status: satisfied
+    description: >-
+      Fingerprint is opt-in (default false), never replaces password, and
+      its retry/failure behavior is bounded (max 5 attempts, no lockout
+      installed on failure) both hermetically and against a real fail-closed
+      no-device path live.
+    tests:
+      - test/security-pam-fingerprint.sh
+      - test/security-lock-fingerprint-behavior.sh
+      - test/security-recovery-pam-vm.nix
+
+  - id: no-competing-polkit-owner-enabled
+    status: satisfied
+    description: >-
+      Omanixy never imperatively sets, stops, or kills a competing polkit
+      agent (hyprpolkitagent, polkit-gnome); it only asserts against one
+      being enabled alongside the Quattro agent.
+    tests:
+      - test/security-contracts.sh
+      - test/security-polkit-hm.sh
+      - test/security-recovery-polkit-vm.nix
+
+  - id: no-competing-idle-owner-enabled
+    status: satisfied
+    description: >-
+      Omanixy never imperatively sets, stops, or kills a competing idle
+      daemon (hypridle, swayidle); it only asserts against one being enabled
+      alongside Layer 6's own idle owner.
+    tests:
+      - test/security-contracts.sh
+      - test/security-idle-hm.sh
+
+  - id: no-competing-notification-daemon-enabled
+    status: satisfied
+    description: >-
+      Omanixy never imperatively sets, stops, or kills a competing
+      notification daemon (mako, dunst, swaync, fnott); it only asserts
+      against one being enabled alongside the Quattro daemon, and a real
+      unknown independent owner is proven non-destructive live.
+    tests:
+      - test/security-contracts.sh
+      - test/security-notifications-hm.sh
+      - test/security-recovery-notifications-vm.nix
+
+  - id: suspend-resume-monitor-dpms-status
+    status: experimental-boundary
+    description: >-
+      Suspend/resume while a native lock or idle cycle is active, and
+      monitor/DPMS interaction against a live compositor, remain
+      unsupported-environment - two independent nested-compositor
+      topologies were genuinely attempted and both failed for distinct,
+      captured reasons; this is not claimed passed, and the native lock/idle
+      surfaces stay experimental rather than supported specifically because
+      of this gap.
+    matrix_case: recovery.suspend-resume
+
+  - id: crash-restart-while-locked-status
+    status: experimental-boundary
+    description: >-
+      Crash/restart while the *native Wayland* lock session itself is held
+      remains unsupported-environment for the same nested-compositor reason;
+      what layer 8 does prove passed is the lower-layer composition - a
+      real, bounded systemd restart under genuine failure
+      (recovery.systemd-restart-bound), and crash/restart with PAM, polkit,
+      and the notification daemon all simultaneously live
+      (recovery.cross-feature-crash) - never conflated with proving the
+      native lock's own live session survives a crash, which it does not
+      claim.
+    matrix_case: recovery.lock-nested-compositor
+
+  - id: no-broad-sudo-setuid
+    status: satisfied
+    description: >-
+      No security capability this layer or any prior layer added introduces
+      a setuid binary or a broad sudo rule; polkit authorization is the only
+      privilege-adjacent surface, and it never grants blanket access.
+    tests:
+      - test/security-polkit-executable-surface.sh
+      - test/quattro-contract-audit.sh
+
+  - id: third-party-qml-trust-documented
+    status: satisfied
+    description: >-
+      Third-party QML plugins execute unsandboxed inside the same shell
+      process as every security-sensitive surface; this is documented
+      rather than hidden, and is one reason every native security
+      integration stays experimental rather than supported.
+    tests:
+      - test/security-contracts.sh
+
+  - id: explicit-compatibility-matrix
+    status: satisfied
+    description: >-
+      upstream/porting-matrix.yaml and upstream/security-recovery-matrix.yaml
+      together form an explicit, machine-checked classification/support
+      matrix for every security.* surface, cross-validated against each
+      other so neither can silently drift.
+    tests:
+      - test/security-contracts.sh
+      - test/security-recovery-contract.sh
+
+  - id: required-final-validation-gates
+    status: satisfied
+    description: >-
+      Every Layer 1-8 security check, the recovery VM suite, and the whole
+      flake's check set must pass before this layer's promotion is
+      considered valid - enforced by this repo's own justfile/CI surface,
+      not merely asserted in prose.
+    tests:
+      - justfile
+      - test/security-recovery-contract.sh

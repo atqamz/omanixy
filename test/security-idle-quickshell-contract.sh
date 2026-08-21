@@ -14,8 +14,11 @@
 # this test is to catch drift in our own understanding (or in the pinned
 # revision itself) against the exact ABI evidence recorded in the ADR and
 # ledger, not to modify or re-implement any of it. Section 43 deliberately
-# does not claim this proves real compositor/inhibitor interaction - that is
-# explicitly deferred to Layer 8.
+# does not claim this proves real compositor/inhibitor interaction. Layer 8
+# investigated that live evidence and recorded it as unsupported-environment
+# (upstream/security-recovery-matrix.yaml's recovery.idle-nested-compositor)
+# rather than proving it here or anywhere else - it remains genuinely
+# unavailable in this environment, not merely unattempted.
 #
 # Remediation pass: also proves the pinned Quickshell.Io Process ABI
 # (src/io/process.{hpp,cpp}) the idle service's own FailedToStart handling

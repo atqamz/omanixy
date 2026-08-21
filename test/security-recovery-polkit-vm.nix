@@ -26,6 +26,15 @@
 # pinned Quickshell polkit listener registers itself against
 # `polkit_unix_session_new_for_process(getpid())`, i.e. against whichever
 # logind session contains the agent's own process.
+#
+# Every scenario reports its evidence exclusively as `CHECK <name> PASS|FAIL
+# ...` lines, asserted in the outer NixOS test via
+# test/lib/recovery-check-helpers.py's `assert_checks(output, required)`
+# against an exact, named, per-scenario required-check set - never via
+# "no line said FAIL", which a driver that silently skips a step would still
+# satisfy. A missing expected CHECK, an unexpected extra one, a duplicate, or
+# a malformed PASS/FAIL token is exactly as much a failure as an explicit
+# FAIL.
 { pkgs, self, home-manager }:
 let
   lib = pkgs.lib;
@@ -60,12 +69,16 @@ let
       property int succeededCount: 0
       property int failedCount: 0
       property int daemonCancelCount: 0
+      property int registeredTrueCount: 0
 
       PolkitAgent {
         id: agent
         path: "${dbusPath}"
 
-        onIsRegisteredChanged: console.log("HARNESS_EVENT isRegisteredChanged " + isRegistered)
+        onIsRegisteredChanged: {
+          console.log("HARNESS_EVENT isRegisteredChanged " + isRegistered)
+          if (isRegistered) root.registeredTrueCount += 1
+        }
         onIsActiveChanged: console.log("HARNESS_EVENT isActiveChanged " + isActive)
         onAuthenticationRequestStarted: console.log("HARNESS_EVENT authenticationRequestStarted")
         onFlowChanged: {
@@ -101,7 +114,8 @@ let
             actionId: agent.flow ? agent.flow.actionId : "",
             succeededCount: root.succeededCount,
             failedCount: root.failedCount,
-            daemonCancelCount: root.daemonCancelCount
+            daemonCancelCount: root.daemonCancelCount,
+            registeredTrueCount: root.registeredTrueCount
           })
         }
 
@@ -196,7 +210,7 @@ let
     mkdir -p "$WORKDIR"
     cd "$WORKDIR"
 
-    echo "SESSION_INFO session=''${XDG_SESSION_ID:-unset} $(loginctl session-status "''${XDG_SESSION_ID:-}" 2>&1 | head -3 | tr '\n' ';')"
+    echo "DIAG session=''${XDG_SESSION_ID:-unset} $(loginctl session-status "''${XDG_SESSION_ID:-}" 2>&1 | head -3 | tr '\n' ';')"
 
     qs_status() { timeout 5 "$QS" ipc -p "$1" call -- "$2" status 2>/dev/null; }
     qs_call() { local dir=$1 target=$2 fn=$3; shift 3; timeout 5 "$QS" ipc -p "$dir" call -- "$target" "$fn" "$@" 2>/dev/null; }
@@ -212,25 +226,50 @@ let
       done
       return 1
     }
+    check() {
+      local name=$1 ok=$2; shift 2
+      if [ "$ok" = "yes" ]; then
+        echo "CHECK $name PASS $*"
+      else
+        echo "CHECK $name FAIL $*"
+      fi
+    }
 
     case "$scenario" in
+
       register)
+        # Section 3: rival absent, real polkitd active, real registration,
+        # exactly one registration-success event, harness stays alive.
+        rival_running=$(pgrep -fc 'qu[i]ckshell.*-p .*rival' 2>/dev/null || true)
+        [ "''${rival_running:-0}" = "0" ] && check rival-absent yes || check rival-absent no "rival_running=$rival_running"
+
+        polkitd_state=$(systemctl is-active polkit.service 2>&1)
+        [ "$polkitd_state" = "active" ] && check polkitd-active yes "$polkitd_state" || check polkitd-active no "$polkitd_state"
+
         "$QS" -n -p "$HARNESS_DIR" >harness.log 2>&1 &
         hpid=$!
         if wait_for "$HARNESS_DIR" polkit '.isRegistered == true' 60; then
-          echo "RESULT register ok"
+          check registered yes
         else
-          echo "RESULT register fail"
+          check registered no
           cat harness.log
         fi
+
+        registered_events=$(grep -c 'HARNESS_EVENT isRegisteredChanged true' harness.log || true)
+        [ "''${registered_events:-0}" = "1" ] && check single-registration-event yes || check single-registration-event no "count=$registered_events"
+
+        kill -0 "$hpid" 2>/dev/null && check harness-alive yes || check harness-alive no
         kill "$hpid" 2>/dev/null || true
+        wait "$hpid" 2>/dev/null
         ;;
 
       auth)
         "$QS" -n -p "$HARNESS_DIR" >harness.log 2>&1 &
         hpid=$!
-        if ! wait_for "$HARNESS_DIR" polkit '.isRegistered == true' 60; then
-          echo "RESULT auth register-failed"
+        if wait_for "$HARNESS_DIR" polkit '.isRegistered == true' 60; then
+          check agent-registered yes
+        else
+          check agent-registered no
           cat harness.log
           kill "$hpid" 2>/dev/null || true
           exit 0
@@ -238,61 +277,90 @@ let
 
         "$PKCHECK" -a "$ACTION_ID" -u -p $$ >pkcheck1.log 2>&1 &
         p1=$!
-        if ! wait_for "$HARNESS_DIR" polkit '.isResponseRequired == true' 40; then
-          echo "RESULT auth no-prompt"
+        if wait_for "$HARNESS_DIR" polkit '.isResponseRequired == true' 40; then
+          check request-created yes
+        else
+          check request-created no
           cat harness.log
           cat pkcheck1.log
-          kill "$p1" 2>/dev/null || true
-          kill "$hpid" 2>/dev/null || true
+          kill "$p1" "$hpid" 2>/dev/null || true
           exit 0
         fi
 
         qs_call "$HARNESS_DIR" polkit submit "$WRONG_PASSWORD" >/dev/null
         if wait_for "$HARNESS_DIR" polkit '.failedCount == 1' 20; then
-          wrong_result=ok
+          check wrong-password-failure yes
         else
-          wrong_result=no-failure-signal
+          check wrong-password-failure no "$(qs_status "$HARNESS_DIR" polkit)"
         fi
-        after_wrong=$(qs_status "$HARNESS_DIR" polkit)
-        echo "RESULT auth-wrongpass $wrong_result status=$after_wrong"
 
         if wait_for "$HARNESS_DIR" polkit '.isResponseRequired == true' 20; then
-          qs_call "$HARNESS_DIR" polkit submit "$FIXTURE_PASSWORD" >/dev/null
-          wait "$p1"
-          pkexit=$?
-          after_success=$(qs_status "$HARNESS_DIR" polkit)
-          echo "RESULT auth-success pkcheck_exit=$pkexit status=$after_success"
+          check reprompt-after-failure yes
         else
-          echo "RESULT auth-success no-reprompt-after-failure"
-          kill "$p1" 2>/dev/null || true
+          check reprompt-after-failure no
+          kill "$p1" "$hpid" 2>/dev/null || true
+          exit 0
         fi
+
+        qs_call "$HARNESS_DIR" polkit submit "$FIXTURE_PASSWORD" >/dev/null
+        wait "$p1"
+        pkexit=$?
+        [ "$pkexit" = "0" ] && check pkcheck-exit-zero yes || check pkcheck-exit-zero no "exit=$pkexit"
+
+        if wait_for "$HARNESS_DIR" polkit '.succeededCount == 1' 20; then
+          check correct-password-success yes
+        else
+          check correct-password-success no "$(qs_status "$HARNESS_DIR" polkit)"
+        fi
+
+        if wait_for "$HARNESS_DIR" polkit '.isActive == false' 20; then
+          check flow-inactive-after yes
+        else
+          check flow-inactive-after no "$(qs_status "$HARNESS_DIR" polkit)"
+        fi
+
         kill "$hpid" 2>/dev/null || true
+        wait "$hpid" 2>/dev/null
         ;;
 
       user-cancel)
         "$QS" -n -p "$HARNESS_DIR" >harness.log 2>&1 &
         hpid=$!
         if ! wait_for "$HARNESS_DIR" polkit '.isRegistered == true' 60; then
-          echo "RESULT user-cancel register-failed"
+          check request-active no "register-failed"
           kill "$hpid" 2>/dev/null || true
           exit 0
         fi
         "$PKCHECK" -a "$ACTION_ID" -u -p $$ >pkcheck.log 2>&1 &
         p1=$!
-        if ! wait_for "$HARNESS_DIR" polkit '.isActive == true' 40; then
-          echo "RESULT user-cancel no-request"
+        if wait_for "$HARNESS_DIR" polkit '.isActive == true' 40; then
+          check request-active yes
+        else
+          check request-active no
           cat harness.log
           cat pkcheck.log
-          kill "$p1" 2>/dev/null || true
-          kill "$hpid" 2>/dev/null || true
+          kill "$p1" "$hpid" 2>/dev/null || true
           exit 0
         fi
-        qs_call "$HARNESS_DIR" polkit cancel >/dev/null
+
+        cancel_result=$(qs_call "$HARNESS_DIR" polkit cancel)
+        [ "$cancel_result" = "cancelled" ] && check user-cancel-invoked yes || check user-cancel-invoked no "result=$cancel_result"
+
         wait "$p1"
         pkexit=$?
-        wait_for "$HARNESS_DIR" polkit '.isActive == false' 20
+        [ "$pkexit" != "0" ] && check requester-bounded yes "exit=$pkexit" || check requester-bounded no "exit=$pkexit"
+
+        if wait_for "$HARNESS_DIR" polkit '.isActive == false' 20; then
+          check flow-inactive-after-cancel yes
+        else
+          check flow-inactive-after-cancel no
+        fi
+
         final=$(qs_status "$HARNESS_DIR" polkit)
-        echo "RESULT user-cancel pkcheck_exit=$pkexit status=$final"
+        printf '%s' "$final" | "$JQ" -e '.isResponseRequired == false' >/dev/null 2>&1 \
+          && check no-stale-prompt yes "$final" || check no-stale-prompt no "$final"
+
+        kill -0 "$hpid" 2>/dev/null && check harness-alive-after-cancel yes || check harness-alive-after-cancel no
         kill "$hpid" 2>/dev/null || true
         ;;
 
@@ -300,34 +368,49 @@ let
         "$QS" -n -p "$HARNESS_DIR" >harness.log 2>&1 &
         hpid=$!
         if ! wait_for "$HARNESS_DIR" polkit '.isRegistered == true' 60; then
-          echo "RESULT daemon-cancel register-failed"
+          check request-active no "register-failed"
           kill "$hpid" 2>/dev/null || true
           exit 0
         fi
         "$PKCHECK" -a "$ACTION_ID" -u -p $$ >pkcheck.log 2>&1 &
         p1=$!
-        if ! wait_for "$HARNESS_DIR" polkit '.isResponseRequired == true' 40; then
-          echo "RESULT daemon-cancel no-prompt"
+        if wait_for "$HARNESS_DIR" polkit '.isResponseRequired == true' 40; then
+          check request-active yes
+        else
+          check request-active no
           cat harness.log
           cat pkcheck.log
-          kill "$p1" 2>/dev/null || true
-          kill "$hpid" 2>/dev/null || true
+          kill "$p1" "$hpid" 2>/dev/null || true
           exit 0
         fi
-        kill -TERM "$p1" 2>/dev/null || true
+
+        kill -TERM "$p1" 2>/dev/null
+        cancel_sent=$?
+        [ "$cancel_sent" = "0" ] && check daemon-cancel-stimulus yes || check daemon-cancel-stimulus no "kill_exit=$cancel_sent"
         wait "$p1" 2>/dev/null
-        ok=no
-        if wait_for "$HARNESS_DIR" polkit '.isActive == false' 40; then ok=yes; fi
+
+        if wait_for "$HARNESS_DIR" polkit '.isActive == false' 40; then
+          check flow-inactive-after-daemon-cancel yes
+        else
+          check flow-inactive-after-daemon-cancel no
+        fi
+
         final=$(qs_status "$HARNESS_DIR" polkit)
-        echo "RESULT daemon-cancel bounded=$ok status=$final"
+        printf '%s' "$final" | "$JQ" -e '.isResponseRequired == false' >/dev/null 2>&1 \
+          && check no-stale-request yes "$final" || check no-stale-request no "$final"
+
+        kill -0 "$hpid" 2>/dev/null && check no-shell-restart yes || check no-shell-restart no
         kill "$hpid" 2>/dev/null || true
         ;;
 
       collision)
+        # Section 7, sequence A-H.
         "$QS" -n -p "$RIVAL_DIR" >rival.log 2>&1 &
         rpid=$!
-        if ! wait_for "$RIVAL_DIR" rival '.isRegistered == true' 60; then
-          echo "RESULT collision rival-register-failed"
+        if wait_for "$RIVAL_DIR" rival '.isRegistered == true' 60; then
+          check rival-registered yes
+        else
+          check rival-registered no
           cat rival.log
           kill "$rpid" 2>/dev/null || true
           exit 0
@@ -337,26 +420,33 @@ let
         h1pid=$!
         sleep 5
         h1_status=$(qs_status "$HARNESS_DIR" polkit)
+        printf '%s' "$h1_status" | "$JQ" -e '.isRegistered == false' >/dev/null 2>&1 \
+          && check quattro-not-registered yes "$h1_status" || check quattro-not-registered no "$h1_status"
+
         rival_status=$(qs_status "$RIVAL_DIR" rival)
         rival_alive=no
         kill -0 "$rpid" 2>/dev/null && rival_alive=yes
-        echo "RESULT collision harness1=$h1_status rival=$rival_status rival_alive=$rival_alive"
-        echo "DIAG rival.log: $(tr '\n' '|' < rival.log)"
-        echo "DIAG harness1.log: $(tr '\n' '|' < harness1.log)"
+        [ "$rival_alive" = "yes" ] && printf '%s' "$rival_status" | "$JQ" -e '.isRegistered == true' >/dev/null 2>&1 \
+          && check rival-remains-registered yes "$rival_status" || check rival-remains-registered no "alive=$rival_alive status=$rival_status"
 
         sleep 5
         h1_status_no_retry=$(qs_status "$HARNESS_DIR" polkit)
-        echo "RESULT collision-no-retry harness1=$h1_status_no_retry"
+        printf '%s' "$h1_status_no_retry" | "$JQ" -e '.isRegistered == false' >/dev/null 2>&1 \
+          && check no-retry-while-rival-present yes "$h1_status_no_retry" || check no-retry-while-rival-present no "$h1_status_no_retry"
 
-        rival_alive_before_stop=no
-        kill -0 "$rpid" 2>/dev/null && rival_alive_before_stop=yes
-        echo "RESULT collision-rival-untouched rival_alive_before_we_stop_it=$rival_alive_before_stop"
-        kill "$rpid" 2>/dev/null || true
+        kill -0 "$rpid" 2>/dev/null
+        rival_alive_before_stop=$?
+        kill "$rpid" 2>/dev/null
+        term_exit=$?
         wait "$rpid" 2>/dev/null
+        { [ "$rival_alive_before_stop" = "0" ] && [ "$term_exit" = "0" ]; } \
+          && check test-terminates-rival yes || check test-terminates-rival no "was_alive=$rival_alive_before_stop term_exit=$term_exit"
 
         sleep 3
         h1_after_rival_gone=$(qs_status "$HARNESS_DIR" polkit)
-        echo "RESULT collision-stale harness1=$h1_after_rival_gone"
+        printf '%s' "$h1_after_rival_gone" | "$JQ" -e '.isRegistered == false' >/dev/null 2>&1 \
+          && check quattro-remains-unregistered-after-rival-gone yes "$h1_after_rival_gone" \
+          || check quattro-remains-unregistered-after-rival-gone no "$h1_after_rival_gone"
 
         kill "$h1pid" 2>/dev/null || true
         wait "$h1pid" 2>/dev/null
@@ -364,30 +454,124 @@ let
         "$QS" -n -p "$HARNESS_DIR" >harness2.log 2>&1 &
         h2pid=$!
         if wait_for "$HARNESS_DIR" polkit '.isRegistered == true' 60; then
-          echo "RESULT collision-fresh ok"
+          check fresh-quattro-registers yes
         else
-          echo "RESULT collision-fresh fail"
+          check fresh-quattro-registers no
         fi
         kill "$h2pid" 2>/dev/null || true
         ;;
 
-      daemon-restart)
+      stress)
+        # Section 9: 20 wrong-password authentication cycles against the
+        # real backend, then a fresh correct-password authentication, with
+        # process/log bounds asserted rather than merely printed.
         "$QS" -n -p "$HARNESS_DIR" >harness.log 2>&1 &
         hpid=$!
         if ! wait_for "$HARNESS_DIR" polkit '.isRegistered == true' 60; then
-          echo "RESULT daemon-restart register-failed"
+          check stress-20-cycles-completed no "register-failed"
+          check stress-single-harness-process no "register-failed"
+          check stress-log-bound no "register-failed"
+          check stress-no-continued-growth no "register-failed"
+          check stress-final-correct-auth no "register-failed"
+          cat harness.log
+          kill "$hpid" 2>/dev/null || true
+          exit 0
+        fi
+
+        unix_chkpwd_before=$(pgrep -c unix_chkpwd 2>/dev/null); unix_chkpwd_before=''${unix_chkpwd_before:-0}
+        cycles_ok=0
+        n=1
+        while [ "$n" -le 20 ]; do
+          "$PKCHECK" -a "$ACTION_ID" -u -p $$ >"pkcheck-$n.log" 2>&1 &
+          pn=$!
+          cycle_failed_once=no
+          # A real pkcheck/agent-helper conversation reprompts internally
+          # (up to its own real bounded retry count) after a single wrong
+          # password rather than exiting immediately - proven already by
+          # the "auth" scenario's own reprompt-after-failure check - so this
+          # keeps answering wrong until the real backend itself ends the
+          # request, bounded to 6 internal attempts so a real cap higher
+          # than expected can never hang this loop.
+          attempt=0
+          while [ "$attempt" -lt 6 ] && wait_for "$HARNESS_DIR" polkit '.isResponseRequired == true' 20; do
+            before_failed=$(qs_status "$HARNESS_DIR" polkit | "$JQ" -r '.failedCount')
+            qs_call "$HARNESS_DIR" polkit submit "$WRONG_PASSWORD" >/dev/null
+            attempt=$((attempt + 1))
+            if wait_for "$HARNESS_DIR" polkit ".failedCount == $((before_failed + 1))" 20; then
+              cycle_failed_once=yes
+            fi
+          done
+          # Bounded termination: if the real backend has not already ended
+          # this request within the 6-attempt budget above, end it here -
+          # a cycle "terminates" either way, never left to hang.
+          kill "$pn" 2>/dev/null || true
+          wait "$pn" 2>/dev/null
+          [ "$cycle_failed_once" = "yes" ] && cycles_ok=$((cycles_ok + 1))
+          n=$((n + 1))
+        done
+        [ "$cycles_ok" = "20" ] && check stress-20-cycles-completed yes || check stress-20-cycles-completed no "cycles_ok=$cycles_ok"
+
+        procs=$(pgrep -fc 'qu[i]ckshell -n -p' || true)
+        [ "$procs" = "1" ] && check stress-single-harness-process yes || check stress-single-harness-process no "procs=$procs"
+
+        events=$(grep -c '^HARNESS_EVENT' harness.log || true)
+        # Generous multiplier: up to 6 internal reprompt attempts per cycle
+        # (the bounded budget above) times 20 cycles, times a generous
+        # per-attempt event count, plus fixed registration overhead - finite
+        # and explicitly proportional to the 20-cycle stimulus, not an
+        # arbitrary tiny constant.
+        max_events=$((20 * 6 * 10 + 50))
+        [ "''${events:-0}" -le "$max_events" ] \
+          && check stress-log-bound yes "events=$events max=$max_events" \
+          || check stress-log-bound no "events=$events max=$max_events"
+
+        sleep 2
+        events_after_wait=$(grep -c '^HARNESS_EVENT' harness.log || true)
+        [ "$events_after_wait" = "$events" ] \
+          && check stress-no-continued-growth yes "events=$events events_after_wait=$events_after_wait" \
+          || check stress-no-continued-growth no "events=$events events_after_wait=$events_after_wait"
+
+        unix_chkpwd_after=$(pgrep -c unix_chkpwd 2>/dev/null); unix_chkpwd_after=''${unix_chkpwd_after:-0}
+        echo "DIAG unix_chkpwd before=$unix_chkpwd_before after=$unix_chkpwd_after"
+
+        "$PKCHECK" -a "$ACTION_ID" -u -p $$ >pkcheck-final.log 2>&1 &
+        pf=$!
+        if wait_for "$HARNESS_DIR" polkit '.isResponseRequired == true' 20; then
+          qs_call "$HARNESS_DIR" polkit submit "$FIXTURE_PASSWORD" >/dev/null
+          wait "$pf"
+          pfexit=$?
+          [ "$pfexit" = "0" ] && check stress-final-correct-auth yes || check stress-final-correct-auth no "exit=$pfexit"
+        else
+          check stress-final-correct-auth no "no-prompt"
+          kill "$pf" 2>/dev/null || true
+        fi
+
+        kill "$hpid" 2>/dev/null || true
+        ;;
+
+      daemon-restart)
+        # Section 8: polkitd disappearance/recovery during an in-flight
+        # request, plus both the same-harness-reconnect and fresh-harness
+        # recovery paths (both are actually observed to work on the pinned
+        # ABI; both are asserted, not merely one printed and the other
+        # documented).
+        "$QS" -n -p "$HARNESS_DIR" >harness.log 2>&1 &
+        hpid=$!
+        if ! wait_for "$HARNESS_DIR" polkit '.isRegistered == true' 60; then
+          check request-active-before-restart no "register-failed"
           kill "$hpid" 2>/dev/null || true
           exit 0
         fi
 
         "$PKCHECK" -a "$ACTION_ID" -u -p $$ >pkcheck1.log 2>&1 &
         p1=$!
-        if ! wait_for "$HARNESS_DIR" polkit '.isResponseRequired == true' 40; then
-          echo "RESULT daemon-restart no-prompt"
+        if wait_for "$HARNESS_DIR" polkit '.isResponseRequired == true' 40; then
+          check request-active-before-restart yes
+        else
+          check request-active-before-restart no
           cat harness.log
           cat pkcheck1.log
-          kill "$p1" 2>/dev/null || true
-          kill "$hpid" 2>/dev/null || true
+          kill "$p1" "$hpid" 2>/dev/null || true
           exit 0
         fi
 
@@ -399,11 +583,11 @@ let
           n=$((n + 1))
         done
         if kill -0 "$p1" 2>/dev/null; then
-          echo "RESULT daemon-restart-inflight hung"
+          check inflight-requester-bounded no "still-running-after-30s"
           kill "$p1" 2>/dev/null || true
         else
           wait "$p1"
-          echo "RESULT daemon-restart-inflight bounded exit=$?"
+          check inflight-requester-bounded yes "exit=$?"
         fi
 
         "$PKCHECK" -a "$ACTION_ID" -u -p $$ >pkcheck2.log 2>&1 &
@@ -411,9 +595,10 @@ let
         if wait_for "$HARNESS_DIR" polkit '.isResponseRequired == true' 15; then
           qs_call "$HARNESS_DIR" polkit submit "$FIXTURE_PASSWORD" >/dev/null
           wait "$p2"
-          echo "RESULT daemon-restart-same-harness reprompted exit=$?"
+          p2exit=$?
+          [ "$p2exit" = "0" ] && check same-harness-reprompt yes "exit=$p2exit" || check same-harness-reprompt no "exit=$p2exit"
         else
-          echo "RESULT daemon-restart-same-harness stale-no-prompt"
+          check same-harness-reprompt no "stale-no-prompt"
           kill "$p2" 2>/dev/null || true
         fi
 
@@ -423,18 +608,21 @@ let
         "$QS" -n -p "$HARNESS_DIR" >harness-fresh.log 2>&1 &
         hf=$!
         if wait_for "$HARNESS_DIR" polkit '.isRegistered == true' 60; then
+          check fresh-harness-registers yes
           "$PKCHECK" -a "$ACTION_ID" -u -p $$ >pkcheck3.log 2>&1 &
           p3=$!
           if wait_for "$HARNESS_DIR" polkit '.isResponseRequired == true' 40; then
             qs_call "$HARNESS_DIR" polkit submit "$FIXTURE_PASSWORD" >/dev/null
             wait "$p3"
-            echo "RESULT daemon-restart-fresh-harness ok exit=$?"
+            p3exit=$?
+            [ "$p3exit" = "0" ] && check fresh-harness-auth-success yes "exit=$p3exit" || check fresh-harness-auth-success no "exit=$p3exit"
           else
-            echo "RESULT daemon-restart-fresh-harness no-prompt"
+            check fresh-harness-auth-success no "no-prompt"
             kill "$p3" 2>/dev/null || true
           fi
         else
-          echo "RESULT daemon-restart-fresh-harness register-failed"
+          check fresh-harness-registers no
+          check fresh-harness-auth-success no "register-failed"
         fi
         kill "$hf" 2>/dev/null || true
         ;;
@@ -444,6 +632,13 @@ let
         exit 1
         ;;
     esac
+
+    # Correctness/failure is reported exclusively via the CHECK lines above,
+    # never via this script's own exit code: the last command of a case
+    # branch is frequently a `wait` on a deliberately-killed background
+    # process, whose (128+signal) exit status must never leak out as this
+    # script's own.
+    exit 0
   '';
 
   runScenario = scenario:
@@ -497,25 +692,65 @@ pkgs.testers.runNixOSTest {
   };
 
   testScript = ''
+    ${builtins.readFile ./lib/recovery-check-helpers.py}
+
     machine.wait_for_unit("multi-user.target")
     machine.wait_for_unit("polkit.service")
 
     print("=== scenario 1: real registration ===")
-    print(machine.succeed("${runScenario "register"}"))
+    out = machine.succeed("${runScenario "register"}")
+    print(out)
+    assert_checks(out, {
+        "rival-absent", "polkitd-active", "registered",
+        "single-registration-event", "harness-alive",
+    })
 
     print("=== scenario 2: real authentication success + wrong-password failure ===")
-    print(machine.succeed("${runScenario "auth"}"))
+    out = machine.succeed("${runScenario "auth"}")
+    print(out)
+    assert_checks(out, {
+        "agent-registered", "request-created", "wrong-password-failure",
+        "reprompt-after-failure", "pkcheck-exit-zero",
+        "correct-password-success", "flow-inactive-after",
+    })
 
     print("=== scenario 3a: user-initiated cancellation ===")
-    print(machine.succeed("${runScenario "user-cancel"}"))
+    out = machine.succeed("${runScenario "user-cancel"}")
+    print(out)
+    assert_checks(out, {
+        "request-active", "user-cancel-invoked", "requester-bounded",
+        "flow-inactive-after-cancel", "no-stale-prompt",
+        "harness-alive-after-cancel",
+    })
 
     print("=== scenario 3b: daemon-initiated cancellation ===")
-    print(machine.succeed("${runScenario "daemon-cancel"}"))
+    out = machine.succeed("${runScenario "daemon-cancel"}")
+    print(out)
+    assert_checks(out, {
+        "request-active", "daemon-cancel-stimulus",
+        "flow-inactive-after-daemon-cancel", "no-stale-request",
+        "no-shell-restart",
+    })
 
     print("=== scenario 4: registration collision with an independent agent ===")
-    print(machine.succeed("${runScenario "collision"}"))
+    out = machine.succeed("${runScenario "collision"}")
+    print(out)
+    assert_checks(out, {
+        "rival-registered", "quattro-not-registered", "rival-remains-registered",
+        "no-retry-while-rival-present", "test-terminates-rival",
+        "quattro-remains-unregistered-after-rival-gone", "fresh-quattro-registers",
+    })
 
-    print("=== scenario 5: polkitd disappearance/recovery during an in-flight request ===")
+    print("=== scenario 5: finite real wrong-password stress (20 cycles) ===")
+    out = machine.succeed("${runScenario "stress"}")
+    print(out)
+    assert_checks(out, {
+        "stress-20-cycles-completed", "stress-single-harness-process",
+        "stress-log-bound", "stress-no-continued-growth",
+        "stress-final-correct-auth",
+    })
+
+    print("=== scenario 6: polkitd disappearance/recovery during an in-flight request ===")
     workdir = "/home/${testUser}/polkit-test-daemon-restart"
     machine.succeed(f"rm -rf {workdir}")
     machine.execute(
@@ -527,6 +762,12 @@ pkgs.testers.runNixOSTest {
         "systemctl show omanixy-polkit-daemon-restart.service -p SubState --value | grep -qx dead",
         timeout=90,
     )
-    print(machine.succeed("cat /tmp/daemon-restart-out.log"))
+    out = machine.succeed("cat /tmp/daemon-restart-out.log")
+    print(out)
+    assert_checks(out, {
+        "request-active-before-restart", "inflight-requester-bounded",
+        "same-harness-reprompt", "fresh-harness-registers",
+        "fresh-harness-auth-success",
+    })
   '';
 }

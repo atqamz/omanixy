@@ -235,12 +235,13 @@ if rg -n 'omarchy-launch-screensaver|omarchy-screensaver|\bttfx\b|\bsocat\b' \
   exit 1
 fi
 
-# Pre-suspend locking and sleep-monitor services are explicitly deferred to
-# Layer 8 (Section 11) - none of that vocabulary may appear as live wiring
-# in the Home Manager module yet.
+# Pre-suspend locking and sleep-monitor services are permanently, by design,
+# not owned by Omanixy (Section 11/61 of issue #4; confirmed final at
+# Layer 8, not merely deferred to it) - none of that vocabulary may appear as
+# live wiring in the Home Manager module.
 if rg -n 'omarchy-system-sleep-monitor|omarchy-sleep-lock\.service|systemd-inhibit|omarchy-system-lock\b' \
   "$repo/modules/home"; then
-  printf '%s\n' 'sleep/suspend-monitor vocabulary leaked into the Home Manager module - deferred to Layer 8' >&2
+  printf '%s\n' 'sleep/suspend-monitor vocabulary leaked into the Home Manager module - intentionally omitted, consumer-owned suspend policy' >&2
   exit 1
 fi
 

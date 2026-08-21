@@ -1928,6 +1928,20 @@
             PYTHON=${pkgs.python3.withPackages (ps: [ ps.pyyaml ])}/bin/python ${pkgs.bash}/bin/bash ${./test/security-recovery-contract.sh} ${./.}
             touch "$out"
           '';
+          security-recovery-check-helpers-selftest = pkgs.runCommand "omanixy-security-recovery-check-helpers-selftest"
+            {
+              nativeBuildInputs = [ pkgs.python3 ];
+            } ''
+            python3 ${./test/lib/recovery-check-helpers-selftest.py} ${./test/lib/recovery-check-helpers.py}
+            touch "$out"
+          '';
+          security-issue-4-acceptance = pkgs.runCommand "omanixy-security-issue-4-acceptance"
+            {
+              nativeBuildInputs = [ pkgs.bash (pkgs.python3.withPackages (ps: [ ps.pyyaml ])) ];
+            } ''
+            PYTHON=${pkgs.python3.withPackages (ps: [ ps.pyyaml ])}/bin/python ${pkgs.bash}/bin/bash ${./test/security-issue-4-acceptance.sh} ${./.}
+            touch "$out"
+          '';
           security-recovery-pam-vm = import ./test/security-recovery-pam-vm.nix { inherit pkgs self home-manager; };
           security-recovery-polkit-vm = import ./test/security-recovery-polkit-vm.nix { inherit pkgs self home-manager; };
           security-recovery-notifications-vm = import ./test/security-recovery-notifications-vm.nix { inherit pkgs self home-manager; };

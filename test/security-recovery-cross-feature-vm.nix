@@ -467,6 +467,7 @@ let
           kill "$hpid" 2>/dev/null || true
           exit 0
         fi
+        echo "CHECK crash-setup PASS"
 
         # Establish real, live/in-flight state on all three surfaces at once.
         qs_ipc pam start >/dev/null
@@ -500,7 +501,7 @@ let
           echo "CHECK crash-notification-live FAIL count=$popup_before"
         fi
 
-        unix_chkpwd_before=$(pgrep -c unix_chkpwd 2>/dev/null || echo 0)
+        unix_chkpwd_before=$(pgrep -c unix_chkpwd 2>/dev/null); unix_chkpwd_before=''${unix_chkpwd_before:-0}
 
         # Simulate the real omanixy-shell.service process crashing while PAM,
         # polkit, and notification state all exist at once.
@@ -527,8 +528,12 @@ let
           echo "CHECK crash-no-orphan-process FAIL leftover=$leftover_qs"
         fi
 
-        unix_chkpwd_after=$(pgrep -c unix_chkpwd 2>/dev/null || echo 0)
-        echo "DIAG unix_chkpwd before=$unix_chkpwd_before after=$unix_chkpwd_after"
+        unix_chkpwd_after=$(pgrep -c unix_chkpwd 2>/dev/null); unix_chkpwd_after=''${unix_chkpwd_after:-0}
+        if [ "$unix_chkpwd_after" -le "$unix_chkpwd_before" ]; then
+          echo "CHECK crash-no-helper-leak PASS before=$unix_chkpwd_before after=$unix_chkpwd_after"
+        else
+          echo "CHECK crash-no-helper-leak FAIL before=$unix_chkpwd_before after=$unix_chkpwd_after"
+        fi
 
         # The bounded systemd restart: a fresh combined harness process,
         # mirroring the real omanixy-shell.service's Restart=on-failure
@@ -685,6 +690,8 @@ pkgs.testers.runNixOSTest {
   };
 
   testScript = ''
+    ${builtins.readFile ./lib/recovery-check-helpers.py}
+
     machine.wait_for_unit("multi-user.target")
     machine.wait_for_unit("polkit.service")
 
@@ -704,18 +711,15 @@ pkgs.testers.runNixOSTest {
     machine.succeed("test -e /etc/pam.d/omarchy-lock-password")
     machine.fail("test -e /etc/pam.d/omarchy-lock-fingerprint")
 
-    def assert_all_checks_pass(output):
-        fails = [
-            line for line in output.splitlines()
-            if line.startswith("CHECK ") and " FAIL" in line
-        ]
-        assert not fails, "\n".join(fails) + "\n\nfull output:\n" + output
-
     print("=== scenario 1: cross-feature boot, no ownership conflicts ===")
     machine.succeed("rm -rf /home/${testUser}/.local/state/omarchy")
     out = machine.succeed("${runScenario "boot"}")
     print(out)
-    assert_all_checks_pass(out)
+    assert_checks(out, {
+        "boot-ready", "polkit-registration", "notifications-ownership",
+        "pam-conversation", "polkit-authentication", "notifications-delivery",
+        "single-process",
+    })
 
     uid = machine.succeed("id -u ${testUser}").strip()
     active_state = machine.succeed(
@@ -741,6 +745,13 @@ pkgs.testers.runNixOSTest {
     machine.succeed("rm -rf /home/${testUser}/.local/state/omarchy")
     out = machine.succeed("${runScenario "crash"}")
     print(out)
-    assert_all_checks_pass(out)
+    assert_checks(out, {
+        "crash-setup", "crash-pam-inflight", "crash-polkit-inflight",
+        "crash-notification-live", "crash-polkit-client-bounded",
+        "crash-no-orphan-process", "crash-no-helper-leak",
+        "crash-polkit-fresh-registration", "crash-polkit-fresh-auth",
+        "crash-pam-fresh", "crash-notification-restored",
+        "crash-notification-action-not-resurrected",
+    })
   '';
 }

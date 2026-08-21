@@ -239,6 +239,34 @@ let
       done
       return 1
     }
+    # Launches "$QS -n -p $HARNESS_DIR" into $harness_log, retrying if
+    # Quickshell reports "An instance of this configuration is already
+    # running" - real, observed behavior right after a prior instance of
+    # the same $HARNESS_DIR config was killed via an external cgroup-wide
+    # `systemctl stop` (session-phase1/session-phase2's own teardown)
+    # rather than this script's own in-process `kill "$hpid"; wait "$hpid"`
+    # pattern every other scenario uses: Quickshell's own instance lock
+    # apparently needs a moment longer to release in that case. Bounded to
+    # 20 attempts/~20s; sets $hpid on success.
+    launch_harness_retrying() {
+      local harness_log=$1 attempt=0
+      while [ "$attempt" -lt 20 ]; do
+        QML2_IMPORT_PATH="$HARNESS_DIR" "$QS" -n -p "$HARNESS_DIR" >"$harness_log" 2>&1 &
+        hpid=$!
+        if wait_ipc_ready "$HARNESS_DIR"; then
+          return 0
+        fi
+        if grep -q "already running" "$harness_log" 2>/dev/null; then
+          kill "$hpid" 2>/dev/null || true
+          wait "$hpid" 2>/dev/null
+          attempt=$((attempt + 1))
+          sleep 1
+          continue
+        fi
+        return 1
+      done
+      return 1
+    }
 
     case "$scenario" in
 
@@ -582,6 +610,147 @@ let
           echo "CHECK burst-responsive-after FAIL ping=$ping_after"
         fi
 
+        # Bounded, proportional log growth: a generous multiplier of the
+        # 300-notification stimulus, not an arbitrary byte count - and a
+        # short post-stimulus window proving the harness has gone quiet
+        # rather than continuing to emit lines on its own.
+        harness_log_lines=$(wc -l < harness.log)
+        max_log_lines=$((300 * 5 + 200))
+        if [ "$harness_log_lines" -le "$max_log_lines" ]; then
+          echo "CHECK burst-log-bound PASS lines=$harness_log_lines max=$max_log_lines"
+        else
+          echo "CHECK burst-log-bound FAIL lines=$harness_log_lines max=$max_log_lines"
+        fi
+        sleep 2
+        harness_log_lines_after_wait=$(wc -l < harness.log)
+        if [ "$harness_log_lines_after_wait" = "$harness_log_lines" ]; then
+          echo "CHECK burst-log-quiescent PASS lines=$harness_log_lines_after_wait"
+        else
+          echo "CHECK burst-log-quiescent FAIL before=$harness_log_lines after=$harness_log_lines_after_wait"
+        fi
+
+        kill "$hpid" 2>/dev/null || true
+        wait "$hpid" 2>/dev/null
+        ;;
+
+      session-phase1)
+        # Section 15: establish real ownership+delivery in a genuine PAM/
+        # logind session (this scenario's own systemd-run session), then
+        # signal readiness and block so the outer test can destroy this
+        # exact session/unit from the outside while it is still alive.
+        #
+        # PAM's session-open callback registers the login session with
+        # logind but does not block on the user manager (and the D-Bus
+        # session bus it hosts) actually finishing startup - this driver
+        # script's own process can start running before that bus exists.
+        # The pinned NotificationServer registers exactly once at
+        # construction with no retry-on-first-failure (only
+        # serviceUnregistered-driven reclaim, which never fires for a
+        # connection that never existed), so launching the harness before
+        # the bus is reachable would silently and permanently fail its
+        # registration. Wait for the real bus first.
+        n=0
+        while [ "$n" -lt 150 ] && ! busctl --user list >/dev/null 2>&1; do
+          n=$((n + 1))
+          sleep 0.2
+        done
+        if ! launch_harness_retrying harness.log; then
+          echo "CHECK session-phase1-ready FAIL harness-never-ready"
+          cat harness.log
+          kill "$hpid" 2>/dev/null || true
+          exit 0
+        fi
+
+        # IPC readiness (Quickshell's own IPC socket) and the D-Bus
+        # NotificationServer's async RequestName registration are two
+        # independent readiness signals - especially right after a fresh
+        # session/bus is created, IPC can be ready slightly before D-Bus
+        # registration completes, so this polls briefly rather than
+        # checking once.
+        n=0
+        owner=""
+        while [ "$n" -lt 150 ]; do
+          owner=$(owner_now)
+          has_owner "$owner" && break
+          n=$((n + 1))
+          sleep 0.2
+        done
+        if has_owner "$owner"; then
+          echo "CHECK session-phase1-ownership PASS owner=$owner"
+        else
+          echo "CHECK session-phase1-ownership FAIL owner=$owner"
+          echo "DIAG harness.log tail: $(tail -30 harness.log | tr '\n' '|')"
+        fi
+
+        notify-send -a TestClient -u normal "SessionPhase1 hello"
+        sleep 1
+        if [ "$(popup_count)" = "1" ]; then
+          echo "CHECK session-phase1-delivery PASS"
+        else
+          echo "CHECK session-phase1-delivery FAIL popup_count=$(popup_count)"
+        fi
+
+        # A `-p PAMName=login` session reparents this script (and, with it,
+        # the harness it forked) into logind's own session-<N>.scope
+        # cgroup, separate from this systemd-run invocation's own
+        # transient service unit/cgroup - `systemctl stop` on that service
+        # unit alone does not reliably reach processes already reparented
+        # into the session scope. Record the real logind session id so the
+        # outer test can terminate the scope that actually holds them.
+        echo "''${XDG_SESSION_ID:-}" > "$WORKDIR/session-id"
+        touch "$WORKDIR/session-ready"
+        # Block here, alive, until the outer test stops this whole unit
+        # (systemctl stop), which tears down this login session's cgroup -
+        # and, once it is the last session for this user with no lingering
+        # enabled, the user manager and its D-Bus session bus with it.
+        sleep 300
+        ;;
+
+      session-phase2)
+        # The fresh session/bus half of Section 15: a brand new systemd-run
+        # session, proving a fresh harness can claim the name and deliver
+        # again after the prior session/bus was genuinely torn down (never
+        # simulated by sleeping).
+        #
+        # Same real bus-readiness wait as session-phase1, and more load-
+        # bearing here: this session's own D-Bus user bus was just started
+        # fresh moments ago by this very login, so the race is real, not
+        # theoretical.
+        n=0
+        while [ "$n" -lt 150 ] && ! busctl --user list >/dev/null 2>&1; do
+          n=$((n + 1))
+          sleep 0.2
+        done
+        if ! launch_harness_retrying harness.log; then
+          echo "CHECK session-phase2-ready FAIL harness-never-ready"
+          cat harness.log
+          kill "$hpid" 2>/dev/null || true
+          exit 0
+        fi
+
+        n=0
+        owner=""
+        while [ "$n" -lt 150 ]; do
+          owner=$(owner_now)
+          has_owner "$owner" && break
+          n=$((n + 1))
+          sleep 0.2
+        done
+        if has_owner "$owner"; then
+          echo "CHECK session-phase2-ownership PASS owner=$owner"
+        else
+          echo "CHECK session-phase2-ownership FAIL owner=$owner"
+          echo "DIAG harness.log tail: $(tail -30 harness.log | tr '\n' '|')"
+        fi
+
+        notify-send -a TestClient -u normal "SessionPhase2 hello"
+        sleep 1
+        if [ "$(popup_count)" = "1" ]; then
+          echo "CHECK session-phase2-delivery PASS"
+        else
+          echo "CHECK session-phase2-delivery FAIL popup_count=$(popup_count)"
+        fi
+
         kill "$hpid" 2>/dev/null || true
         wait "$hpid" 2>/dev/null
         ;;
@@ -643,6 +812,8 @@ pkgs.testers.runNixOSTest {
   };
 
   testScript = ''
+    ${builtins.readFile ./lib/recovery-check-helpers.py}
+
     machine.wait_for_unit("multi-user.target")
 
     print("=== setup: the real declarative capability activates for a real user ===")
@@ -660,41 +831,96 @@ pkgs.testers.runNixOSTest {
     assert "ExecStart" in unit_file, unit_file
     print("home-manager-provisioned omanixy-shell.service unit is present for a real user")
 
-    def assert_all_checks_pass(output):
-        fails = [
-            line for line in output.splitlines()
-            if line.startswith("CHECK ") and " FAIL" in line
-        ]
-        assert not fails, "\n".join(fails) + "\n\nfull output:\n" + output
-
     print("=== scenario 1: real D-Bus ownership + real notify-send delivery ===")
     machine.succeed("rm -rf /home/${testUser}/.local/state/omarchy")
     out = machine.succeed("${runScenario "ownership-delivery"}")
     print(out)
-    assert_all_checks_pass(out)
+    assert_checks(out, {"ownership", "delivery"})
 
     print("=== scenario 2: replacement identity, default action, close round-trip ===")
     machine.succeed("rm -rf /home/${testUser}/.local/state/omarchy")
     out = machine.succeed("${runScenario "replace-action-close"}")
     print(out)
-    assert_all_checks_pass(out)
+    assert_checks(out, {
+        "replace-identity", "replace-content", "default-action", "close-roundtrip",
+    })
 
     print("=== scenario 3: DND suppression + persistence across a real process restart ===")
     machine.succeed("rm -rf /home/${testUser}/.local/state/omarchy")
     out = machine.succeed("${runScenario "dnd-restart"}")
     print(out)
-    assert_all_checks_pass(out)
+    assert_checks(out, {
+        "dnd-on", "dnd-suppressed", "dnd-recorded-in-history",
+        "dnd-settings-flushed", "dnd-restart-persisted",
+    })
 
-    print("=== scenario 4: known-owner collision, non-destructive, event-driven reclaim ===")
+    print("=== scenario 4: unknown independent-owner collision, non-destructive, event-driven reclaim ===")
     machine.succeed("rm -rf /home/${testUser}/.local/state/omarchy")
     out = machine.succeed("${runScenario "collision-reclaim"}")
     print(out)
-    assert_all_checks_pass(out)
+    assert_checks(out, {
+        "stub-owns-name", "harness-did-not-steal-name",
+        "harness-survives-collision", "harness-did-not-receive-during-collision",
+        "reclaim-succeeded", "reclaim-no-restart", "reclaim-functional",
+    })
 
-    print("=== scenario 5: notification burst, bounded history ===")
+    print("=== scenario 5: notification burst, bounded history and log growth ===")
     machine.succeed("rm -rf /home/${testUser}/.local/state/omarchy")
     out = machine.succeed("${runScenario "burst"}")
     print(out)
-    assert_all_checks_pass(out)
+    assert_checks(out, {
+        "burst-received-all", "burst-no-crash", "burst-history-bounded",
+        "burst-responsive-after", "burst-log-bound", "burst-log-quiescent",
+    })
+
+    print("=== scenario 6: session/bus destruction and fresh-session recovery ===")
+    machine.succeed("loginctl disable-linger ${testUser} 2>&1 || true")
+    machine.succeed("rm -rf /home/${testUser}/.local/state/omarchy")
+    workdir1 = "/home/${testUser}/notif-test-session-phase1"
+    machine.succeed(f"rm -rf {workdir1}")
+    machine.execute(
+        "${runScenario "session-phase1"} > /tmp/session-phase1-out.log 2>&1 &"
+    )
+    machine.wait_for_file(f"{workdir1}/session-ready", timeout=60)
+    phase1_partial = machine.succeed("cat /tmp/session-phase1-out.log")
+    print(phase1_partial)
+    assert_checks(phase1_partial, {
+        "session-phase1-ownership", "session-phase1-delivery",
+    })
+
+    # Destroy this exact session from the outside - its own logind
+    # session-<N>.scope cgroup (which actually holds the driver script and
+    # the harness it forked, per the comment recorded inside the scenario
+    # above), its login session, and (once it is the last session for this
+    # user with lingering disabled) the user manager and D-Bus session bus
+    # it owned - never simulated by sleeping or by touching the host.
+    session_id = machine.succeed(f"cat {workdir1}/session-id").strip()
+    assert session_id, "session-phase1 must have recorded a real logind session id"
+    machine.succeed(f"loginctl terminate-session {session_id}")
+    machine.succeed("systemctl stop omanixy-notif-session-phase1.service 2>&1 || true")
+    # Do not rely on systemd's own lazy StopWhenUnneeded GC pass noticing
+    # the last session ended - stop the user manager (and, with it, the
+    # D-Bus user-session bus it hosts) explicitly and deterministically,
+    # exactly like the rest of this scenario's genuine-destruction
+    # discipline: never simulated by sleeping, never left to chance timing.
+    machine.succeed(
+        "systemctl stop user@$(id -u ${testUser}).service 2>&1 || true"
+    )
+    machine.wait_until_succeeds(
+        "systemctl show user@$(id -u ${testUser}).service -p SubState --value | grep -qx dead",
+        timeout=60,
+    )
+    print("user manager / session D-Bus bus for the test user has been torn down")
+
+    # session-phase1's own delivery check already persisted a popup file;
+    # a fresh harness's real restorePopups() would otherwise legitimately
+    # restore it alongside session-phase2's own notification, making
+    # popup_count 2 rather than 1 for a reason that has nothing to do with
+    # what this scenario is actually proving (fresh registration+delivery).
+    machine.succeed("rm -rf /home/${testUser}/.local/state/omarchy")
+
+    out = machine.succeed("${runScenario "session-phase2"}")
+    print(out)
+    assert_checks(out, {"session-phase2-ownership", "session-phase2-delivery"})
   '';
 }
