@@ -12,12 +12,15 @@ fixture=$(mktemp -d)
 trap 'chmod -R u+w "$fixture"; rm -rf "$fixture"' EXIT
 
 # The real, final Service.qml has exactly nine allowed command bindings
-# (one per fixed-domain verb), exactly six enqueuePopupFileJob call sites
-# with proven literal-array provenance, and zero exec/execDetached/run/
-# startDetached calls.
+# (one per fixed-domain verb), exactly six pinned executable producer
+# blocks (persistPopupFile/deletePopupFileFor/archivePopupFileFor/
+# writeHistoryFile/clearHistory/sweepOrphanImages) each proving its own
+# enqueuePopupFileJob call site in its own lexical scope, three canonical
+# queue-plumbing blocks, and zero exec/execDetached/run/startDetached
+# calls.
 scan_output=$("$python_bin" "$scanner" "$service_file" 2>&1)
 printf '%s\n' "$scan_output" >&2
-grep -Fq "9 command binding(s) passed, 6 enqueuePopupFileJob call site(s) with proven literal-array provenance, executable always 'omanixy-notification-state'" <<<"$scan_output"
+grep -Fq "9 command binding(s) passed, 6 canonical producer block(s) with proven producer-scope provenance, 6 enqueuePopupFileJob call site(s) accounted for, 3 canonical queue block(s) intact, executable always 'omanixy-notification-state'" <<<"$scan_output"
 
 assert_rejected_raw() {
   local name=$1 content=$2
@@ -117,11 +120,14 @@ assert_rejected_because "fake-string-then-real-exec" "exec/execDetached call fou
 
 # ---------------------------------------------------------------
 # Queue provenance: the canonical enqueuePopupFileJob/
-# enqueueHistoryRead/runNextPopupFileJob plumbing, reproduced
-# verbatim from the production patcher output. Kept in exact sync
-# with scripts/scan-notification-executable-surface's own
-# CANONICAL_BLOCKS constants - a change to one without the other is
-# exactly the kind of drift these adversarial cases exist to catch.
+# enqueueHistoryRead/runNextPopupFileJob plumbing PLUS the six canonical
+# executable producer functions (persistPopupFile/deletePopupFileFor/
+# archivePopupFileFor/writeHistoryFile/clearHistory/sweepOrphanImages),
+# all reproduced verbatim from the production patcher output. Kept in
+# exact sync with scripts/scan-notification-executable-surface's own
+# CANONICAL_BLOCKS/PRODUCER_CANONICAL_BLOCKS constants - a change to one
+# without the other is exactly the kind of drift these adversarial cases
+# exist to catch.
 # ---------------------------------------------------------------
 good_queue_skeleton='  property var popupFileQueue: []
   property var runningPopupFileJobDone: null
@@ -156,16 +162,66 @@ good_queue_skeleton='  property var popupFileQueue: []
   }
 
   function persistPopupFile(snapshot) {
-    var command = ["omanixy-notification-state", "persist-popup", stem(), json()]
+    // The JSON and every image source travel as argv elements, not through
+    // shell interpolation - omanixy-notification-state owns HOME/stem
+    // validation, the images directory, and bounded copying internally.
+    var persistable = NotificationLogic.persistablePopup(snapshot, imagesDir)
+    var command = ["omanixy-notification-state", "persist-popup", NotificationLogic.imageStem(snapshot),
+      NotificationLogic.serializePopup(persistable.entry, NotificationUrgency.Normal)]
+    for (var i = 0; i < persistable.copies.length; i++)
+      command.push(persistable.copies[i].role, persistable.copies[i].from)
+    enqueuePopupFileJob(command)
+  }
+
+  function deletePopupFileFor(row) {
+    if (!row) return
+    // History replays and the "no recent notifications" placeholder never
+    // had a file - delete-popup on a nonexistent stem is a harmless no-op.
+    var command = ["omanixy-notification-state", "delete-popup", NotificationLogic.imageStem(row)]
+    enqueuePopupFileJob(command)
+  }
+
+  function archivePopupFileFor(row) {
+    if (!row) return
+    // A history replay or the empty-history placeholder has no file to move;
+    // archive-popup on a nonexistent stem leaves the history untouched.
+    // Image copies stay put - live and archived entries share imagesDir.
+    var command = ["omanixy-notification-state", "archive-popup", NotificationLogic.imageStem(row)]
+    enqueuePopupFileJob(command)
+  }
+
+  function writeHistoryFile(entry, done) {
+    if (!entry) {
+      if (done) done()
+      return
+    }
+    var persistable = NotificationLogic.persistablePopup(entry, imagesDir)
+    var command = ["omanixy-notification-state", "persist-history", NotificationLogic.imageStem(entry),
+      NotificationLogic.serializePopup(persistable.entry, NotificationUrgency.Normal)]
+    for (var i = 0; i < persistable.copies.length; i++)
+      command.push(persistable.copies[i].role, persistable.copies[i].from)
+    enqueuePopupFileJob(command, done)
+  }
+
+  function clearHistory() {
+    var command = ["omanixy-notification-state", "clear-history"]
+    enqueuePopupFileJob(command)
+  }
+
+  function sweepOrphanImages() {
+    var command = ["omanixy-notification-state", "sweep-images"]
     enqueuePopupFileJob(command)
   }
 
   Process { id: popupFileProc }
   Process { id: readHistoryProc }'
 
-# Baseline: the canonical skeleton alone, with one legitimate call site,
-# must be accepted - proves the provenance machinery does not itself
-# false-positive on the real shape it exists to verify.
+# Baseline: the canonical skeleton alone, with its six legitimate producer
+# call sites, must be accepted - proves the provenance machinery does not
+# itself false-positive on the real shape it exists to verify. This is
+# also adversarial case S11 (a function-local reviewed literal producer,
+# under its proven canonical shape, must ACCEPT) for every one of the six
+# producers at once.
 assert_accepted_raw "queue-provenance-baseline" "Item {
 $good_queue_skeleton
 }"
@@ -207,9 +263,11 @@ $good_queue_skeleton
 
 # S4: one reviewed literal command construction is left dead while the
 # actual enqueued value comes from a dynamic reassignment closer to the
-# call. Must reject - the call-shape alone (bare \`command\`) is not enough,
-# the nearest preceding construction must itself be the literal array.
-assert_rejected_because "queue-s4-dead-literal-dynamic-reassignment" "is not a literal array" "Item {
+# call, inside a function that is not one of the six pinned producers.
+# Must reject - the call-shape alone (bare \`command\`) is not enough, the
+# call site itself must lie inside a pinned producer's own lexical scope,
+# never traced back to a same-named construction anywhere else in the file.
+assert_rejected_because "queue-s4-dead-literal-dynamic-reassignment" "does not lie inside one of the six pinned producer blocks" "Item {
 $good_queue_skeleton
 
   function attackerFn() {
@@ -274,6 +332,112 @@ assert_rejected_because "queue-s6-renamed-canonical-function" "expected exactly 
 
   Process { id: popupFileProc }
   Process { id: readHistoryProc }
+}"
+
+# ---------------------------------------------------------------
+# Cross-scope producer provenance (S7-S14): the false-open this
+# remediation closes. The old scanner traced an enqueuePopupFileJob call's
+# \`command\` argument back to the file-global "nearest preceding
+# construction" of that identifier - a lexical-scope-blind proof that a
+# same-named function parameter, an unrelated prior function's literal, a
+# destructured local, or a dynamic reassignment inside a wholly different,
+# unreviewed function could all satisfy by pure text position. Every case
+# below builds on the full six-producer/three-queue skeleton above, so
+# each one proves the decoy function - never one of the six pinned
+# producers - is what gets rejected.
+# ---------------------------------------------------------------
+
+# S7: a function parameter named \`command\` shadows an unrelated, safe
+# literal construction in a prior function. Must reject.
+assert_rejected_because "queue-s7-parameter-shadow" "does not lie inside one of the six pinned producer blocks" "Item {
+$good_queue_skeleton
+
+  function safe() {
+    var command = [\"omanixy-notification-state\", \"init\"]
+  }
+
+  function evil(command) {
+    enqueuePopupFileJob(command)
+  }
+}"
+
+# S8: same shadow as S7, plus an actual dynamic caller feeding the
+# parameter from attacker-influenced notification hints. Must reject.
+assert_rejected_because "queue-s8-parameter-shadow-dynamic-caller" "does not lie inside one of the six pinned producer blocks" "Item {
+$good_queue_skeleton
+
+  function evil(command) {
+    enqueuePopupFileJob(command)
+  }
+
+  function bridge(notification) {
+    evil(notification.hints[\"argv\"])
+  }
+}"
+
+# S9: no parameter shadow at all - the calling function has no local
+# \`command\` of its own, only a prior, unrelated function's literal. Must
+# reject; a lexical scope cannot borrow another function's local.
+assert_rejected_because "queue-s9-prior-function-literal-only" "does not lie inside one of the six pinned producer blocks" "Item {
+$good_queue_skeleton
+
+  function safe() {
+    var command = [\"omanixy-notification-state\", \"init\"]
+  }
+
+  function evil() {
+    enqueuePopupFileJob(command)
+  }
+}"
+
+# S10: a destructured local named \`command\` stands in for the parameter
+# shadow. Must reject via the same producer-scope mechanism.
+assert_rejected_because "queue-s10-destructured-shadow" "does not lie inside one of the six pinned producer blocks" "Item {
+$good_queue_skeleton
+
+  function evil(payload) {
+    var { command } = payload
+    enqueuePopupFileJob(command)
+  }
+}"
+
+# S12: a reviewed-looking producer with an extra reassignment between the
+# literal construction and the enqueue call. The extra statement means
+# this function's text can never match any of the six pinned producer
+# blocks, so its call site is rejected the same as any other decoy.
+assert_rejected_because "queue-s12-reviewed-producer-second-reassignment" "does not lie inside one of the six pinned producer blocks" "Item {
+$good_queue_skeleton
+
+  function evilProducer() {
+    var command = [\"omanixy-notification-state\", \"sweep-images\"]
+    command = attackerControlled()
+    enqueuePopupFileJob(command)
+  }
+}"
+
+# S13: a function parameter named \`command\` plus an ambiguous local
+# reassignment inside the same function. Must fail closed.
+assert_rejected_because "queue-s13-parameter-plus-local-ambiguity" "does not lie inside one of the six pinned producer blocks" "Item {
+$good_queue_skeleton
+
+  function evilProducer(command) {
+    if (command) {
+      var command = [\"omanixy-notification-state\", \"sweep-images\"]
+    }
+    enqueuePopupFileJob(command)
+  }
+}"
+
+# S14: one of the six canonical producer blocks (sweepOrphanImages) is
+# duplicated verbatim a second time. Must reject on exact-count drift, not
+# silently accept the duplicate as a second valid producer.
+assert_rejected_because "queue-s14-duplicate-producer-block" "expected exactly one pinned occurrence, found 2" "Item {
+$good_queue_skeleton
+
+  function sweepOrphanImages() {
+    var command = [\"omanixy-notification-state\", \"sweep-images\"]
+    enqueuePopupFileJob(command)
+  }
 }"
 
 printf '%s\n' 'notifications executable surface checks passed'

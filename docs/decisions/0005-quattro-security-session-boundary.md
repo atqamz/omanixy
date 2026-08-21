@@ -1734,18 +1734,39 @@ requires the three canonical queue functions (`enqueuePopupFileJob`,
 text exactly once each - the same drift discipline the production patcher
 itself uses - and only accepts the two queue-plumbing shapes when they
 fall inside one of those three verified blocks. Every `popupFileQueue`
-mutation must likewise fall inside one of those blocks, and every
-`enqueuePopupFileJob` call site must pass the bare identifier `command`
-(never a function call, a property access, or any other expression),
-traced back to its nearest preceding construction, which must itself be
-one of the exec/verb-validated literal arrays this scanner independently
-audits - a dynamic reassignment sitting closer to the call than the
-literal array fails closed. A six-case adversarial matrix
+mutation must likewise fall inside one of those blocks.
+
+A second hostile review found that the first version of the
+`enqueuePopupFileJob` call-site proof, while requiring the bare
+identifier `command` as the argument, traced that identifier back to its
+file-global "nearest preceding construction" - a lexical-scope-blind
+proof. A function parameter named `command` in an unrelated, attacker-
+reachable function could shadow an entirely different, reviewed literal
+constructed earlier in the file and be silently accepted, because the
+scanner searched backward through the whole file rather than confining
+itself to the calling function's own scope. The scanner now pins each of
+the six executable producer functions (`persistPopupFile`,
+`deletePopupFileFor`, `archivePopupFileFor`, `writeHistoryFile`,
+`clearHistory`, `sweepOrphanImages`) as canonical reviewed blocks, exactly
+like the three queue functions above, and accepts an `enqueuePopupFileJob`
+call site only when it lies inside one of those six pinned ranges - the
+one lexical scope where that call's literal `command` construction and
+the call itself are proven together. The file-global nearest-preceding
+search is gone entirely; there is no longer any path by which a call
+outside a producer's own reviewed scope can be accepted, regardless of
+parameter shadowing, destructuring, aliasing, nested functions, or
+reassignment. A fourteen-case adversarial matrix
 (test/security-notifications-executable-surface.sh) proves a second copy
 of either queue-plumbing shape, an attacker-controlled call argument, a
-dead literal shadowed by a dynamic reassignment, a duplicated canonical
-block, and a renamed canonical block are all rejected, alongside a
-baseline proving the canonical skeleton itself is not a false positive.
+dead literal shadowed by a dynamic reassignment, a duplicated or renamed
+canonical block, a shadowing function parameter (with and without a
+dynamic caller feeding it), a prior-function literal referenced with no
+local of its own, a destructured local standing in for the parameter
+shadow, a reviewed-looking producer body carrying an extra reassignment,
+a parameter named `command` combined with an ambiguous local, and a
+duplicated producer block are all rejected, alongside a baseline proving
+the full six-producer/three-queue canonical skeleton itself is not a
+false positive.
 
 The generated-QML behavior proof now exercises the complete lettered
 matrix rather than a subset: replacement identity and content, DND

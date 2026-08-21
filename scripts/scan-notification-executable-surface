@@ -43,11 +43,22 @@ proves it mechanically instead:
    same three blocks - the queue has no other write path.
 4. Every call to `enqueuePopupFileJob` must pass the bare identifier
    `command` (optionally with a second bare identifier for `done`) - never
-   a function call, a property access, or any other expression - and the
-   nearest preceding construction of that identifier must be one of the
-   literal, exec/verb-validated command arrays this scanner independently
-   audits. A dynamic reassignment of `command` closer to the call than its
-   literal construction, or no literal construction at all, fails closed.
+   a function call, a property access, or any other expression - AND that
+   call site must lie inside one of the six pinned, reviewed producer
+   function blocks (persistPopupFile/deletePopupFileFor/
+   archivePopupFileFor/writeHistoryFile/clearHistory/sweepOrphanImages),
+   each required to match pinned text exactly once, the same discipline as
+   the three queue functions above. A prior version of this check instead
+   traced the argument back to its file-global "nearest preceding
+   construction" of the `command` identifier - a lexical-scope-blind proof
+   that a same-named function parameter, an unrelated prior function's
+   literal, a destructured local, or a dynamic reassignment inside a
+   different, unreviewed function could all satisfy by pure text position,
+   without the call actually living in the scope that constructed the
+   value. Because every producer function is now pinned byte-for-byte, a
+   call site outside all six can never smuggle in a shadowed, destructured,
+   reassigned, or otherwise attacker-influenced `command` - the only way to
+   be inside a pinned block is to BE the reviewed producer, verbatim.
 
 Discovery reuses the shared QML source-discovery lexical primitives
 (scripts/source_discovery.py) for comment/string masking and the shared
@@ -143,12 +154,83 @@ CANONICAL_BLOCKS = {
     ]),
 }
 
-# The bare `command` identifier, assigned (not compared, not a property
-# access like `job.command` or `popupFileProc.command`). Used to trace each
-# enqueuePopupFileJob call site's argument back to its nearest preceding
-# construction - literal array (good) or anything else (bad).
-BARE_COMMAND_ASSIGN_RE = re.compile(r"(?<![.\w])\bcommand\s*=(?!=)")
-BARE_COMMAND_ARRAY_ASSIGN_RE = re.compile(r"(?<![.\w])\bcommand\s*=\s*\[")
+# The six canonical executable producer functions, pinned verbatim to the
+# production patcher's own output (scripts/patch-notification-service).
+# Each must occur in the source exactly once - the same "exact text, fail
+# on drift" discipline as CANONICAL_BLOCKS above. Unlike the queue-plumbing
+# blocks, these are the actual proof of provenance for every
+# enqueuePopupFileJob call site: a call is only ever accepted when it lies
+# inside one of these six pinned ranges, because that is the only way for
+# the call to be paired, in the same lexical scope, with the literal
+# command array that pinned text constructs. Authored here with their real
+# comments (as the patcher emits them) and passed through
+# source_discovery.strip_comments so the pinned text matches this
+# scanner's own comment-stripped `stripped` source exactly.
+_PRODUCER_SOURCE = {
+    "persistPopupFile": block([
+        "  function persistPopupFile(snapshot) {",
+        "    // The JSON and every image source travel as argv elements, not through",
+        "    // shell interpolation - omanixy-notification-state owns HOME/stem",
+        "    // validation, the images directory, and bounded copying internally.",
+        "    var persistable = NotificationLogic.persistablePopup(snapshot, imagesDir)",
+        '    var command = ["omanixy-notification-state", "persist-popup", NotificationLogic.imageStem(snapshot),',
+        "      NotificationLogic.serializePopup(persistable.entry, NotificationUrgency.Normal)]",
+        "    for (var i = 0; i < persistable.copies.length; i++)",
+        "      command.push(persistable.copies[i].role, persistable.copies[i].from)",
+        "    enqueuePopupFileJob(command)",
+        "  }",
+    ]),
+    "deletePopupFileFor": block([
+        "  function deletePopupFileFor(row) {",
+        "    if (!row) return",
+        '    // History replays and the "no recent notifications" placeholder never',
+        "    // had a file - delete-popup on a nonexistent stem is a harmless no-op.",
+        '    var command = ["omanixy-notification-state", "delete-popup", NotificationLogic.imageStem(row)]',
+        "    enqueuePopupFileJob(command)",
+        "  }",
+    ]),
+    "archivePopupFileFor": block([
+        "  function archivePopupFileFor(row) {",
+        "    if (!row) return",
+        "    // A history replay or the empty-history placeholder has no file to move;",
+        "    // archive-popup on a nonexistent stem leaves the history untouched.",
+        "    // Image copies stay put - live and archived entries share imagesDir.",
+        '    var command = ["omanixy-notification-state", "archive-popup", NotificationLogic.imageStem(row)]',
+        "    enqueuePopupFileJob(command)",
+        "  }",
+    ]),
+    "writeHistoryFile": block([
+        "  function writeHistoryFile(entry, done) {",
+        "    if (!entry) {",
+        "      if (done) done()",
+        "      return",
+        "    }",
+        "    var persistable = NotificationLogic.persistablePopup(entry, imagesDir)",
+        '    var command = ["omanixy-notification-state", "persist-history", NotificationLogic.imageStem(entry),',
+        "      NotificationLogic.serializePopup(persistable.entry, NotificationUrgency.Normal)]",
+        "    for (var i = 0; i < persistable.copies.length; i++)",
+        "      command.push(persistable.copies[i].role, persistable.copies[i].from)",
+        "    enqueuePopupFileJob(command, done)",
+        "  }",
+    ]),
+    "clearHistory": block([
+        "  function clearHistory() {",
+        '    var command = ["omanixy-notification-state", "clear-history"]',
+        "    enqueuePopupFileJob(command)",
+        "  }",
+    ]),
+    "sweepOrphanImages": block([
+        "  function sweepOrphanImages() {",
+        '    var command = ["omanixy-notification-state", "sweep-images"]',
+        "    enqueuePopupFileJob(command)",
+        "  }",
+    ]),
+}
+PRODUCER_CANONICAL_BLOCKS = {
+    name: source_discovery.strip_comments(raw, shell=False)
+    for name, raw in _PRODUCER_SOURCE.items()
+}
+
 POPUP_FILE_QUEUE_ASSIGN_RE = re.compile(r"(?<![.\w])\bpopupFileQueue\s*=(?!=)")
 # Excludes the function's own definition header ("function
 # enqueuePopupFileJob(command, done) {") - every other match is a real call
@@ -288,14 +370,14 @@ def check_command(tokens: list[tuple[str, bool]], context: str) -> None:
             fail(f"{context}: shell interpreter literal found in a data position ({value!r})")
 
 
-def locate_canonical_blocks(stripped: str) -> dict[str, tuple[int, int]]:
+def locate_pinned_blocks(stripped: str, blocks: dict[str, str], label: str) -> dict[str, tuple[int, int]]:
     ranges: dict[str, tuple[int, int]] = {}
-    for name, canonical_text in CANONICAL_BLOCKS.items():
+    for name, canonical_text in blocks.items():
         count = stripped.count(canonical_text)
         if count != 1:
             fail(
-                f"queue provenance block {name!r}: expected exactly one pinned occurrence, found {count} "
-                "- the canonical queue plumbing has drifted and provenance can no longer be proven"
+                f"{label} {name!r}: expected exactly one pinned occurrence, found {count} "
+                f"- the canonical {label} has drifted and provenance can no longer be proven"
             )
         start = stripped.index(canonical_text)
         ranges[name] = (start, start + len(canonical_text))
@@ -306,25 +388,31 @@ def within_any(position: int, ranges: dict[str, tuple[int, int]]) -> bool:
     return any(start <= position < end for start, end in ranges.values())
 
 
-def check_queue_provenance(stripped: str, canonical_ranges: dict[str, tuple[int, int]]) -> int:
+def check_command_provenance(
+    stripped: str,
+    queue_ranges: dict[str, tuple[int, int]],
+    producer_ranges: dict[str, tuple[int, int]],
+) -> int:
     # Every mutation of popupFileQueue itself must live inside one of the
-    # three verified canonical blocks - the queue has no other write path.
+    # three verified canonical queue blocks - the queue has no other write
+    # path.
     queue_assignments = list(POPUP_FILE_QUEUE_ASSIGN_RE.finditer(stripped))
     for match in queue_assignments:
-        if not within_any(match.start(), canonical_ranges):
+        if not within_any(match.start(), queue_ranges):
             fail(
                 f"line {line_of(stripped, match.start())}: popupFileQueue is mutated outside the "
                 "canonical enqueuePopupFileJob/enqueueHistoryRead/runNextPopupFileJob plumbing"
             )
 
     # Every call site must pass the bare `command` identifier (never a
-    # function call, property access, or any other expression), and the
-    # identifier's nearest preceding construction must be a literal array -
-    # never a dynamic reassignment sitting closer to the call.
-    array_command_starts = {
-        match.start()
-        for match in BARE_COMMAND_ARRAY_ASSIGN_RE.finditer(stripped)
-    }
+    # function call, property access, or any other expression), AND the
+    # call itself must live inside one of the six pinned producer blocks -
+    # the only lexical scope where that identifier's literal construction
+    # and this call are proven together. A file-global "nearest preceding
+    # construction" of `command` is not consulted anywhere: a producer
+    # block's own pinned text already fixes its single `command`
+    # construction and its own call, so no cross-scope search is needed or
+    # trusted.
     checked_calls = 0
     for call_start, args_text in find_enqueue_calls(stripped):
         # A call site inside the canonical enqueuePopupFileJob definition
@@ -339,22 +427,20 @@ def check_queue_provenance(stripped: str, canonical_ranges: dict[str, tuple[int,
                 "identifier `command` (optionally with a second bare identifier for `done`) is allowed"
             )
 
-        preceding_assignments = [
-            m for m in BARE_COMMAND_ASSIGN_RE.finditer(stripped, 0, call_start)
-        ]
-        if not preceding_assignments:
-            fail(f"{context}: enqueuePopupFileJob(command) called with no prior construction of `command`")
-        nearest = preceding_assignments[-1]
-        if nearest.start() not in array_command_starts:
+        if not within_any(call_start, producer_ranges):
             fail(
-                f"{context}: the nearest construction of `command` before this call "
-                f"(line {line_of(stripped, nearest.start())}) is not a literal array - "
-                "queue provenance cannot be proven"
+                f"{context}: enqueuePopupFileJob(...) call site does not lie inside one of the six "
+                "pinned producer blocks (persistPopupFile/deletePopupFileFor/archivePopupFileFor/"
+                "writeHistoryFile/clearHistory/sweepOrphanImages) - a call outside its own reviewed "
+                "lexical producer scope cannot prove queue provenance"
             )
         checked_calls += 1
 
-    if checked_calls == 0:
-        fail("no enqueuePopupFileJob call sites found - the queue-provenance invariant is unverifiable")
+    if checked_calls != len(producer_ranges):
+        fail(
+            f"expected exactly {len(producer_ranges)} enqueuePopupFileJob call site(s), one per pinned "
+            f"producer block, but found {checked_calls} - the producer-to-call-site pairing has drifted"
+        )
 
     return checked_calls
 
@@ -381,9 +467,13 @@ def scan(text: str) -> int:
     # rename.
     has_queue = "enqueuePopupFileJob" in stripped
     if has_queue:
-        canonical_ranges = locate_canonical_blocks(stripped)
-        checked_calls = check_queue_provenance(stripped, canonical_ranges)
+        queue_ranges = locate_pinned_blocks(stripped, CANONICAL_BLOCKS, "queue provenance block")
+        producer_ranges = locate_pinned_blocks(stripped, PRODUCER_CANONICAL_BLOCKS, "producer block")
+        checked_calls = check_command_provenance(stripped, queue_ranges, producer_ranges)
+        canonical_ranges = queue_ranges
     else:
+        queue_ranges = {}
+        producer_ranges = {}
         canonical_ranges = {}
         checked_calls = 0
 
@@ -430,7 +520,9 @@ def scan(text: str) -> int:
 
     print(
         f"notification executable surface: {allowed_count} command binding(s) passed, "
-        f"{checked_calls} enqueuePopupFileJob call site(s) with proven literal-array provenance, "
+        f"{len(producer_ranges)} canonical producer block(s) with proven producer-scope provenance, "
+        f"{checked_calls} enqueuePopupFileJob call site(s) accounted for, "
+        f"{len(queue_ranges)} canonical queue block(s) intact, "
         f"executable always {ALLOWED_EXECUTABLE!r}, verb always one of the reviewed fixed-domain set, "
         "0 exec/execDetached/run/startDetached calls found (expected)",
         file=sys.stderr,
