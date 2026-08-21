@@ -225,6 +225,20 @@ let
         org.freedesktop.DBus GetNameOwner s org.freedesktop.Notifications 2>&1
     }
     has_owner() { case "$1" in *'"'*) return 0 ;; *) return 1 ;; esac; }
+    # Extract the bare ":1.N" unique connection name from owner_now()'s
+    # `s ":1.N"` text output, or empty if there is currently no owner.
+    owner_unique() { printf '%s\n' "$1" | sed -n 's/^s "\(:[^"]*\)"$/\1/p'; }
+    # Map a D-Bus unique connection name to the real Unix PID that holds it,
+    # via the real org.freedesktop.DBus.GetConnectionUnixProcessID call - the
+    # only way to prove *who* actually owns a name rather than merely that
+    # some owner string is present.
+    owner_pid_for() {
+      local unique=$1
+      [ -z "$unique" ] && return 1
+      busctl --user call org.freedesktop.DBus /org/freedesktop/DBus \
+        org.freedesktop.DBus GetConnectionUnixProcessID s "$unique" 2>/dev/null \
+        | sed -n 's/^u \([0-9]\+\)$/\1/p'
+    }
     qs_ipc() {
       local dir=$1 target=$2 fn=$3
       shift 3
@@ -796,15 +810,38 @@ let
         done
         if [ "$dunst_owns" = "yes" ]; then
           echo "CHECK dunst-started PASS pid=$dpid"
-          echo "CHECK dunst-owns-name PASS owner=$owner_probe"
         else
           echo "CHECK dunst-started FAIL"
-          echo "CHECK dunst-owns-name FAIL"
+          echo "CHECK dunst-owns-name FAIL no-owner"
           cat dunst.log
           kill "$dpid" "$xvfb_pid" 2>/dev/null || true
           exit 0
         fi
         owner_before_quattro="$owner_probe"
+
+        # dunst-owns-name proves process identity, not merely that some
+        # owner string exists: the real unique owner is mapped via
+        # GetConnectionUnixProcessID to a real PID, and that PID must equal
+        # dunst's own $dpid. A mutation where some unrelated process happens
+        # to own the name after dunst starts cannot satisfy this: its PID
+        # would not equal $dpid. /proc/<pid>/exe is recorded as additional
+        # diagnostic evidence only, never gating PASS/FAIL: the pinned
+        # `dunst` on PATH is a nixpkgs wrapper script that `exec`s into
+        # `.dunst-wrapped` (same PID throughout, so the PID match above is
+        # unaffected), but that means the wrapper script's own realpath
+        # never equals /proc/<pid>/exe's post-exec target, so comparing them
+        # for equality would fail this check for a reason unrelated to the
+        # actual identity this proof cares about.
+        dunst_unique=$(owner_unique "$owner_before_quattro")
+        dunst_owner_pid=$(owner_pid_for "$dunst_unique")
+        dunst_exe=$(readlink -f "/proc/$dunst_owner_pid/exe" 2>/dev/null || true)
+        if [ -n "$dunst_owner_pid" ] && [ "$dunst_owner_pid" = "$dpid" ]; then
+          echo "CHECK dunst-owns-name PASS unique=$dunst_unique pid=$dunst_owner_pid exe=$dunst_exe"
+        else
+          echo "CHECK dunst-owns-name FAIL unique=$dunst_unique owner_pid=$dunst_owner_pid dunst_pid=$dpid exe=$dunst_exe"
+          kill "$dpid" "$xvfb_pid" 2>/dev/null || true
+          exit 0
+        fi
 
         QML2_IMPORT_PATH="$HARNESS_DIR" "$QS" -n -p "$HARNESS_DIR" >harness.log 2>&1 &
         hpid=$!
@@ -820,6 +857,17 @@ let
           echo "CHECK quattro-did-not-steal-name PASS"
         else
           echo "CHECK quattro-did-not-steal-name FAIL before=$owner_before_quattro during=$owner_during"
+        fi
+
+        # While Quattro runs alongside dunst, re-verify the owner-PID
+        # identity is stable, not merely that the owner string looks
+        # unchanged.
+        during_unique=$(owner_unique "$owner_during")
+        during_owner_pid=$(owner_pid_for "$during_unique")
+        if [ -n "$during_owner_pid" ] && [ "$during_owner_pid" = "$dpid" ]; then
+          echo "CHECK dunst-owns-name-pid-stable PASS pid=$during_owner_pid"
+        else
+          echo "CHECK dunst-owns-name-pid-stable FAIL pid=$during_owner_pid dunst_pid=$dpid"
         fi
 
         dunst_alive=no
@@ -857,6 +905,19 @@ let
           echo "CHECK quattro-reclaims-name PASS owner=$owner_after attempts=$n"
         else
           echo "CHECK quattro-reclaims-name FAIL"
+        fi
+
+        # The post-reclaim owner must be proven, not assumed, to be the
+        # Quattro harness process itself: a different unique owner string
+        # than dunst's own, mapped via GetConnectionUnixProcessID to exactly
+        # $hpid.
+        after_unique=$(owner_unique "$owner_after")
+        after_owner_pid=$(owner_pid_for "$after_unique")
+        if [ -n "$after_owner_pid" ] && [ "$after_owner_pid" = "$hpid" ] \
+          && [ -n "$after_unique" ] && [ "$after_unique" != "$dunst_unique" ]; then
+          echo "CHECK quattro-reclaims-name-pid PASS pid=$after_owner_pid unique=$after_unique"
+        else
+          echo "CHECK quattro-reclaims-name-pid FAIL pid=$after_owner_pid hpid=$hpid unique=$after_unique dunst_unique=$dunst_unique"
         fi
 
         notify-send -a TestClient -u normal "KnownDaemonCollision after reclaim"
@@ -954,31 +1015,31 @@ pkgs.testers.runNixOSTest {
     machine.succeed("rm -rf /home/${testUser}/.local/state/omarchy")
     out = machine.succeed("${runScenario "ownership-delivery"}")
     print(out)
-    assert_checks(out, RECOVERY_CHECKS["notifications.ownership-delivery"]["checks"])
+    assert_scenario(out, "notifications.ownership-delivery")
 
     print("=== scenario 2: replacement identity, default action, close round-trip ===")
     machine.succeed("rm -rf /home/${testUser}/.local/state/omarchy")
     out = machine.succeed("${runScenario "replace-action-close"}")
     print(out)
-    assert_checks(out, RECOVERY_CHECKS["notifications.replace-action-close"]["checks"])
+    assert_scenario(out, "notifications.replace-action-close")
 
     print("=== scenario 3: DND suppression + persistence across a real process restart ===")
     machine.succeed("rm -rf /home/${testUser}/.local/state/omarchy")
     out = machine.succeed("${runScenario "dnd-restart"}")
     print(out)
-    assert_checks(out, RECOVERY_CHECKS["notifications.dnd-restart"]["checks"])
+    assert_scenario(out, "notifications.dnd-restart")
 
     print("=== scenario 4: unknown independent-owner collision, non-destructive, event-driven reclaim ===")
     machine.succeed("rm -rf /home/${testUser}/.local/state/omarchy")
     out = machine.succeed("${runScenario "collision-reclaim"}")
     print(out)
-    assert_checks(out, RECOVERY_CHECKS["notifications.collision-reclaim"]["checks"])
+    assert_scenario(out, "notifications.collision-reclaim")
 
     print("=== scenario 5: notification burst, bounded history and log growth ===")
     machine.succeed("rm -rf /home/${testUser}/.local/state/omarchy")
     out = machine.succeed("${runScenario "burst"}")
     print(out)
-    assert_checks(out, RECOVERY_CHECKS["notifications.burst"]["checks"])
+    assert_scenario(out, "notifications.burst")
 
     print("=== scenario 6: session/bus destruction and fresh-session recovery ===")
     machine.succeed("loginctl disable-linger ${testUser} 2>&1 || true")
@@ -991,7 +1052,7 @@ pkgs.testers.runNixOSTest {
     machine.wait_for_file(f"{workdir1}/session-ready", timeout=60)
     phase1_partial = machine.succeed("cat /tmp/session-phase1-out.log")
     print(phase1_partial)
-    assert_checks(phase1_partial, RECOVERY_CHECKS["notifications.session-phase1"]["checks"])
+    assert_scenario(phase1_partial, "notifications.session-phase1")
 
     # Destroy this exact session from the outside - its own logind
     # session-<N>.scope cgroup (which actually holds the driver script and
@@ -1026,12 +1087,12 @@ pkgs.testers.runNixOSTest {
 
     out = machine.succeed("${runScenario "session-phase2"}")
     print(out)
-    assert_checks(out, RECOVERY_CHECKS["notifications.session-phase2"]["checks"])
+    assert_scenario(out, "notifications.session-phase2")
 
     print("=== scenario 7: real known-by-name daemon (dunst) collision under Xvfb ===")
     machine.succeed("rm -rf /home/${testUser}/.local/state/omarchy")
     out = machine.succeed("${runScenario "known-daemon-collision"}")
     print(out)
-    assert_checks(out, RECOVERY_CHECKS["notifications.known-daemon-collision"]["checks"])
+    assert_scenario(out, "notifications.known-daemon-collision")
   '';
 }

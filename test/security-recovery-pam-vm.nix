@@ -117,7 +117,7 @@ pkgs.testers.runNixOSTest {
         def finish(self, scenario_id):
             output = "\n".join(self.lines)
             print(output)
-            assert_checks(output, RECOVERY_CHECKS[scenario_id]["checks"])
+            assert_scenario(output, scenario_id)
             self.lines = []
 
     # --- Scenario 1: real PAM conversation, correct and wrong password ---
@@ -405,34 +405,63 @@ pkgs.testers.runNixOSTest {
     fingerprintMachine.succeed("pkill -9 -f '/libexec/fprint[d]' 2>&1 || true")
     induce_outage(fingerprintMachine)
 
+    def journal_cursor(machine_ref, unit):
+        # `-n 0` prints no log entries at all; `--show-cursor` still emits a
+        # trailing "-- cursor: s=...;..." line naming the current tail
+        # position, which is the real baseline every subsequent
+        # `--after-cursor` count is measured from.
+        out = machine_ref.succeed(f"journalctl -u {unit} --no-pager -n 0 --show-cursor 2>&1").strip()
+        return out.splitlines()[-1].split("cursor:", 1)[1].strip()
+
+    def journal_count_since(machine_ref, unit, cursor):
+        out = machine_ref.execute(
+            f"journalctl -u {unit} --no-pager --after-cursor={shlex.quote(cursor)} 2>&1"
+        )[1]
+        return len([l for l in out.splitlines() if l.strip()])
+
+    backend_baseline_cursor = journal_cursor(fingerprintMachine, "fprintd.service")
+
     stress_attempts = 0
     stress_successes = 0
-    stress_output_lines = 0
     for i in range(20):
         status, output = run_harness(fingerprintMachine, fuid, "single", "omarchy-lock-fingerprint", password="irrelevant", extra_timeout=25, watchdog_ms=20000)
         stress_attempts += 1
-        stress_output_lines += len(output.splitlines())
         if "HARNESS_DONE completed:Success" in output:
             stress_successes += 1
-    print(f"=== FINGERPRINT D: finite outage stress - {stress_attempts} attempts, {stress_successes} successes, {stress_output_lines} output lines ===")
+    print(f"=== FINGERPRINT D: finite outage stress - {stress_attempts} attempts, {stress_successes} successes ===")
 
     c.record("stress-20-attempts-completed", stress_attempts == 20, f"attempts={stress_attempts}")
     c.record("stress-zero-success", stress_successes == 0, f"successes={stress_successes}")
 
     leftover = leftover_quickshell(fingerprintMachine)
     print(f"leftover quickshell processes immediately after the stress run: {leftover}")
-    c.record("stress-single-process", leftover == 0, f"leftover={leftover}")
 
-    # Generous multiplier of the 20-attempt stimulus, mirroring
-    # recovery.polkit-stress-finite's own bound formula.
-    max_lines = 20 * 15 + 50
-    c.record("stress-log-bound", stress_output_lines <= max_lines, f"lines={stress_output_lines} max={max_lines}")
+    # Real backend/system journal evidence, not a process-count proxy: the
+    # fprintd.service unit's own journal (systemd's control-plane messages
+    # about it plus any of its own stdout/stderr) is counted from the
+    # pre-stress baseline cursor, bounded to a generous multiplier of the
+    # 20-attempt stimulus.
+    backend_events = journal_count_since(fingerprintMachine, "fprintd.service", backend_baseline_cursor)
+    max_backend_events = 20 * 20 + 100
+    print(f"fprintd.service journal events since baseline: {backend_events} (max {max_backend_events})")
+    c.record("stress-backend-log-bound", backend_events <= max_backend_events, f"events={backend_events} max={max_backend_events}")
 
     time.sleep(2)
     leftover_after_wait = leftover_quickshell(fingerprintMachine)
+    backend_events_after_wait = journal_count_since(fingerprintMachine, "fprintd.service", backend_baseline_cursor)
     print(f"leftover quickshell processes after a 2s post-stimulus observation window: {leftover_after_wait}")
+    print(f"fprintd.service journal events after the same window: {backend_events_after_wait}")
     c.record("stress-no-runaway-retry", leftover_after_wait == leftover, f"{leftover} -> {leftover_after_wait}")
-    c.record("stress-log-quiescent", leftover_after_wait == 0, f"leftover_after_wait={leftover_after_wait}")
+    # Real quiescence: the same real backend journal, re-measured after a
+    # short no-stimulus window, must not have grown on its own - not merely
+    # "no Quickshell harness process remains", which is a separate fact
+    # recorded by stress-no-quickshell-process below.
+    c.record("stress-backend-log-quiescent", backend_events_after_wait == backend_events, f"before={backend_events} after={backend_events_after_wait}")
+
+    c.record("stress-no-quickshell-process", leftover_after_wait == 0, f"leftover_after_wait={leftover_after_wait}")
+    fprintd_procs = int(fingerprintMachine.succeed("pgrep -c '/libexec/fprint[d]' 2>&1 || true").strip() or "0")
+    print(f"real fprintd processes alive after the stress run: {fprintd_procs}")
+    c.record("stress-no-fprintd-process", fprintd_procs == 0, f"fprintd_procs={fprintd_procs}")
 
     status, output = run_harness(fingerprintMachine, fuid, "single", "omarchy-lock-password", password="${testUserPassword}")
     print("=== FINGERPRINT D: password still available after the finite outage stress ===")

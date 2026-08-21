@@ -24,10 +24,26 @@ with open(path, encoding="utf-8") as f:
 validate = ns["validate"]
 
 RECOVERY_CHECKS = {
-    "surfacea.scenario1": {"owner": "security.surface-a", "checks": frozenset({"x"}), "implemented": True},
-    "surfacea.placeholder": {"owner": "security.surface-a", "checks": frozenset(), "implemented": False},
-    "surfaceb.scenario1": {"owner": "security.surface-b", "checks": frozenset({"y"}), "implemented": True},
-    "core.placeholder": {"owner": "security.recovery", "checks": frozenset(), "implemented": False},
+    "surfacea.scenario1": {
+        "owner": "security.surface-a", "checks": frozenset({"x"}), "implemented": True,
+        "evidence": "test/fixture.sh", "matrix_cases": frozenset({"recovery.a-passed"}),
+    },
+    "surfacea.scenario2": {
+        "owner": "security.surface-a", "checks": frozenset({"z"}), "implemented": True,
+        "evidence": "test/fixture.sh", "matrix_cases": frozenset({"recovery.a-passed-2"}),
+    },
+    "surfacea.placeholder": {
+        "owner": "security.surface-a", "checks": frozenset(), "implemented": False,
+        "evidence": "none", "matrix_cases": frozenset({"recovery.a-hw"}),
+    },
+    "surfaceb.scenario1": {
+        "owner": "security.surface-b", "checks": frozenset({"y"}), "implemented": True,
+        "evidence": "test/fixture.sh", "matrix_cases": frozenset({"recovery.b-passed"}),
+    },
+    "core.placeholder": {
+        "owner": "security.recovery", "checks": frozenset(), "implemented": False,
+        "evidence": "none", "matrix_cases": frozenset({"recovery.core"}),
+    },
 }
 
 LEDGER = {
@@ -58,6 +74,15 @@ MATRIX = {
         {
             "id": "recovery.core", "surface": "security.recovery", "environment": "physical-hardware",
             "status": "required-before-supported", "evidence": "none", "check": "core.placeholder",
+            "expected_invariant": "inv",
+        },
+        # Appended (never inserted) so every pre-existing fixed-index
+        # perturbation test below keeps addressing the same row it always
+        # has - only Part H's own tests reference this row, by index -1 or
+        # by id, never by a renumbered earlier index.
+        {
+            "id": "recovery.a-passed-2", "surface": "security.surface-a", "environment": "nested-vm",
+            "status": "passed", "evidence": "test/fixture.sh", "check": "surfacea.scenario2",
             "expected_invariant": "inv",
         },
     ]
@@ -162,5 +187,77 @@ expect_fail(mx, copy.deepcopy(LEDGER), "non-passed case citing an already-implem
 mx = copy.deepcopy(MATRIX)
 mx["items"][0]["check"] = ["surfacea.scenario1"]
 expect_pass(mx, copy.deepcopy(LEDGER))
+
+# --- Part H: scenario <-> matrix case must be bound by exact identity, not ---
+# --- merely by sharing an owner and an evidence file                     ---
+
+# Same-surface wrong-scenario mutation: recovery.a-passed-2 (owned by
+# surfacea.scenario2) is reassigned to cite surfacea.scenario1 instead - same
+# owner, same evidence file as its real scenario, but surfacea.scenario1's
+# own matrix_cases never lists recovery.a-passed-2, so this must fail even
+# though every other field lines up.
+mx = copy.deepcopy(MATRIX)
+assert mx["items"][-1]["id"] == "recovery.a-passed-2"
+mx["items"][-1]["check"] = "surfacea.scenario1"
+expect_fail(mx, copy.deepcopy(LEDGER), "same-surface wrong scenario id (matrix_cases mismatch)")
+
+# A matrix case citing a check id that is real, correctly owned, and
+# implemented, but whose matrix_cases set was never extended to include this
+# case (mirrors the issue's exact recovery.pam-fingerprint-backend-recovery /
+# fingerprint.no-device mutation).
+checks = copy.deepcopy(RECOVERY_CHECKS)
+checks["surfacea.scenario1"] = dict(checks["surfacea.scenario1"])
+checks["surfacea.scenario1"]["matrix_cases"] = frozenset()  # no longer claims recovery.a-passed
+try:
+    validate(copy.deepcopy(MATRIX), copy.deepcopy(LEDGER), repo_path_exists, checks)
+except AssertionError:
+    pass
+else:
+    raise AssertionError("expected validate() to reject a matrix case missing from scenario.matrix_cases")
+
+# A scenario's matrix_cases referencing a matrix id that does not exist at
+# all - a registry entry cannot unilaterally claim ownership of a case that
+# was never defined.
+checks = copy.deepcopy(RECOVERY_CHECKS)
+checks["surfacea.scenario1"] = dict(checks["surfacea.scenario1"])
+checks["surfacea.scenario1"]["matrix_cases"] = frozenset({"recovery.a-passed", "recovery.does-not-exist"})
+try:
+    validate(copy.deepcopy(MATRIX), copy.deepcopy(LEDGER), repo_path_exists, checks)
+except AssertionError:
+    pass
+else:
+    raise AssertionError("expected validate() to reject scenario.matrix_cases citing a nonexistent case")
+
+# Passed-case evidence must match the scenario's own registered evidence
+# exactly, not merely both be non-"none" - a passed case citing the right
+# scenario id but a different (stale, or copy-pasted) evidence path is
+# rejected the same way a missing evidence file is.
+mx = copy.deepcopy(MATRIX)
+mx["items"][0]["evidence"] = "test/other-fixture.sh"
+
+
+def repo_path_exists_with_other(path):
+    return path in ("test/fixture.sh", "test/other-fixture.sh")
+
+
+try:
+    validate(mx, copy.deepcopy(LEDGER), repo_path_exists_with_other, copy.deepcopy(RECOVERY_CHECKS))
+except AssertionError:
+    pass
+else:
+    raise AssertionError("expected validate() to reject passed-case evidence that mismatches its scenario")
+
+# --- Part I: every required_before_supported bullet stands on its own ---
+
+# The exact adversarial fixture from the issue: a valid baseline RBS bullet
+# with a real id, plus a second, prose-only bullet with no id at all. The
+# aggregate-text search this validator used to run would still find the
+# first bullet's id and pass; each bullet must now be checked on its own.
+m = copy.deepcopy(LEDGER)
+m["items"][0]["evidence"]["required_before_supported"] = [
+    "existing gap (recovery.a-hw)",
+    "another future support gap with no recovery id",
+]
+expect_fail(copy.deepcopy(MATRIX), m, "extra prose-only bullet alongside an otherwise-valid RBS list")
 
 print("recovery-contract-helpers self-test: all adversarial cases behaved as expected")

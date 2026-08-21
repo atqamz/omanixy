@@ -2043,7 +2043,7 @@ against a real Wayland session for the agent's own `PanelWindow`
 presentation remains unavailable for the same nested-compositor reason as
 lock and idle (`recovery.polkit-nested-compositor`), and a larger,
 hundreds-of-cycles stress run beyond the finite 20-cycle one just proven
-stays under `required_before_supported`.
+stays under `required_before_supported` (`recovery.polkit-stress-large-scale`).
 
 ### Notifications real D-Bus ownership and collision behavior
 
@@ -2168,6 +2168,97 @@ by more than one ledger entry - closing the exact "`security.recovery` as a
 duplicate owner of a child surface's own gap" failure mode this layer's
 remediation was asked to eliminate. All of the drifted prose above was
 reworded to cite each surface's own outstanding cases only.
+
+### Final remediation: process-identity proof, real backend log quiescence, and scenario/matrix binding
+
+A second remediation pass on this same layer closed five further false-open
+gaps, none of them found by re-running any existing test - each is a defect
+in what a check actually proved, or in the contract binding the ledger to
+that evidence.
+
+`recovery.notifications-known-daemon-collision`'s `dunst-owns-name` check
+used to accept any owner string at all - "some process owns the name" is not
+"dunst owns the name". It now maps the real D-Bus unique owner to a real
+Unix PID via `org.freedesktop.DBus.GetConnectionUnixProcessID` and requires
+that PID to equal dunst's own (the same PID throughout, since the pinned
+`dunst` on `PATH` is a wrapper script that `exec`s into `.dunst-wrapped`
+rather than forking a child; `/proc/<pid>/exe` is recorded alongside as
+diagnostic evidence only, never gating the result, since the wrapper's own
+realpath never equals its post-`exec` target); two new checks,
+`dunst-owns-name-pid-stable` (re-verified while Quattro runs alongside
+dunst) and `quattro-reclaims-name-pid` (the post-reclaim owner is proven,
+not merely observed, to be the Quattro harness process, and to differ from
+dunst's own), close the same gap at the two other points in the scenario
+where "an owner exists" previously stood in for "the *right* owner exists".
+
+`recovery.pam-fingerprint-backend-stress`'s `stress-log-quiescent` check was
+misnamed: it measured that no Quickshell harness process remained, a
+process-count fact, not log quiescence. It is replaced by
+`stress-backend-log-bound` and `stress-backend-log-quiescent`, which
+establish a real `fprintd.service` journal cursor before the 20-attempt
+outage stress, bound the event count since that baseline to a generous
+multiplier of the stimulus, and require the same count, re-measured after a
+short no-stimulus window, to be unchanged - genuine quiescence against the
+real backend's own journal. `stress-no-quickshell-process` and
+`stress-no-fprintd-process` keep the process-level facts as their own,
+correctly named checks.
+
+Every VM test's `RECOVERY_CHECKS[...]["checks"]`-keyed `assert_checks` call
+is replaced by `assert_scenario(output, scenario_id)`, which resolves the
+registry's own exact required set internally - a call site can no longer
+assemble or narrow an arbitrary subset, only name one scenario identity.
+`RECOVERY_CHECKS` itself gains two new fields per entry: `evidence` (the one
+VM test file that scenario's checks come from) and `matrix_cases` (the
+exact, closed set of `upstream/security-recovery-matrix.yaml` row ids that
+scenario is legitimate evidence for). `test/lib/recovery-contract-helpers.py`
+now enforces this bidirectionally: a matrix case's `check:` id must list
+that case in its own `matrix_cases`, a `passed` case's `evidence` must
+exactly match its check id's registered evidence, and every scenario's
+`matrix_cases` entries must themselves exist and cite the scenario back.
+This closes a concrete mutation two scenarios sharing both an owner and an
+evidence file previously let through silently: reassigning
+`recovery.pam-fingerprint-backend-recovery`'s `check:` to
+`fingerprint.no-device` (same surface, same evidence file, wrong scenario)
+now fails, because `fingerprint.no-device`'s own `matrix_cases` never lists
+that case. The audit that added this binding also found one implemented,
+already-live scenario the matrix had never cited at all -
+`polkit.daemon-restart` - which is now recorded as
+`recovery.polkit-daemon-restart`, `status: passed`.
+
+The ledger's own `required_before_supported` validation used to search the
+*joined* text of an entry's whole bullet list for a cited id, so a
+prose-only bullet sitting alongside another bullet that did cite a real id
+passed silently. Every bullet is now checked on its own: each must carry at
+least one stable `recovery.*` id, subject to the same cross-surface/
+already-passed/unreferenced-outstanding rules as before. Auditing the whole
+ledger against this rule found four surfaces with untracked prose:
+`security.lock`'s stranded-lock, no-screen/monitor, and native-lock-UI
+auth-failure bullets are all the same recorded
+`recovery.lock-nested-compositor` gap and now cite it explicitly; its
+open-ended "broader compositor/GPU/hardware matrix" bullet is not a
+completable gate and moved to notes. `security.pam-password`'s faillock and
+systemd-homed bullets were already-settled decisions restated as if still
+outstanding (the faillock decision is confirmed, not pending, per this
+layer's own repeated-failure evidence; systemd-homed's exclusion was already
+documented in this same entry's notes) and are removed from
+`required_before_supported` entirely. `security.polkit-agent`'s
+larger-scale-stress bullet is now `recovery.polkit-stress-large-scale`
+(`required-before-supported`, unimplemented). `security.idle`'s
+suspend/resume bullet duplicated `security.recovery`'s own gap and moved to
+notes; its unsupported-protocol bullet now cites
+`recovery.idle-nested-compositor` explicitly, and its declarative-conflict
+bullet is now `recovery.idle-real-external-owner`
+(`unsupported-environment`, blocked by the same live-compositor gap).
+`security.notification-daemon`'s mako/swaync/fnott bullet is now
+`recovery.notifications-named-daemon-breadth` (`unsupported-environment`,
+same root cause as the dunst case already proved passed).
+`security.recovery`'s fingerprint/TOD bullet duplicated
+`security.pam-fingerprint`'s own gap and moved to notes, leaving its
+suspend-resume and lid-hardware bullets - each already correctly
+self-owned - untouched. `test/lib/recovery-check-helpers-selftest.py` and
+`test/lib/recovery-contract-helpers-selftest.py` gained adversarial fixtures
+pinning every one of these behaviors, including the exact
+baseline-plus-untracked-bullet fixture this section describes.
 
 No `security.*` entry reaches `support: supported` after this layer; the
 target for every entry, including `security.recovery` itself, remains

@@ -29,12 +29,12 @@
 #
 # Every scenario reports its evidence exclusively as `CHECK <name> PASS|FAIL
 # ...` lines, asserted in the outer NixOS test via
-# test/lib/recovery-check-helpers.py's `assert_checks(output, required)`
-# against an exact, named, per-scenario required-check set - never via
-# "no line said FAIL", which a driver that silently skips a step would still
-# satisfy. A missing expected CHECK, an unexpected extra one, a duplicate, or
-# a malformed PASS/FAIL token is exactly as much a failure as an explicit
-# FAIL.
+# test/lib/recovery-check-helpers.py's `assert_scenario(output, scenario_id)`
+# against that scenario's own exact, registered required-check set - never
+# via "no line said FAIL", which a driver that silently skips a step would
+# still satisfy, and never against a caller-assembled subset. A missing
+# expected CHECK, an unexpected extra one, a duplicate, or a malformed
+# PASS/FAIL token is exactly as much a failure as an explicit FAIL.
 { pkgs, self, home-manager }:
 let
   lib = pkgs.lib;
@@ -700,32 +700,32 @@ pkgs.testers.runNixOSTest {
     print("=== scenario 1: real registration ===")
     out = machine.succeed("${runScenario "register"}")
     print(out)
-    assert_checks(out, RECOVERY_CHECKS["polkit.register"]["checks"])
+    assert_scenario(out, "polkit.register")
 
     print("=== scenario 2: real authentication success + wrong-password failure ===")
     out = machine.succeed("${runScenario "auth"}")
     print(out)
-    assert_checks(out, RECOVERY_CHECKS["polkit.auth"]["checks"])
+    assert_scenario(out, "polkit.auth")
 
     print("=== scenario 3a: user-initiated cancellation ===")
     out = machine.succeed("${runScenario "user-cancel"}")
     print(out)
-    assert_checks(out, RECOVERY_CHECKS["polkit.user-cancel"]["checks"])
+    assert_scenario(out, "polkit.user-cancel")
 
     print("=== scenario 3b: daemon-initiated cancellation ===")
     out = machine.succeed("${runScenario "daemon-cancel"}")
     print(out)
-    assert_checks(out, RECOVERY_CHECKS["polkit.daemon-cancel"]["checks"])
+    assert_scenario(out, "polkit.daemon-cancel")
 
     print("=== scenario 4: registration collision with an independent agent ===")
     out = machine.succeed("${runScenario "collision"}")
     print(out)
-    assert_checks(out, RECOVERY_CHECKS["polkit.collision"]["checks"])
+    assert_scenario(out, "polkit.collision")
 
     print("=== scenario 5: finite real wrong-password stress (20 cycles) ===")
     out = machine.succeed("${runScenario "stress"}")
     print(out)
-    assert_checks(out, RECOVERY_CHECKS["polkit.stress"]["checks"])
+    assert_scenario(out, "polkit.stress")
 
     print("=== scenario 6: polkitd disappearance/recovery during an in-flight request ===")
     workdir = "/home/${testUser}/polkit-test-daemon-restart"
@@ -741,6 +741,6 @@ pkgs.testers.runNixOSTest {
     )
     out = machine.succeed("cat /tmp/daemon-restart-out.log")
     print(out)
-    assert_checks(out, RECOVERY_CHECKS["polkit.daemon-restart"]["checks"])
+    assert_scenario(out, "polkit.daemon-restart")
   '';
 }

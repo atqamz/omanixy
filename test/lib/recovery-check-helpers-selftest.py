@@ -22,6 +22,7 @@ ns = {}
 with open(path, encoding="utf-8") as f:
     exec(compile(f.read(), path, "exec"), ns)
 assert_checks = ns["assert_checks"]
+assert_scenario = ns["assert_scenario"]
 CheckAssertionError = ns["CheckAssertionError"]
 RECOVERY_CHECKS = ns["RECOVERY_CHECKS"]
 
@@ -110,7 +111,56 @@ for scenario_id, scenario in RECOVERY_CHECKS.items():
     )
     assert isinstance(scenario.get("checks"), frozenset), f"{scenario_id}: checks must be a frozenset"
     assert isinstance(scenario.get("implemented"), bool), f"{scenario_id}: implemented must be a bool"
+    assert isinstance(scenario.get("evidence"), str) and scenario["evidence"], (
+        f"{scenario_id}: evidence must be a non-empty string ('none' for a placeholder)"
+    )
+    assert isinstance(scenario.get("matrix_cases"), frozenset) and scenario["matrix_cases"], (
+        f"{scenario_id}: matrix_cases must be a non-empty frozenset - every scenario must be "
+        "tied to at least one real recovery matrix case id"
+    )
     if not scenario["implemented"]:
         assert not scenario["checks"], f"{scenario_id}: unimplemented scenario must have an empty checks set"
+        assert scenario["evidence"] == "none", f"{scenario_id}: unimplemented scenario must have evidence 'none'"
+
+# --- assert_scenario: the scenario-bound public API VM tests must use ---
+
+# Happy path: a real, implemented scenario id resolves to its own exact
+# registered checks set.
+assert_scenario(f"CHECK {A} PASS\nCHECK {B} PASS\n", "notifications.ownership-delivery")
+
+# Unknown scenario id must be rejected before any output parsing.
+try:
+    assert_scenario(f"CHECK {A} PASS\nCHECK {B} PASS\n", "totally-bogus-scenario-id")
+except CheckAssertionError:
+    pass
+else:
+    raise AssertionError("expected assert_scenario to reject an unknown scenario id")
+
+# An unimplemented (placeholder) scenario id must never be assertable, even
+# against output that happens to look plausible - no VM test may claim
+# evidence for a case this flake documents as not yet exercised.
+for placeholder_id, placeholder in RECOVERY_CHECKS.items():
+    if placeholder["implemented"]:
+        continue
+    try:
+        assert_scenario("CHECK anything PASS\n", placeholder_id)
+    except CheckAssertionError:
+        pass
+    else:
+        raise AssertionError(
+            f"expected assert_scenario to reject unimplemented scenario id {placeholder_id!r}"
+        )
+    break
+
+# A caller cannot narrow assert_scenario to a subset of the scenario's own
+# checks: passing only the {A} half of {A, B} must still fail, since
+# assert_scenario always resolves the scenario's full registered set
+# internally rather than accepting whatever the caller's own output emits.
+try:
+    assert_scenario(f"CHECK {A} PASS\n", "notifications.ownership-delivery")
+except CheckAssertionError:
+    pass
+else:
+    raise AssertionError("expected assert_scenario to require the scenario's full checks set")
 
 print("recovery-check-helpers self-test: all adversarial cases behaved as expected")

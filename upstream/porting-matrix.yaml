@@ -968,10 +968,9 @@ items:
         - layer 8 live evidence (test/security-recovery-pam-vm.nix, upstream/security-recovery-matrix.yaml) that the underlying pam_unix conversation this lock depends on - start, prompt, cancel, repeated wrong password, correct password, missing service - is sound against a real PAM stack in a booted VM, and that the owning omanixy-shell.service's restart policy is genuinely bounded under a real failure condition; the lock's own WlSessionLock-bound presentation remains unexercised live, per required_before_supported below
       required_before_supported:
         - crash and restart with an ext-session-lock held against a live nested compositor - investigated at layer 8 and recorded as unsupported-environment in upstream/security-recovery-matrix.yaml (recovery.lock-nested-compositor); the pinned Hyprland 0.55.4/Aquamarine headless backend does not reach a usable compositor state in this KVM/QEMU environment even with a DRM render node present
-        - stranded lock detection and recovery against that same live nested compositor
-        - no-screen and monitor-change behavior against that same live nested compositor
-        - bounded authentication failure behavior exercised through the native lock's own WlSessionLock UI and failedAttempts counter, as opposed to the underlying pam_unix conversation itself, which layer 8 did prove live via a direct PamContext harness (see security.pam-password)
-        - broader compositor/GPU/hardware matrix beyond the nested/reference environment attempted at layer 8
+        - stranded lock detection and recovery against that same live nested compositor (recovery.lock-nested-compositor)
+        - no-screen and monitor-change behavior against that same live nested compositor (recovery.lock-nested-compositor)
+        - bounded authentication failure behavior exercised through the native lock's own WlSessionLock UI and failedAttempts counter, as opposed to the underlying pam_unix conversation itself, which layer 8 did prove live via a direct PamContext harness (see security.pam-password) - also blocked by the same live nested compositor (recovery.lock-nested-compositor)
     tests:
       - test/quattro-contract-audit.sh
       - test/security-contracts.sh
@@ -982,6 +981,7 @@ items:
       - test/security-lock-core-only.sh
     notes:
       - The initial native topology is in-process because it preserves the pinned service and recovery model; it remains experimental because third-party QML shares the process trust boundary.
+      - The nested-compositor investigation (recovery.lock-nested-compositor) is the sole live-environment blocker for every remaining native-lock-presentation gap - stranded-lock recovery, no-screen/monitor-change behavior, and WlSessionLock-UI-driven authentication-failure behavior all reduce to that one recorded limitation, not four independent gaps. A broader compositor/GPU/hardware matrix beyond the nested/reference environment attempted at layer 8 remains a permanently open-ended breadth statement, not a completable support gate, and is recorded here rather than in required_before_supported for that reason.
       - Omanixy does not enable the lock plugin, install a lock agent, or write PAM configuration in layer 1.
       - Layer 3 makes the native lock reachable only when programs.omanixy.security.lock.enable is explicitly set to true; it remains off by default, password-only (fingerprint stays structurally unreachable), and still owns no keybinding to trigger it. All evidence in this layer is hermetic and fake-backend; no live authentication, generation switch, or real session lock has been exercised.
 
@@ -1062,9 +1062,6 @@ items:
         - hermetic build proof that an unrelated normal-priority security.pam.services."omarchy-lock-password".text definition does not concatenate into the Omanixy-owned service text (mkForce ownership), via test/security-pam-composition.sh
         - hermetic build proof that Omanixy owns both the service's enable state and its text atomically (mkForce on both fields): an unrelated normal-priority enable = false does not suppress the service, and an assertion fails config.system.build.toplevel's evaluation closed if a second, equal-priority override (for example another lib.mkForce on text) contests ownership, rather than letting nixpkgs' lines-type concatenation silently compose an altered auth stack, via test/security-pam-capability.sh
         - layer 8 live evidence (test/security-recovery-pam-vm.nix, upstream/security-recovery-matrix.yaml) of a real PAM conversation against the generated omarchy-lock-password service in a booted NixOS VM: PAM start, prompt, cancel, correct-password success, wrong-password failure, at least 20 consecutive wrong-password attempts with no lockout state and bounded log growth, and a distinct PAM-start failure when the service is absent
-      required_before_supported:
-        - a decision and, if adopted, an explicit lockout policy with real lockout tests, before any faillock module is added - layer 8 confirms the no-faillock decision holds under a real, repeated (>=20 attempts) wrong-password sequence and keeps it as a deliberate v0.1 omission, not a gap
-        - a decision and implementation, if ever adopted, for authenticating systemd-homed accounts; unvalidated and out of scope until then
     tests:
       - test/quattro-contract-audit.sh
       - test/security-pam.sh
@@ -1078,6 +1075,7 @@ items:
       - The implemented password backend is pam_unix against ordinary shadow-backed local Unix accounts. systemd-homed authentication is not implemented by this layer and is not claimed to work; pam_systemd_home is deliberately absent. A host may have systemd-homed available while a given account is still shadow-backed - this is a support-scope omission, not a host-specific claim.
       - support is experimental, not supported, because no live authentication conversation has been exercised; only the generated declarative artifact is hermetically proven.
       - No PAM consumer, native lock, fingerprint capability, polkit agent, idle manager, or notification daemon is enabled by this layer.
+      - No faillock or other lockout policy is adopted in this v0.1; layer 8's real, repeated (>=20 attempts) wrong-password evidence against the live pam_unix backend is the proof this decision holds under load, not an outstanding gate to revisit (see security.recovery's own notes for the same confirmation at the ledger's final promotion gate).
 
   - id: security.pam-fingerprint
     classification: adapted
@@ -1238,8 +1236,9 @@ items:
         - layer 8 live evidence (test/security-recovery-polkit-vm.nix, upstream/security-recovery-matrix.yaml) of real D-Bus polkit agent registration against a live polkitd, real authentication success and wrong-password failure against a test-only policy, real user and daemon-initiated cancellation, real registration collision with an independent agent with neither process killed or stopped, and polkitd disappearance/reappearance mid-request with the requester never hanging
         - layer 8 live evidence (test/security-recovery-cross-feature-vm.nix, recovery.polkit-crash-midauth) of killing the shell process mid-authentication against the real agent while a real pkcheck request is in flight, proving the stranded requester exits boundedly and a fresh process re-registers and authenticates cleanly
         - layer 8 live evidence (test/security-recovery-polkit-vm.nix, recovery.polkit-stress-finite) of a finite 20-cycle real wrong-password stress run with bounded process count and log volume, followed by a fresh correct-password authentication
+        - layer 8 live evidence (test/security-recovery-polkit-vm.nix, recovery.polkit-daemon-restart) of polkitd disappearing while a real authentication request is in flight, the stranded requester bounded rather than hung, the same still-running harness reprompting and authenticating cleanly once polkitd returns, and a fresh harness process also registering and authenticating cleanly
       required_before_supported:
-        - repeated-backend-failure/log-volume behavior at a larger scale (hundreds of cycles) than the finite 20-cycle stress layer 8 already proved passed
+        - repeated-backend-failure/log-volume behavior at a larger scale (hundreds of cycles) than the finite 20-cycle stress layer 8 already proved passed - recorded as required-before-supported in upstream/security-recovery-matrix.yaml (recovery.polkit-stress-large-scale)
         - nested session validation against a real Wayland/Hyprland compositor rather than an offscreen QPA platform (the PolkitAgent object itself does not require one; only its PanelWindow presentation does; investigated at layer 8 and recorded as unsupported-environment in upstream/security-recovery-matrix.yaml, recovery.polkit-nested-compositor)
     tests:
       - test/quattro-contract-audit.sh
@@ -1345,9 +1344,8 @@ items:
         - a direct package-level evaluation proof (bypassing programs.omanixy.security.idle and the Home Manager assertion matrix entirely) that packages/omanixy-shell's own idleRequiresLockValid assertion fires for a hand-constructed idle=true/lock=false security attrset, and passes for idle=true/lock=true
       required_before_supported:
         - a real nested Wayland session idle transition against a live ext-idle-notify-v1 compositor, a real Wayland idle inhibitor, real activity cancelling a live cycle, monitor hotplug while idle detection is active, and Quickshell crash/restart during an active idle cycle - investigated at layer 8 and recorded as unsupported-environment in upstream/security-recovery-matrix.yaml (recovery.idle-nested-compositor); Quickshell's IdleMonitor requires the same live Wayland connection that security.lock's own nested-compositor investigation could not establish in this environment. The offscreen fake-monitor behavior proof (test/security-idle-qml-behavior.sh) remains the available evidence for the idle logic itself.
-        - suspend and resume while an idle cycle or a lock-on-idle request is in flight - depends on the same live nested session; owned by security.recovery's own required_before_supported entry and upstream/security-recovery-matrix.yaml, not duplicated here
-        - the real ext-idle-notify-v1-unsupported fail-safe path against an actual compositor that lacks the protocol
-        - a real declarative conflict scenario (hypridle or swayidle actually running alongside the Quattro idle owner), beyond the already-proven Home Manager assertion matrix
+        - the real ext-idle-notify-v1-unsupported fail-safe path against an actual compositor that lacks the protocol - blocked by the same live nested compositor (recovery.idle-nested-compositor)
+        - a real declarative conflict scenario (hypridle or swayidle actually running alongside the Quattro idle owner), beyond the already-proven Home Manager assertion matrix - recorded as unsupported-environment in upstream/security-recovery-matrix.yaml (recovery.idle-real-external-owner)
     tests:
       - test/quattro-contract-audit.sh
       - test/security-contracts.sh
@@ -1374,6 +1372,7 @@ items:
       - Persisted stay-awake trust is revocable, not merely fail-safe at startup: an indeterminate probe (exit 2) or a probe/writer Process that fails to start disables automatic lock-on-idle immediately via the same stayAwakeStateLoaded=false path startup itself uses, and never infers stayAwake either way - "unknown" is a distinct state from "marker absent", proven at both the exit-code and the FailedToStart-transition level.
       - Cancelling an idle cycle (activity, stay-awake, or a trust revocation) never kills an already-running lock Process; the pinned Layer-3 lock IPC is allowed to complete on its own, and its eventual result is processed normally against whatever state exists by then (a stale ACCEPTED/TERMINAL_UNAVAILABLE is simply a no-op once the cycle has already ended, and a stale retry request is denied by the same cycleActive guard every other retry decision uses) - Layer 6 never sends a signal to, or otherwise interrupts, an in-flight lock request.
       - A lock, probe, or writer Process that fails to start (the pinned Quickshell ABI's onErrorOccurred(QProcess::FailedToStart), which never emits exited()) is detected without polling or an invented QML onError signal: an explicit per-operation awaiting-result flag plus the real runningChanged() signal, reconciled through exactly one Qt.callLater deferral, so a fake or real caller's signal ordering can never cause a normal exit to be double-processed as a start failure.
+      - Suspend and resume while an idle cycle or a lock-on-idle request is in flight depends on the same live nested session this layer's own required_before_supported already lists; that specific outstanding case (recovery.suspend-resume) is owned by security.recovery's own required_before_supported entry, not duplicated here.
       - Process.startDetached() is unreachable from the final audited source, even wrapping an otherwise-allowlisted argv (`omanixy-shell lock lock`, or either omanixy-idle-state form) - scan-idle-executable-surface rejects it unconditionally, the same zero-tolerance treatment already given to exec/execDetached/run.
       - The configured lock timeout is bounded above by 2147483 seconds, the largest whole-second value that survives the pinned Quickshell backend's own signed-32-bit-millisecond conversion (`static_cast<int>(timeout * 1000)` in src/wayland/idle_notify/monitor.cpp) - this ceiling is derived from that pinned arithmetic range, not an Omanixy policy preference, and any value past it falls back to the pinned 300-second default exactly like any other invalid input.
 
@@ -1444,7 +1443,7 @@ items:
         - layer 8 live evidence (test/security-recovery-notifications-vm.nix, recovery.notifications-session-bus-lifecycle) that destroying this test user's real login session and D-Bus user-session bus (systemctl stop on the owning transient unit, confirmed by the user manager reaching SubState=dead, not simulated by sleeping) and then establishing a genuinely fresh session lets a fresh daemon instance claim org.freedesktop.Notifications and deliver again - the specifically-notification-daemon-scoped half of session D-Bus disappearance/recovery, distinct from the systemd-service-level restart bound proven for the shell as a whole (see security.recovery)
         - final layer 8 remediation live evidence (test/security-recovery-notifications-vm.nix, recovery.notifications-known-daemon-collision) of a real collision with a known, by-name external daemon - a real, pinned dunst 1.13.2 process under a disposable Xvfb X11 display - genuinely owning org.freedesktop.Notifications before the Quattro daemon starts, with the Quattro harness never stealing the name, both processes alive throughout, only the test itself terminating dunst, an event-driven reclaim with no restart, and delivery working again afterward
       required_before_supported:
-        - "a real collision with the remaining named daemons (mako/swaync/fnott actually running) - unattempted at this layer: they are wlr-layer-shell-only and still depend on the same live Wayland compositor connection this environment's nested-compositor investigation already found unavailable, unlike dunst's X11 backend which let that one real by-name daemon already be exercised live (see the evidence above)"
+        - "a real collision with the remaining named daemons (mako/swaync/fnott actually running) - unattempted at this layer: they are wlr-layer-shell-only and still depend on the same live Wayland compositor connection this environment's nested-compositor investigation already found unavailable, unlike dunst's X11 backend which let that one real by-name daemon already be exercised live (see the evidence above) - recorded as unsupported-environment in upstream/security-recovery-matrix.yaml (recovery.notifications-named-daemon-breadth)"
         - monitor hotplug with popups visible on screen (recovery.notifications-monitor-hotplug) - depends on the same live nested-compositor presentation security.lock's own nested-compositor investigation could not establish
     tests:
       - test/quattro-contract-audit.sh
@@ -1513,7 +1512,6 @@ items:
         - a hostile self-review of this layer's diff confirming no security option defaulted true, no new recovery daemon or public option, no pam_faillock, no pam_systemd_home, no automatic pre-suspend lock ownership, no broad sudo/setuid, and no competing agent/daemon killed
       required_before_supported:
         - suspend and resume while a native lock or idle cycle is active (recovery.suspend-resume) - live nested-compositor evidence for the native lock and idle surfaces themselves is owned by security.lock's and security.idle's own required_before_supported entries, not duplicated here
-        - enrolled physical fingerprint hardware and a real TOD driver - see security.pam-fingerprint's own required_before_supported entries
         - real laptop lid hardware validation - Omanixy does not own lid/clamshell policy and none is introduced here; recorded in upstream/security-recovery-matrix.yaml (recovery.lid-hardware)
     tests:
       - test/security-contracts.sh
@@ -1524,6 +1522,7 @@ items:
       - test/security-recovery-cross-feature-vm.nix
     notes:
       - This is the final promotion gate, not a permission to enable any security runtime by default. Every programs.omanixy.security.* option remains default false after this layer.
+      - Enrolled physical fingerprint hardware and a real TOD driver remain outstanding; that gap is owned entirely by security.pam-fingerprint's own required_before_supported entries (recovery.pam-fingerprint-enrolled-hardware, recovery.pam-fingerprint-tod-driver) and is not duplicated here, per the same child-surface-owns-its-own-gap discipline this entry's suspend/resume bullet already follows.
       - security.recovery is a compatibility/support ledger entry, not a user-selectable runtime capability; there is no programs.omanixy.security.recovery option, no new recovery daemon, dispatcher, or supervisor. All recovery behavior remains owned by the already-selected services and the existing omanixy-shell.service lifecycle.
       - pam_faillock is intentionally omitted from the v0.1 lock password policy; layer 8's real repeated-wrong-password evidence is the proof this decision holds under load, not a TODO to revisit.
       - systemd-homed accounts (pam_systemd_home) remain unimplemented and unclaimed; the v0.1 backend is ordinary shadow-backed Unix accounts via pam_unix only.

@@ -66,10 +66,25 @@ def validate(matrix, ledger, repo_path_exists, recovery_checks):
                 f"{cid}: check id {check_id!r} is owned by {scenario['owner']!r}, "
                 f"not this case's surface {case['surface']!r} (cross-surface check id)"
             )
+            # A scenario id shared by coincidence (same owner, same evidence
+            # file) can never stand in for a matrix case it does not itself
+            # claim: e.g. two implemented, same-surface, same-evidence-file
+            # scenarios must not be interchangeable just because nothing
+            # else here distinguishes them.
+            assert cid in scenario.get("matrix_cases", ()), (
+                f"{cid}: check id {check_id!r} does not list this case in its own "
+                "matrix_cases - a scenario must explicitly own every matrix case it is "
+                "cited as evidence for (same-surface wrong-scenario mismatch)"
+            )
             if case["status"] == "passed":
                 assert scenario["implemented"], (
                     f"{cid}: status=passed cites check id {check_id!r}, which has no "
                     "implemented evidence (passed case whose check id is absent)"
+                )
+                assert scenario.get("evidence") == case["evidence"], (
+                    f"{cid}: status=passed evidence {case['evidence']!r} does not match "
+                    f"check id {check_id!r}'s own registered evidence "
+                    f"{scenario.get('evidence')!r}"
                 )
             else:
                 assert not scenario["implemented"], (
@@ -106,6 +121,22 @@ def validate(matrix, ledger, repo_path_exists, recovery_checks):
         "security.recovery must be represented in the recovery matrix"
     )
 
+    # Reverse direction of the same binding: every id a scenario's own
+    # matrix_cases claims must be a real matrix case, and that case's own
+    # check field must cite the scenario back - a registry entry cannot
+    # unilaterally claim ownership of a case that never actually names it.
+    for check_id, scenario in recovery_checks.items():
+        for owned_cid in scenario.get("matrix_cases", ()):
+            case = by_id.get(owned_cid)
+            assert case is not None, (
+                f"RECOVERY_CHECKS[{check_id!r}] matrix_cases cites unknown recovery "
+                f"matrix id {owned_cid!r}"
+            )
+            assert check_id in _check_ids(case), (
+                f"RECOVERY_CHECKS[{check_id!r}] claims matrix_cases {owned_cid!r}, but "
+                f"that case's own check field does not cite {check_id!r} back"
+            )
+
     # Exact bidirectional mapping between each ledger entry's own
     # required_before_supported prose and the matrix cases it owns - never a
     # bare "some case exists for this surface" check, and never satisfiable
@@ -115,8 +146,21 @@ def validate(matrix, ledger, repo_path_exists, recovery_checks):
     referenced_by = {}  # matrix case id -> set of ledger entry ids citing it
     for entry_id, entry in security.items():
         required_before_supported = entry["evidence"].get("required_before_supported") or []
-        text = "\n".join(required_before_supported)
-        referenced = set(ID_RE.findall(text))
+
+        # Every individual bullet must carry its own stable recovery.* id -
+        # not merely the joined text of the whole list. A prose-only bullet
+        # sitting alongside another bullet that does cite a real id used to
+        # pass (the aggregate text search would still find that other
+        # bullet's id somewhere), which let untracked support-gate prose
+        # accumulate silently; each bullet now stands on its own.
+        referenced = set()
+        for bullet in required_before_supported:
+            bullet_ids = set(ID_RE.findall(bullet))
+            assert bullet_ids, (
+                f"{entry_id}: required_before_supported bullet has no stable recovery.* "
+                f"case id: {bullet!r}"
+            )
+            referenced |= bullet_ids
 
         dead = sorted(referenced - seen_ids)
         assert not dead, f"{entry_id}: required_before_supported cites unknown recovery matrix id(s): {dead}"

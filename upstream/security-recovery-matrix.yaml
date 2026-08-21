@@ -141,11 +141,16 @@ items:
       20 consecutive fingerprint attempts against the real, deliberately
       unavailable backend each reach a genuine bounded failure, none ever
       succeeds, no autonomous retry loop or accumulating harness process is
-      left behind, event/log volume stays proportional to the 20-attempt
-      stimulus and does not keep growing once the stimulus stops, and a
-      subsequent fresh password authentication still succeeds - the finite
-      real-backend-failure analogue of recovery.polkit-stress-finite for
-      this surface.
+      left behind, and a subsequent fresh password authentication still
+      succeeds - the finite real-backend-failure analogue of
+      recovery.polkit-stress-finite for this surface. Quiescence is measured
+      directly against the real fprintd.service journal (a baseline cursor
+      established before the 20 attempts, an event count bounded
+      proportionally to that stimulus, and the same count re-measured after
+      a short no-stimulus window and required to be unchanged), not inferred
+      from Quickshell harness process absence alone; no real fprintd process
+      and no accumulating Quickshell harness process remain afterward
+      either.
 
   - id: recovery.pam-fingerprint-enrolled-hardware
     surface: security.pam-fingerprint
@@ -245,6 +250,31 @@ items:
       real backend each reach genuine request/failure state, leave exactly
       one harness process and a bounded, non-growing event log, and a
       subsequent fresh correct-password authentication still succeeds.
+
+  - id: recovery.polkit-daemon-restart
+    surface: security.polkit-agent
+    environment: nested-vm
+    status: passed
+    evidence: test/security-recovery-polkit-vm.nix
+    check: polkit.daemon-restart
+    expected_invariant: >-
+      polkitd disappearing while a real authentication request is in flight
+      leaves the stranded requester bounded rather than hung; the same
+      still-running harness process reprompts and authenticates cleanly once
+      polkitd is back, and a fresh harness process launched afterward also
+      registers and authenticates cleanly.
+
+  - id: recovery.polkit-stress-large-scale
+    surface: security.polkit-agent
+    environment: nested-vm
+    status: required-before-supported
+    evidence: none
+    check: polkit.stress-large-scale
+    expected_invariant: >-
+      Repeated real wrong-password authentication cycles at a larger scale
+      (hundreds of cycles) than the finite 20-cycle stress
+      (recovery.polkit-stress-finite) already proved passed remain bounded
+      and non-growing in process count and log volume.
 
   - id: recovery.polkit-crash-midauth
     surface: security.polkit-agent
@@ -369,11 +399,17 @@ items:
       A real collision specifically with a known, by-name external daemon -
       a real, pinned dunst 1.13.2 process, X11-backed under a disposable
       Xvfb display started solely for this scenario - genuinely owns
-      org.freedesktop.Notifications before the Quattro daemon ever starts;
-      the Quattro harness never steals the name while dunst holds it, both
-      processes remain alive throughout, only the test itself (never the
-      harness) terminates dunst, the harness reclaims the name event-driven
-      with no restart, and a fresh notify-send delivers afterward. Distinct
+      org.freedesktop.Notifications before the Quattro daemon ever starts,
+      proven by process identity (the real D-Bus unique owner mapped via
+      GetConnectionUnixProcessID to dunst's own PID) rather than mere
+      owner-string existence, with that identity re-checked while Quattro
+      runs alongside it; the Quattro harness never steals the name while
+      dunst holds it, both processes remain alive throughout, only the test
+      itself (never the harness) terminates dunst, the harness reclaims the
+      name event-driven with no restart - the post-reclaim owner is proven
+      by the same PID-mapping technique to be the Quattro harness process
+      itself, not merely a different-looking owner string - and a fresh
+      notify-send delivers afterward. Distinct
       from the unknown/bare-owner collision already proved passed above
       (recovery.notifications-unknown-owner-collision). mako/swaync/fnott
       remain unattempted: they are wlr-layer-shell-only and still depend on
@@ -397,6 +433,28 @@ items:
     expected_invariant: >-
       Monitor hotplug behavior with live popups visible on screen against a
       real compositor output.
+
+  - id: recovery.notifications-named-daemon-breadth
+    surface: security.notification-daemon
+    environment: nested-vm
+    status: unsupported-environment
+    evidence: none
+    check: notifications.named-daemon-breadth
+    attempted_evidence: >-
+      Covered by the same two nested-compositor attempts recorded in full
+      under recovery.lock-nested-compositor.
+    reason: >-
+      mako, swaync, and fnott are wlr-layer-shell-only and depend on the
+      same live Wayland compositor connection this environment's
+      nested-compositor investigation already found unavailable, unlike
+      dunst's X11 (withX11) backend, which let
+      recovery.notifications-known-daemon-collision exercise one real
+      by-name daemon collision live via a disposable Xvfb display instead
+      of that dependency.
+    expected_invariant: >-
+      A real collision, distinct from the dunst case already proved passed,
+      specifically against the remaining named daemons (mako, swaync,
+      fnott) actually running.
 
   - id: recovery.lock-nested-compositor
     surface: security.lock
@@ -461,6 +519,26 @@ items:
     expected_invariant: >-
       A real ext-idle-notify-v1 transition, a real Wayland idle inhibitor,
       and monitor hotplug while idle detection is active.
+
+  - id: recovery.idle-real-external-owner
+    surface: security.idle
+    environment: nested-vm
+    status: unsupported-environment
+    evidence: none
+    check: idle.real-external-owner
+    attempted_evidence: >-
+      Covered by the same two nested-compositor attempts recorded in full
+      under recovery.lock-nested-compositor.
+    reason: >-
+      A live declarative conflict scenario (hypridle or swayidle actually
+      running alongside the Quattro idle owner) requires the same live
+      Wayland idle-notify connection neither nested-compositor attempt
+      reached; the already-proven Home Manager assertion matrix remains the
+      available evidence for the build-time conflict detection itself.
+    expected_invariant: >-
+      A real declarative idle-owner conflict (hypridle or swayidle actually
+      running) behaves deterministically against a live compositor, beyond
+      the already-proven build-time Home Manager assertion matrix.
 
   - id: recovery.suspend-resume
     surface: security.recovery

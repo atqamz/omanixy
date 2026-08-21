@@ -715,7 +715,7 @@ pkgs.testers.runNixOSTest {
     machine.succeed("rm -rf /home/${testUser}/.local/state/omarchy")
     out = machine.succeed("${runScenario "boot"}")
     print(out)
-    assert_checks(out, RECOVERY_CHECKS["cross-feature.boot"]["checks"])
+    assert_scenario(out, "cross-feature.boot")
 
     uid = machine.succeed("id -u ${testUser}").strip()
     active_state = machine.succeed(
@@ -741,6 +741,6 @@ pkgs.testers.runNixOSTest {
     machine.succeed("rm -rf /home/${testUser}/.local/state/omarchy")
     out = machine.succeed("${runScenario "crash"}")
     print(out)
-    assert_checks(out, RECOVERY_CHECKS["cross-feature.crash"]["checks"])
+    assert_scenario(out, "cross-feature.crash")
   '';
 }
