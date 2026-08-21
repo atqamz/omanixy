@@ -65,6 +65,7 @@ required_ids = {
     "consumer-external-lock-path-valid",
     "no-fingerprint-system-works",
     "fingerprint-optional-bounded",
+    "fingerprint-daemon-unavailable-predictable",
     "no-competing-polkit-owner-enabled",
     "no-competing-idle-owner-enabled",
     "no-competing-notification-daemon-enabled",

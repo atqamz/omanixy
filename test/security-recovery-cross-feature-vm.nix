@@ -715,11 +715,7 @@ pkgs.testers.runNixOSTest {
     machine.succeed("rm -rf /home/${testUser}/.local/state/omarchy")
     out = machine.succeed("${runScenario "boot"}")
     print(out)
-    assert_checks(out, {
-        "boot-ready", "polkit-registration", "notifications-ownership",
-        "pam-conversation", "polkit-authentication", "notifications-delivery",
-        "single-process",
-    })
+    assert_checks(out, RECOVERY_CHECKS["cross-feature.boot"]["checks"])
 
     uid = machine.succeed("id -u ${testUser}").strip()
     active_state = machine.succeed(
@@ -745,13 +741,6 @@ pkgs.testers.runNixOSTest {
     machine.succeed("rm -rf /home/${testUser}/.local/state/omarchy")
     out = machine.succeed("${runScenario "crash"}")
     print(out)
-    assert_checks(out, {
-        "crash-setup", "crash-pam-inflight", "crash-polkit-inflight",
-        "crash-notification-live", "crash-polkit-client-bounded",
-        "crash-no-orphan-process", "crash-no-helper-leak",
-        "crash-polkit-fresh-registration", "crash-polkit-fresh-auth",
-        "crash-pam-fresh", "crash-notification-restored",
-        "crash-notification-action-not-resurrected",
-    })
+    assert_checks(out, RECOVERY_CHECKS["cross-feature.crash"]["checks"])
   '';
 }

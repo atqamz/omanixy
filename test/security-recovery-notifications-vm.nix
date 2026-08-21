@@ -755,6 +755,125 @@ let
         wait "$hpid" 2>/dev/null
         ;;
 
+      known-daemon-collision)
+        # A real, pinned, X11-backed dunst instance under a disposable Xvfb
+        # display - not a bare NotificationServer stub - actually owning
+        # org.freedesktop.Notifications before Quattro's harness ever
+        # starts, so recovery.notifications-known-daemon-collision reduces
+        # to a genuine by-name external daemon rather than the unknown/bare
+        # owner recovery.notifications-unknown-owner-collision already
+        # covers above.
+        export DISPLAY=:97
+        rm -f /tmp/.X11-unix/X97 2>/dev/null || true
+        Xvfb "$DISPLAY" -screen 0 1024x768x16 >xvfb.log 2>&1 &
+        xvfb_pid=$!
+        n=0
+        xvfb_ready=no
+        while [ "$n" -lt 100 ]; do
+          [ -e /tmp/.X11-unix/X97 ] && { xvfb_ready=yes; break; }
+          n=$((n + 1))
+          sleep 0.1
+        done
+        if [ "$xvfb_ready" = "yes" ]; then
+          echo "CHECK xvfb-display-ready PASS display=$DISPLAY"
+        else
+          echo "CHECK xvfb-display-ready FAIL"
+          cat xvfb.log
+          kill "$xvfb_pid" 2>/dev/null || true
+          exit 0
+        fi
+
+        dunst >dunst.log 2>&1 &
+        dpid=$!
+        n=0
+        owner_probe=""
+        dunst_owns=no
+        while [ "$n" -lt 100 ]; do
+          owner_probe=$(owner_now)
+          if has_owner "$owner_probe"; then dunst_owns=yes; break; fi
+          n=$((n + 1))
+          sleep 0.1
+        done
+        if [ "$dunst_owns" = "yes" ]; then
+          echo "CHECK dunst-started PASS pid=$dpid"
+          echo "CHECK dunst-owns-name PASS owner=$owner_probe"
+        else
+          echo "CHECK dunst-started FAIL"
+          echo "CHECK dunst-owns-name FAIL"
+          cat dunst.log
+          kill "$dpid" "$xvfb_pid" 2>/dev/null || true
+          exit 0
+        fi
+        owner_before_quattro="$owner_probe"
+
+        QML2_IMPORT_PATH="$HARNESS_DIR" "$QS" -n -p "$HARNESS_DIR" >harness.log 2>&1 &
+        hpid=$!
+        if ! wait_ipc_ready "$HARNESS_DIR"; then
+          echo "CHECK quattro-did-not-steal-name FAIL harness-never-ready"
+          cat harness.log
+          kill "$hpid" "$dpid" "$xvfb_pid" 2>/dev/null || true
+          exit 0
+        fi
+
+        owner_during=$(owner_now)
+        if [ "$owner_during" = "$owner_before_quattro" ]; then
+          echo "CHECK quattro-did-not-steal-name PASS"
+        else
+          echo "CHECK quattro-did-not-steal-name FAIL before=$owner_before_quattro during=$owner_during"
+        fi
+
+        dunst_alive=no
+        kill -0 "$dpid" 2>/dev/null && dunst_alive=yes
+        if [ "$dunst_alive" = "yes" ]; then
+          echo "CHECK dunst-alive-during-collision PASS"
+        else
+          echo "CHECK dunst-alive-during-collision FAIL"
+        fi
+
+        quattro_alive=no
+        kill -0 "$hpid" 2>/dev/null && quattro_alive=yes
+        if [ "$quattro_alive" = "yes" ]; then
+          echo "CHECK quattro-alive-during-collision PASS"
+        else
+          echo "CHECK quattro-alive-during-collision FAIL"
+        fi
+
+        # The test itself terminates its own dunst fixture - never the
+        # harness or any production code - exactly like the unknown-owner
+        # collision scenario's own stub teardown above.
+        kill "$dpid" 2>/dev/null || true
+        wait "$dpid" 2>/dev/null
+        echo "CHECK test-terminates-dunst PASS pid=$dpid"
+
+        n=0
+        owner_after=""
+        while [ "$n" -lt 150 ]; do
+          owner_after=$(owner_now)
+          has_owner "$owner_after" && break
+          n=$((n + 1))
+          sleep 0.1
+        done
+        if has_owner "$owner_after"; then
+          echo "CHECK quattro-reclaims-name PASS owner=$owner_after attempts=$n"
+        else
+          echo "CHECK quattro-reclaims-name FAIL"
+        fi
+
+        notify-send -a TestClient -u normal "KnownDaemonCollision after reclaim"
+        sleep 1
+        count_after=$(popup_count)
+        if [ "$count_after" = "1" ]; then
+          echo "CHECK post-reclaim-delivery PASS"
+        else
+          echo "CHECK post-reclaim-delivery FAIL popup_count=$count_after"
+        fi
+
+        kill "$hpid" 2>/dev/null || true
+        wait "$hpid" 2>/dev/null
+        kill "$xvfb_pid" 2>/dev/null || true
+        wait "$xvfb_pid" 2>/dev/null
+        ;;
+
       *)
         echo "unknown scenario: $scenario" >&2
         exit 1
@@ -789,7 +908,7 @@ pkgs.testers.runNixOSTest {
       isNormalUser = true;
     };
 
-    environment.systemPackages = [ quickshellBin pkgs.libnotify ];
+    environment.systemPackages = [ quickshellBin pkgs.libnotify pkgs.dunst pkgs.xorg-server ];
 
     # Proves the real, real-system-integrated declarative capability itself:
     # a genuine NixOS + Home Manager activation with the option on, for a
@@ -835,43 +954,31 @@ pkgs.testers.runNixOSTest {
     machine.succeed("rm -rf /home/${testUser}/.local/state/omarchy")
     out = machine.succeed("${runScenario "ownership-delivery"}")
     print(out)
-    assert_checks(out, {"ownership", "delivery"})
+    assert_checks(out, RECOVERY_CHECKS["notifications.ownership-delivery"]["checks"])
 
     print("=== scenario 2: replacement identity, default action, close round-trip ===")
     machine.succeed("rm -rf /home/${testUser}/.local/state/omarchy")
     out = machine.succeed("${runScenario "replace-action-close"}")
     print(out)
-    assert_checks(out, {
-        "replace-identity", "replace-content", "default-action", "close-roundtrip",
-    })
+    assert_checks(out, RECOVERY_CHECKS["notifications.replace-action-close"]["checks"])
 
     print("=== scenario 3: DND suppression + persistence across a real process restart ===")
     machine.succeed("rm -rf /home/${testUser}/.local/state/omarchy")
     out = machine.succeed("${runScenario "dnd-restart"}")
     print(out)
-    assert_checks(out, {
-        "dnd-on", "dnd-suppressed", "dnd-recorded-in-history",
-        "dnd-settings-flushed", "dnd-restart-persisted",
-    })
+    assert_checks(out, RECOVERY_CHECKS["notifications.dnd-restart"]["checks"])
 
     print("=== scenario 4: unknown independent-owner collision, non-destructive, event-driven reclaim ===")
     machine.succeed("rm -rf /home/${testUser}/.local/state/omarchy")
     out = machine.succeed("${runScenario "collision-reclaim"}")
     print(out)
-    assert_checks(out, {
-        "stub-owns-name", "harness-did-not-steal-name",
-        "harness-survives-collision", "harness-did-not-receive-during-collision",
-        "reclaim-succeeded", "reclaim-no-restart", "reclaim-functional",
-    })
+    assert_checks(out, RECOVERY_CHECKS["notifications.collision-reclaim"]["checks"])
 
     print("=== scenario 5: notification burst, bounded history and log growth ===")
     machine.succeed("rm -rf /home/${testUser}/.local/state/omarchy")
     out = machine.succeed("${runScenario "burst"}")
     print(out)
-    assert_checks(out, {
-        "burst-received-all", "burst-no-crash", "burst-history-bounded",
-        "burst-responsive-after", "burst-log-bound", "burst-log-quiescent",
-    })
+    assert_checks(out, RECOVERY_CHECKS["notifications.burst"]["checks"])
 
     print("=== scenario 6: session/bus destruction and fresh-session recovery ===")
     machine.succeed("loginctl disable-linger ${testUser} 2>&1 || true")
@@ -884,9 +991,7 @@ pkgs.testers.runNixOSTest {
     machine.wait_for_file(f"{workdir1}/session-ready", timeout=60)
     phase1_partial = machine.succeed("cat /tmp/session-phase1-out.log")
     print(phase1_partial)
-    assert_checks(phase1_partial, {
-        "session-phase1-ownership", "session-phase1-delivery",
-    })
+    assert_checks(phase1_partial, RECOVERY_CHECKS["notifications.session-phase1"]["checks"])
 
     # Destroy this exact session from the outside - its own logind
     # session-<N>.scope cgroup (which actually holds the driver script and
@@ -921,6 +1026,12 @@ pkgs.testers.runNixOSTest {
 
     out = machine.succeed("${runScenario "session-phase2"}")
     print(out)
-    assert_checks(out, {"session-phase2-ownership", "session-phase2-delivery"})
+    assert_checks(out, RECOVERY_CHECKS["notifications.session-phase2"]["checks"])
+
+    print("=== scenario 7: real known-by-name daemon (dunst) collision under Xvfb ===")
+    machine.succeed("rm -rf /home/${testUser}/.local/state/omarchy")
+    out = machine.succeed("${runScenario "known-daemon-collision"}")
+    print(out)
+    assert_checks(out, RECOVERY_CHECKS["notifications.known-daemon-collision"]["checks"])
   '';
 }

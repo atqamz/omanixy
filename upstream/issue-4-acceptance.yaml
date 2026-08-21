@@ -79,7 +79,9 @@ items:
     description: >-
       With fingerprint disabled, and with fingerprint enabled but no reader
       present, password authentication remains fully available - proven
-      hermetically and live against a real PAM backend with no device.
+      hermetically, and live against the real selected fprintd backend
+      itself confirmed D-Bus-activated and responding with zero devices
+      (not merely assumed absent).
     tests:
       - test/security-pam-fingerprint.sh
       - test/security-recovery-pam-vm.nix
@@ -89,11 +91,30 @@ items:
     description: >-
       Fingerprint is opt-in (default false), never replaces password, and
       its retry/failure behavior is bounded (max 5 attempts, no lockout
-      installed on failure) both hermetically and against a real fail-closed
-      no-device path live.
+      installed on failure), proven hermetically for the production lock's
+      own max-5 orchestration (test/security-lock-fingerprint-behavior.sh
+      drives FingerprintPolicy.js directly, not through this VM); this
+      layer's live VM evidence separately proves the real backend layer
+      below that orchestration - both the no-device and the genuinely
+      unavailable-backend paths - is itself bounded and fail-closed, never
+      that the VM exercised the production max-5 lock QML.
     tests:
       - test/security-pam-fingerprint.sh
       - test/security-lock-fingerprint-behavior.sh
+      - test/security-recovery-pam-vm.nix
+
+  - id: fingerprint-daemon-unavailable-predictable
+    status: satisfied
+    description: >-
+      fprintd absence produces predictable behavior: with the real fprintd
+      backend deliberately made genuinely unavailable (a runtime-only
+      systemd.service.d/ ExecStart-override drop-in, never touching any
+      Omanixy-owned or nixpkgs-owned file), fingerprint authentication
+      never succeeds, fails closed within a bound, leaves no runaway retry
+      across a finite 20-attempt stress sequence, and password
+      authentication remains available throughout; reversing the same
+      stimulus restores a real, responding, still-zero-device backend.
+    tests:
       - test/security-recovery-pam-vm.nix
 
   - id: no-competing-polkit-owner-enabled

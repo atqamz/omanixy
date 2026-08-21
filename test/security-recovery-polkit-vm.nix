@@ -700,55 +700,32 @@ pkgs.testers.runNixOSTest {
     print("=== scenario 1: real registration ===")
     out = machine.succeed("${runScenario "register"}")
     print(out)
-    assert_checks(out, {
-        "rival-absent", "polkitd-active", "registered",
-        "single-registration-event", "harness-alive",
-    })
+    assert_checks(out, RECOVERY_CHECKS["polkit.register"]["checks"])
 
     print("=== scenario 2: real authentication success + wrong-password failure ===")
     out = machine.succeed("${runScenario "auth"}")
     print(out)
-    assert_checks(out, {
-        "agent-registered", "request-created", "wrong-password-failure",
-        "reprompt-after-failure", "pkcheck-exit-zero",
-        "correct-password-success", "flow-inactive-after",
-    })
+    assert_checks(out, RECOVERY_CHECKS["polkit.auth"]["checks"])
 
     print("=== scenario 3a: user-initiated cancellation ===")
     out = machine.succeed("${runScenario "user-cancel"}")
     print(out)
-    assert_checks(out, {
-        "request-active", "user-cancel-invoked", "requester-bounded",
-        "flow-inactive-after-cancel", "no-stale-prompt",
-        "harness-alive-after-cancel",
-    })
+    assert_checks(out, RECOVERY_CHECKS["polkit.user-cancel"]["checks"])
 
     print("=== scenario 3b: daemon-initiated cancellation ===")
     out = machine.succeed("${runScenario "daemon-cancel"}")
     print(out)
-    assert_checks(out, {
-        "request-active", "daemon-cancel-stimulus",
-        "flow-inactive-after-daemon-cancel", "no-stale-request",
-        "no-shell-restart",
-    })
+    assert_checks(out, RECOVERY_CHECKS["polkit.daemon-cancel"]["checks"])
 
     print("=== scenario 4: registration collision with an independent agent ===")
     out = machine.succeed("${runScenario "collision"}")
     print(out)
-    assert_checks(out, {
-        "rival-registered", "quattro-not-registered", "rival-remains-registered",
-        "no-retry-while-rival-present", "test-terminates-rival",
-        "quattro-remains-unregistered-after-rival-gone", "fresh-quattro-registers",
-    })
+    assert_checks(out, RECOVERY_CHECKS["polkit.collision"]["checks"])
 
     print("=== scenario 5: finite real wrong-password stress (20 cycles) ===")
     out = machine.succeed("${runScenario "stress"}")
     print(out)
-    assert_checks(out, {
-        "stress-20-cycles-completed", "stress-single-harness-process",
-        "stress-log-bound", "stress-no-continued-growth",
-        "stress-final-correct-auth",
-    })
+    assert_checks(out, RECOVERY_CHECKS["polkit.stress"]["checks"])
 
     print("=== scenario 6: polkitd disappearance/recovery during an in-flight request ===")
     workdir = "/home/${testUser}/polkit-test-daemon-restart"
@@ -764,10 +741,6 @@ pkgs.testers.runNixOSTest {
     )
     out = machine.succeed("cat /tmp/daemon-restart-out.log")
     print(out)
-    assert_checks(out, {
-        "request-active-before-restart", "inflight-requester-bounded",
-        "same-harness-reprompt", "fresh-harness-registers",
-        "fresh-harness-auth-success",
-    })
+    assert_checks(out, RECOVERY_CHECKS["polkit.daemon-restart"]["checks"])
   '';
 }

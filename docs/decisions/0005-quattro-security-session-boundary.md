@@ -1954,12 +1954,60 @@ proving the bound, not a live compositor).
 ### Fingerprint no-device and daemon-unavailable behavior
 
 The same harness enables `programs.omanixy.security.pam.fingerprint.enable`
-with no fingerprint reader present in the VM and proves the fingerprint PAM
-path fails closed while password authentication remains available -
-fingerprint never replaces password. Enrolled physical hardware and a real,
-non-fixture TOD driver remain unavailable in this environment and stay
-under `required_before_supported`, exactly as Layer 4 already anticipated;
-this is not a blocker for the `experimental` target.
+on a dedicated `fingerprintMachine` with no fingerprint reader present in
+the VM. This final remediation strengthens that proof from "no device" to
+"a real backend confirmed present and responding, reporting no device":
+before ever driving the fingerprint `PamContext` conversation, the test
+confirms the generated `omarchy-lock-fingerprint` PAM service exists,
+`services.fprintd.enable` is not `"enabled"` at the systemd level (the
+runtime complement to the module's own build-time assertion that it stays
+`false`), `net.reactivated.Fprint` is a real D-Bus-activatable name
+(`ListActivatableNames`), a real `GetDevices` call against
+`net.reactivated.Fprint.Manager` genuinely D-Bus-activates
+`fprintd.service` (observed reaching `ActiveState=active`) and returns an
+empty device list. Only then does it drive the fingerprint conversation and
+prove it never succeeds and stays bounded, with password authentication
+still working immediately after (`recovery.pam-fingerprint-no-device`).
+
+Beyond that baseline, the same VM now also proves the backend-unavailable
+half of issue #4's "fprintd absence produces predictable behavior"
+requirement live, not just as a hermetic state-machine claim. NixOS
+provisions `fprintd.service`'s main unit fragment as a real symlink under
+`/etc/systemd/system` (persistent-tier search path, read-only in this
+disposable test VM's root), which outranks `/run/systemd/system` for
+resolving which fragment defines the unit - so a plain `systemctl mask
+[--runtime]` was tried and confirmed empirically *not* to work (`LoadState`
+stayed `loaded`, and the daemon kept answering `GetDevices` regardless).
+Since `.service.d/` drop-ins, unlike the main unit fragment, are always
+merged in from every search-path tier regardless of which tier the base
+fragment resolved from, a genuinely effective, fully test-owned, reversible
+mechanism is a runtime-only drop-in at
+`/run/systemd/system/fprintd.service.d/` overriding `ExecStart` to a
+command that always fails - never touching any Omanixy-owned or
+nixpkgs-owned file. With that stimulus applied: a `GetDevices` call
+genuinely fails, the fingerprint conversation still never succeeds and
+stays bounded, no orphan harness process is left behind, and password
+authentication remains available throughout
+(`recovery.pam-fingerprint-backend-unavailable`). Removing the drop-in and
+reloading restores a real, responding, still-zero-device backend, with a
+fresh fingerprint attempt again bounded and password authentication still
+working (`recovery.pam-fingerprint-backend-recovery`). A finite 20-attempt
+repeat of the same outage - mirroring `recovery.polkit-stress-finite`'s own
+pattern for this surface - stays bounded throughout: zero successes, no
+orphan/runaway harness process either immediately or after a settle window,
+event/log volume proportional to the stimulus, and password authentication
+still working afterward (`recovery.pam-fingerprint-backend-stress`). Layer
+4's own `fingerprintMaxAttempts=5` orchestration is untouched and remains
+proven exclusively by its own frozen hermetic evidence
+(`test/security-lock-fingerprint-behavior.sh`); this VM drives
+`PamContext` directly against the raw PAM service, never the production
+lock plugin, and its finite-stress evidence backs the real backend layer
+underneath that orchestration, not the orchestration itself.
+
+Enrolled physical hardware and a real, non-fixture TOD driver remain
+unavailable in this environment and stay under `required_before_supported`,
+exactly as Layer 4 already anticipated; neither is a blocker for the
+`experimental` target.
 
 ### Polkit real registration, authentication, and recovery
 
@@ -2021,18 +2069,31 @@ the user manager reaching `SubState=dead`, never simulated by sleeping -
 and then establishing a fresh session lets a fresh daemon instance claim
 `org.freedesktop.Notifications` and deliver again.
 
-A collision specifically with a by-name known daemon (mako/dunst/swaync/
-fnott actually running) was not attempted live: those are wlr-layer-shell
-or X11 daemons whose own core service loop depends on the same live
-Wayland session this layer's nested-compositor investigation already found
-unavailable (see "Nested-compositor environment limitation" above), so a
-live attempt was judged unlikely to add evidence beyond that
-already-established dependency; it stays under `required_before_supported`
-as `recovery.notifications-known-daemon-collision`, with that reasoning
-recorded rather than assumed. Monitor hotplug with popups visible on a live
-compositor (`recovery.notifications-monitor-hotplug`) remains unavailable
-for the same nested-compositor reason as lock, idle, and polkit's
-presentation.
+This final remediation exercises a collision specifically with a real,
+by-name known daemon rather than deferring it further. dunst 1.13.2 (pinned
+by this flake's `nixpkgs`, built `withX11`) does not depend on a live
+Wayland compositor the way mako/swaync/fnott do: it has a working X11
+backend, and X11 itself is available headlessly via `Xvfb`, independent of
+the nested-Hyprland/Aquamarine limitation this layer already found in this
+KVM/QEMU host. `test/security-recovery-notifications-vm.nix`'s new
+`known-daemon-collision` scenario starts a disposable `Xvfb` display,
+starts the real, unmodified, pinned `dunst` binary against it, confirms it
+genuinely owns `org.freedesktop.Notifications`, then starts the Quattro
+harness and confirms it never steals the name while dunst holds it and
+that both processes stay alive throughout. The test itself - never the
+harness, never any production code path - terminates dunst; the harness
+then reclaims the name event-driven, in the same still-running process,
+with no restart, and a fresh `notify-send` delivers again afterward
+(`recovery.notifications-known-daemon-collision`, promoted from
+`required_before_supported` to `passed`). mako/swaync/fnott remain
+untried: they are wlr-layer-shell-only and still depend on the same live
+Wayland compositor connection this layer's nested-compositor investigation
+already found unavailable (see "Nested-compositor environment limitation"
+above); dunst's X11 backend is what let this one real by-name daemon be
+exercised live instead of deferring the whole case. Monitor hotplug with
+popups visible on a live compositor (`recovery.notifications-monitor-hotplug`)
+remains unavailable for the same nested-compositor reason as lock, idle,
+and polkit's presentation.
 
 ### Cross-feature boot and crash recovery
 
@@ -2067,7 +2128,46 @@ real lid hardware) - never a reason to withhold the `experimental` target,
 and never silently reported as passed. `test/security-contracts.sh` and the
 new `test/security-recovery-contract.sh` enforce both halves of this rule.
 
-### Final support-state decisions
+### Machine-bound check registry and exact ledger cross-referencing
+
+Two remaining false-open gaps in the evidence contract itself, not in any
+individual test, are closed by this final remediation. First,
+`upstream/security-recovery-matrix.yaml`'s `check:` field used to be free
+prose (`case["check"].strip()` was the only validation) - a typo like
+`check: imaginary-check` would have passed silently. `test/lib/recovery-
+check-helpers.py` now defines one canonical `RECOVERY_CHECKS` registry,
+keyed by a `<surface>.<scenario>` id, each mapping to its owning
+`security.*` surface, its exact set of `CHECK <name> PASS|FAIL` names, and
+whether it is actually implemented. Every VM test's `assert_checks` call
+now reads its required set from this registry instead of a hand-typed
+literal (`RECOVERY_CHECKS["polkit.register"]["checks"]`, and so on for
+every scenario across the PAM, polkit, notifications, and cross-feature VM
+files), and `assert_checks` itself rejects any required name that is not a
+member of some registered scenario. `test/lib/recovery-contract-helpers.py`
+(shared by `test/security-recovery-contract.sh` and its own adversarial
+`test/lib/recovery-contract-helpers-selftest.py`) then rejects a matrix
+`check:` id that does not exist in that same registry, that is owned by a
+different surface than the citing case, or that a `passed` row cites
+without the registry marking it implemented (or, symmetrically, that a
+non-`passed` row cites a check the registry says is already implemented
+and passing elsewhere - a sign the row should have been promoted instead).
+
+Second, the ledger's own `required_before_supported` cross-references had
+drifted false-open in exactly the way Section 21's original bidirectional
+check did not catch: `security.idle`, `security.notification-daemon`, and
+`security.recovery` each cited at least one `recovery.*` matrix case id
+that actually belonged to a *different* surface (for example
+`security.recovery` citing `recovery.lock-nested-compositor`, which
+`security.lock` already owns and cites itself), and
+`security.polkit-agent` cited an already-`passed` case
+(`recovery.polkit-stress-finite`) as if it were still outstanding.
+`test/lib/recovery-contract-helpers.py` now additionally rejects any
+cross-surface reference and any passed-case-cited-as-outstanding, and
+tracks reverse ownership so the same case can never be cited as outstanding
+by more than one ledger entry - closing the exact "`security.recovery` as a
+duplicate owner of a child surface's own gap" failure mode this layer's
+remediation was asked to eliminate. All of the drifted prose above was
+reworded to cite each surface's own outstanding cases only.
 
 No `security.*` entry reaches `support: supported` after this layer; the
 target for every entry, including `security.recovery` itself, remains

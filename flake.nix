@@ -1935,6 +1935,13 @@
             python3 ${./test/lib/recovery-check-helpers-selftest.py} ${./test/lib/recovery-check-helpers.py}
             touch "$out"
           '';
+          security-recovery-contract-helpers-selftest = pkgs.runCommand "omanixy-security-recovery-contract-helpers-selftest"
+            {
+              nativeBuildInputs = [ pkgs.python3 ];
+            } ''
+            python3 ${./test/lib/recovery-contract-helpers-selftest.py} ${./test/lib/recovery-contract-helpers.py}
+            touch "$out"
+          '';
           security-issue-4-acceptance = pkgs.runCommand "omanixy-security-issue-4-acceptance"
             {
               nativeBuildInputs = [ pkgs.bash (pkgs.python3.withPackages (ps: [ ps.pyyaml ])) ];
