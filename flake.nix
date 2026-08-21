@@ -1921,6 +1921,17 @@
             PYTHON=${pkgs.python3.withPackages (ps: [ ps.pyyaml ])}/bin/python ${pkgs.bash}/bin/bash ${./test/security-contracts.sh} ${./.} ${runtime.passthru.omarchyCompatibilityRoot}
             touch "$out"
           '';
+          security-recovery-contract = pkgs.runCommand "omanixy-security-recovery-contract"
+            {
+              nativeBuildInputs = [ pkgs.bash (pkgs.python3.withPackages (ps: [ ps.pyyaml ])) ];
+            } ''
+            PYTHON=${pkgs.python3.withPackages (ps: [ ps.pyyaml ])}/bin/python ${pkgs.bash}/bin/bash ${./test/security-recovery-contract.sh} ${./.}
+            touch "$out"
+          '';
+          security-recovery-pam-vm = import ./test/security-recovery-pam-vm.nix { inherit pkgs self home-manager; };
+          security-recovery-polkit-vm = import ./test/security-recovery-polkit-vm.nix { inherit pkgs self home-manager; };
+          security-recovery-notifications-vm = import ./test/security-recovery-notifications-vm.nix { inherit pkgs self home-manager; };
+          security-recovery-cross-feature-vm = import ./test/security-recovery-cross-feature-vm.nix { inherit pkgs self home-manager; };
           contract-closure = pkgs.runCommand "omanixy-contract-closure"
             {
               nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gawk pkgs.gnugrep pkgs.gnused pkgs.jq pkgs.procps pkgs.python3 pkgs.util-linux ];

@@ -1,0 +1,292 @@
+# Layer 8 (`4-08-security-recovery`) failure/recovery evidence matrix.
+#
+# This is the durable, machine-checked record of what issue atqamz/omanixy#4's
+# final promotion gate actually exercised, referenced by
+# upstream/porting-matrix.yaml's security.recovery entry and validated by
+# test/security-recovery-contract.sh. It exists so the prose in the ledger and
+# the ADR cannot silently drift from what the tests in this layer actually
+# proved.
+#
+# Fields:
+#   id                 stable, unique identifier for this case
+#   surface            the upstream/porting-matrix.yaml security.* id this
+#                       case is evidence for
+#   environment        hermetic | nested-vm | real-backend | physical-hardware
+#   status             passed | unsupported-environment | required-before-supported
+#   evidence           the test file (and, where useful, the specific
+#                       scenario within it) that produced this result
+#   expected_invariant the property the case proves or, for a
+#                       not-yet-exercised case, the property still to prove
+#
+# A "passed" row must always carry real evidence produced by an actual test
+# run recorded in `evidence`. Hardware or environment breadth that is
+# genuinely unavailable here is recorded as required-before-supported or
+# unsupported-environment, never as passed - see Sections 26 and 60 of issue
+# atqamz/omanixy#4 for the rule this file exists to enforce.
+
+items:
+  - id: recovery.pam-live-conversation
+    surface: security.pam-password
+    environment: nested-vm
+    status: passed
+    evidence: test/security-recovery-pam-vm.nix
+    expected_invariant: >-
+      A real pam_unix conversation against the generated
+      omarchy-lock-password service grants access only for the correct
+      fixture password; a wrong password never grants access and never
+      installs a lockout state.
+
+  - id: recovery.pam-repeated-failure
+    surface: security.pam-password
+    environment: nested-vm
+    status: passed
+    evidence: test/security-recovery-pam-vm.nix
+    expected_invariant: >-
+      At least 20 consecutive wrong-password attempts leave the session
+      unauthenticated, the shell alive, log growth bounded, and a
+      subsequent correct password still able to authenticate - the
+      real-world proof for the ledger's decision to omit pam_faillock.
+
+  - id: recovery.pam-cancel
+    surface: security.pam-password
+    environment: nested-vm
+    status: passed
+    evidence: test/security-recovery-pam-vm.nix
+    expected_invariant: >-
+      Cancelling an in-flight PAM conversation aborts it distinctly from an
+      authentication failure.
+
+  - id: recovery.pam-missing-service
+    surface: security.pam-password
+    environment: nested-vm
+    status: passed
+    evidence: test/security-recovery-pam-vm.nix
+    expected_invariant: >-
+      With the PAM service absent, PAM start failure is reported distinctly
+      from authentication failure, with no fallback to any other
+      authentication path.
+
+  - id: recovery.pam-fingerprint-no-device
+    surface: security.pam-fingerprint
+    environment: nested-vm
+    status: passed
+    evidence: test/security-recovery-pam-vm.nix
+    expected_invariant: >-
+      With fingerprint enabled and no reader present, the fingerprint PAM
+      path fails closed and password authentication remains available.
+
+  - id: recovery.pam-fingerprint-enrolled-hardware
+    surface: security.pam-fingerprint
+    environment: physical-hardware
+    status: required-before-supported
+    evidence: none
+    expected_invariant: >-
+      An enrolled physical fingerprint reader on supported hardware
+      authenticates successfully end to end. No such reader is available in
+      this environment; this remains required only for a future move to
+      "supported", not for the "experimental" target this layer promotes to.
+
+  - id: recovery.pam-fingerprint-tod-driver
+    surface: security.pam-fingerprint
+    environment: physical-hardware
+    status: required-before-supported
+    evidence: none
+    expected_invariant: >-
+      A real, non-fixture, legally evaluable TOD driver authenticates
+      successfully. No such driver is available to this flake hermetically;
+      deferred to required_before_supported, unchanged from Layer 4's own
+      assessment.
+
+  - id: recovery.systemd-restart-bound
+    surface: security.recovery
+    environment: nested-vm
+    status: passed
+    evidence: test/security-recovery-pam-vm.nix
+    expected_invariant: >-
+      omanixy-shell.service, forced to fail repeatedly by a genuine absence
+      of a Wayland compositor, respects Restart=on-failure/RestartSec=2s and
+      is rate-limited to a bounded failure count by
+      StartLimitBurst=5/StartLimitIntervalSec=60s rather than restarting
+      without bound; systemctl reset-failed plus a fresh start proves the
+      unit is not permanently wedged.
+
+  - id: recovery.polkit-real-registration
+    surface: security.polkit-agent
+    environment: nested-vm
+    status: passed
+    evidence: test/security-recovery-polkit-vm.nix
+    expected_invariant: >-
+      The Quattro PolkitAgent object registers against a real, running
+      polkitd.
+
+  - id: recovery.polkit-real-authentication
+    surface: security.polkit-agent
+    environment: nested-vm
+    status: passed
+    evidence: test/security-recovery-polkit-vm.nix
+    expected_invariant: >-
+      A real polkit authentication request against a test-only action
+      succeeds for the correct fixture password and fails for a wrong one.
+
+  - id: recovery.polkit-cancellation
+    surface: security.polkit-agent
+    environment: nested-vm
+    status: passed
+    evidence: test/security-recovery-polkit-vm.nix
+    expected_invariant: >-
+      User-initiated and daemon-initiated cancellation both close the
+      authentication flow without a stale or hung state.
+
+  - id: recovery.polkit-runtime-collision
+    surface: security.polkit-agent
+    environment: nested-vm
+    status: passed
+    evidence: test/security-recovery-polkit-vm.nix
+    expected_invariant: >-
+      Registering against an already-registered independent agent fails
+      diagnostically and boundedly, and never kills, stops, or masks the
+      other agent.
+
+  - id: recovery.polkit-daemon-disappearance
+    surface: security.polkit-agent
+    environment: nested-vm
+    status: passed
+    evidence: test/security-recovery-polkit-vm.nix
+    expected_invariant: >-
+      polkitd restarting during an active request does not hang the
+      requester forever, and a fresh request succeeds once polkitd returns.
+
+  - id: recovery.notifications-real-ownership
+    surface: security.notification-daemon
+    environment: nested-vm
+    status: passed
+    evidence: test/security-recovery-notifications-vm.nix
+    expected_invariant: >-
+      org.freedesktop.Notifications has a real D-Bus owner and it is the
+      Quattro notification daemon; a real independent client's notification
+      is received end to end.
+
+  - id: recovery.notifications-replacement-action-close
+    surface: security.notification-daemon
+    environment: nested-vm
+    status: passed
+    evidence: test/security-recovery-notifications-vm.nix
+    expected_invariant: >-
+      A replacement id updates the same identity with no duplicate live row;
+      a default action fires exactly once; CloseNotification round-trips.
+
+  - id: recovery.notifications-dnd-persistence
+    surface: security.notification-daemon
+    environment: nested-vm
+    status: passed
+    evidence: test/security-recovery-notifications-vm.nix
+    expected_invariant: >-
+      DND suppresses popups per the real daemon's own history policy, and
+      persisted DND state hydrates back after a restart.
+
+  - id: recovery.notifications-known-owner-collision
+    surface: security.notification-daemon
+    environment: nested-vm
+    status: passed
+    evidence: test/security-recovery-notifications-vm.nix
+    expected_invariant: >-
+      A prior independent owner of org.freedesktop.Notifications is never
+      killed or replaced; once it releases the name, the Quattro daemon
+      claims it event-driven, with no restart required.
+
+  - id: recovery.notifications-burst
+    surface: security.notification-daemon
+    environment: nested-vm
+    status: passed
+    evidence: test/security-recovery-notifications-vm.nix
+    expected_invariant: >-
+      A finite burst of notifications leaves the daemon alive with bounded
+      persisted state and no unbounded log growth.
+
+  - id: recovery.lock-nested-compositor
+    surface: security.lock
+    environment: nested-vm
+    status: unsupported-environment
+    evidence: none
+    expected_invariant: >-
+      A real ext-session-lock-v1 acquisition, stranded-lock detection and
+      recovery, no-screen/monitor-change behavior, and DPMS interaction
+      against a live compositor. Investigated and not achieved in this
+      environment: the pinned Hyprland 0.55.4 (via Aquamarine) mandates its
+      headless backend at startup, but Aquamarine's headless implementation
+      supplies no DRM render node of its own (drmFD() is hard-coded -1) and
+      requires the shared GBM allocator to come from a DRM-capable
+      implementation; with a QEMU virtio-gpu render node present
+      (/dev/dri/renderD128) and vgem loaded, CBackend::start() still aborts
+      before Hyprland reaches a usable compositor state, and Hyprland
+      redirects its own diagnostic log to a runtime-directory file that is
+      never flushed before the SIGABRT crash handler runs, so the exact
+      downstream allocator failure could not be captured either. This is an
+      environment limitation of this KVM/QEMU host, not a defect in the
+      audited Omanixy lock module; the existing offscreen fake-WlSessionLock
+      evidence (test/security-lock.sh and friends) remains the available
+      evidence for the lock logic itself.
+
+  - id: recovery.idle-nested-compositor
+    surface: security.idle
+    environment: nested-vm
+    status: unsupported-environment
+    evidence: none
+    expected_invariant: >-
+      A real ext-idle-notify-v1 transition, a real Wayland idle inhibitor,
+      and monitor hotplug while idle detection is active. Blocked by the
+      same nested-compositor limitation as recovery.lock-nested-compositor,
+      since Quickshell's IdleMonitor requires the identical live Wayland
+      connection. The existing offscreen fake-IdleMonitor evidence
+      (test/security-idle-qml-behavior.sh) remains the available evidence
+      for the idle logic itself.
+
+  - id: recovery.suspend-resume
+    surface: security.recovery
+    environment: nested-vm
+    status: unsupported-environment
+    evidence: none
+    expected_invariant: >-
+      A secure native lock survives a real guest suspend/resume cycle with
+      no stale-timer immediate reblank, without Omanixy owning pre-suspend
+      lock policy. Depends on the same live native-lock session that
+      recovery.lock-nested-compositor could not establish in this
+      environment; suspend/resume itself was not separately attempted once
+      the prerequisite lock session was unavailable.
+
+  - id: recovery.lid-hardware
+    surface: security.recovery
+    environment: physical-hardware
+    status: required-before-supported
+    evidence: none
+    expected_invariant: >-
+      Real laptop lid close/open hardware validation. Omanixy does not own
+      lid/clamshell policy (Section 61); no such policy is introduced by
+      this layer, and no physical lid hardware is available in this
+      environment.
+
+  - id: recovery.cross-feature-boot
+    surface: security.recovery
+    environment: nested-vm
+    status: passed
+    evidence: test/security-recovery-cross-feature-vm.nix
+    expected_invariant: >-
+      PAM, polkit, and the notification daemon selected together boot
+      without ownership conflicts, each independently reachable, with no
+      extra PAM/D-Bus daemon spawned.
+
+  - id: recovery.cross-feature-crash
+    surface: security.recovery
+    environment: nested-vm
+    status: passed
+    evidence: test/security-recovery-cross-feature-vm.nix
+    expected_invariant: >-
+      Killing the shell process while a PAM conversation, a polkit
+      authentication request, and a live notification with a pending
+      default action all exist simultaneously leaves the stranded polkit
+      request bounded rather than hung, and a fresh shell process (standing
+      in for the systemd-bounded restart recovery.systemd-restart-bound
+      proves directly) registers with no stale conflict, restores the
+      notification as data-only with no action resurrected, and succeeds at
+      a fresh PAM conversation, polkit authentication, and notification
+      delivery.

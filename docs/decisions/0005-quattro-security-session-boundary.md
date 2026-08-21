@@ -1830,3 +1830,217 @@ adapted daemon continues to run in-process inside the existing
 `omanixy-shell` user service, and D-Bus ownership when selected belongs to
 the Quickshell `NotificationServer` inside that same process - there is no
 second lifecycle supervisor.
+
+## Layer 8 implementation note
+
+`4-08-security-recovery` implements the `security.recovery` ledger entry
+and is the final promotion gate for issue #4. It is not a new runtime
+feature layer: it owns complete failure/recovery validation, nested/live
+evidence, lifecycle hardening only where a real test exposed a defect, and
+the final compatibility/support ledger cleanup. It adds no
+`programs.omanixy.security.recovery` option, no recovery daemon or
+dispatcher, and no new systemd unit; recovery behavior remains owned by the
+services Layers 2-7 already selected and the existing `omanixy-shell`
+service lifecycle.
+
+### First live test topology in this repo
+
+Every prior layer's evidence was either a static pinned-source audit,
+hermetic Nix-evaluation/build-sandbox assertions, or an offscreen Quickshell
+run with specific native objects (`IdleMonitor`, `WlSessionLock`,
+`PanelWindow`, the native `PolkitAgent`/`NotificationServer` listener)
+test-doubled - real rungs 4-5 of the Promotion gate ladder (nested
+compositor, live manual/hardware evidence) had never been attempted. Layer 8
+introduces `pkgs.testers.runNixOSTest`-based checks: real booted NixOS VMs,
+built from the actual `nixosModules.default`/`homeManagerModules.default`
+this flake ships, with a disposable VM-only test user and a disposable
+fixture password that has no value outside that VM. This host has KVM and
+the `nixos-test` Nix system feature, so these checks build and run locally
+exactly as `nix flake check` would run them elsewhere with the same
+features.
+
+### Nested-compositor environment limitation: lock, idle, suspend/resume
+
+Quickshell's `PamContext`, the native `PolkitAgent` object, and
+`NotificationServer` do not require a live Wayland connection - only their
+own presentation surfaces (`WlSessionLockSurface`, `PanelWindow`) do, and
+Quickshell's QPA platform can be `offscreen` for all three. `WlSessionLock`
+and `IdleMonitor`, by contrast, are Wayland-protocol objects that fail to
+construct without a live compositor. Layer 8 investigated running the
+pinned Hyprland 0.55.4 headless inside the VM to provide that compositor:
+Aquamarine (Hyprland's backend abstraction) mandates its headless backend
+at startup, but that backend's `drmFD()` is hard-coded to `-1` and Aquamarine
+requires a DRM-capable implementation to supply the shared GBM allocator.
+With the VM's virtio-gpu render node present (`/dev/dri/renderD128`) and the
+`vgem` kernel module loaded, `CBackend::start()` still aborted before
+Hyprland reached a usable state; Hyprland's own diagnostic log is written to
+a runtime-directory file that was never flushed before its `SIGABRT` crash
+handler ran, so the exact downstream allocator failure could not be
+captured either. This is a limitation of this KVM/QEMU host, not a defect
+in the audited lock or idle modules, and it is recorded honestly rather
+than worked around: `security.lock` and `security.idle` each carry the
+nested-compositor items that depend on it under `required_before_supported`
+(not `required_before_promotion` - both entries already reached their
+`adapted`/`experimental` target at their own layer), and
+`upstream/security-recovery-matrix.yaml` records the specific cases
+(`recovery.lock-nested-compositor`, `recovery.idle-nested-compositor`,
+`recovery.suspend-resume`) as `unsupported-environment` with this exact
+reasoning, not `passed`. The existing offscreen fake-`WlSessionLock`/
+fake-`IdleMonitor` evidence from Layers 3 and 6 remains the available
+evidence for the lock and idle logic itself; only live nested-compositor
+protocol evidence is unavailable here.
+
+### PAM live conversation and the no-`pam_faillock` decision
+
+`test/security-recovery-pam-vm.nix` drives a minimal QML harness
+instantiating the same pinned `Quickshell.Services.Pam.PamContext` type the
+production lock plugin uses, `config: "omarchy-lock-password"`, against the
+real generated `/etc/pam.d/omarchy-lock-password` service in a booted VM -
+not the full production lock QML tree, which also instantiates
+`WlSessionLock` and would hit the same nested-compositor limitation. This
+gives real evidence for the exact PAM ABI the lock depends on, independent
+of the lock's own Wayland-bound presentation. It proves: a correct fixture
+password authenticates; a wrong password fails without installing any
+lockout state; at least 20 consecutive wrong attempts leave the session
+still unauthenticated, the harness alive, log growth bounded, and a
+subsequent correct password still able to authenticate; cancelling an
+in-flight conversation aborts it distinctly from a failure; and with the
+PAM service absent, PAM start fails distinctly from an authentication
+failure, with no fallback to any other authentication path. The repeated-
+failure result is the live proof behind Layer 2's decision to omit
+`pam_faillock`: a lock-screen lockout policy remains a deliberate v0.1
+omission, confirmed under real load, not a gap.
+
+The same file also drives `omanixy-shell.service` in the VM with no Wayland
+compositor present at all - a genuine, not synthetic, failure condition -
+and observes the unit's real `Restart=on-failure`/`RestartSec=2s`/
+`StartLimitBurst=5`/`StartLimitIntervalSec=60s` bound the failure to a
+finite restart count rather than looping forever, and that
+`systemctl reset-failed` plus a fresh start is accepted afterward (it fails
+again for the same Wayland-absence reason, which is expected - the point is
+proving the bound, not a live compositor).
+
+### Fingerprint no-device and daemon-unavailable behavior
+
+The same harness enables `programs.omanixy.security.pam.fingerprint.enable`
+with no fingerprint reader present in the VM and proves the fingerprint PAM
+path fails closed while password authentication remains available -
+fingerprint never replaces password. Enrolled physical hardware and a real,
+non-fixture TOD driver remain unavailable in this environment and stay
+under `required_before_supported`, exactly as Layer 4 already anticipated;
+this is not a blocker for the `experimental` target.
+
+### Polkit real registration, authentication, and recovery
+
+`test/security-recovery-polkit-vm.nix` drives a minimal harness
+instantiating the pinned `PolkitAgent { path: "/org/omarchy/PolkitAgent" }`
+object (no `PanelWindow`) against a real, running `polkitd` in a booted VM.
+It proves: real registration succeeds; a real authentication request
+against a test-only polkit action succeeds for the correct fixture password
+and fails for a wrong one; user- and daemon-initiated cancellation both
+close the flow without a stale state; registering against an
+already-registered independent agent fails diagnostically and boundedly
+without killing, stopping, or masking that agent (the pinned Quickshell ABI
+has no event-driven re-registration on a competitor's departure the way the
+notification daemon does - Layer 8 confirms that documented behavior rather
+than inventing a retry loop); and `polkitd` restarting mid-request does not
+hang the requester forever, with a fresh request succeeding once `polkitd`
+returns - notably, even the same pre-restart harness process could complete
+a fresh request afterward, suggesting the underlying D-Bus agent-listener
+layer reconnects transparently on the bus name reappearing, a lower layer
+than the no-retry registration policy the collision case documents. Live
+evidence against a real Wayland session for the agent's own
+`PanelWindow` presentation remains unavailable for the same
+nested-compositor reason as lock and idle, and stays under
+`required_before_supported`.
+
+### Notifications real D-Bus ownership and collision behavior
+
+`test/security-recovery-notifications-vm.nix` drives a minimal harness
+instantiating the pinned `Quickshell.Services.Notifications.NotificationServer`
+type (no `PanelWindow`) against a real session bus in a booted VM. It
+proves: `org.freedesktop.Notifications` gets a real owner and a real,
+independent client's notification is delivered end to end; a replacement id
+updates the same identity with no duplicate row; a default action fires
+exactly once; `CloseNotification` round-trips; DND suppresses popups per the
+real daemon's own history policy and persists across a restart; an unknown
+independent process that claims the name first is never killed or replaced,
+and once it releases the name the daemon claims it event-driven with no
+restart required (the distinction from polkit's registration behavior,
+confirmed live here); and a finite notification burst leaves the daemon
+alive with bounded persisted state. A collision specifically with a
+by-name known daemon (mako/dunst/swaync/fnott), notification-daemon-specific
+session-D-Bus-disappearance recovery, and monitor hotplug with popups
+visible on a live compositor remain under `required_before_supported`.
+
+### Cross-feature boot and crash recovery
+
+`test/security-recovery-cross-feature-vm.nix` selects PAM, the polkit agent,
+and the notification daemon together in one booted VM (fingerprint hardware
+is naturally absent; lock/idle are excluded because they depend on the same
+unavailable nested compositor) and proves the shell boots with no ownership
+conflicts, each surface independently reachable, and no extra PAM/D-Bus
+daemon spawned. It then establishes real simultaneous state on all three
+surfaces at once - an in-flight PAM conversation, an in-flight polkit
+authentication request, and a live notification with a pending default
+action - and `SIGKILL`s the shell process; the stranded polkit request does
+not hang forever (`polkitd`'s own fallback closes it boundedly), and a
+fresh shell process (standing in for the systemd-bounded restart the PAM
+test's own scenario 6 already proves directly against the real unit)
+registers cleanly with no stale "already registered" conflict, restores
+the pre-crash notification as data-only with no action resurrected, and
+succeeds at a fresh PAM conversation, a fresh polkit authentication, and a
+fresh notification delivery.
+
+### Ledger promotion-semantics cleanup
+
+Every already-promoted `security.*` entry (Layers 2-7) previously carried a
+`required_before_promotion` list even though it had already reached its
+declared target - conflating "still needed to reach the target this layer
+promotes to" with "still needed for some hypothetical future move to
+`supported`". Layer 8 makes this coherent: `required_before_promotion` is
+now empty or absent on every promoted entry, and a `required_before_supported`
+list carries only genuine hardware- or environment-specific breadth (real
+fingerprint hardware, a real TOD driver, live nested-compositor validation,
+real lid hardware) - never a reason to withhold the `experimental` target,
+and never silently reported as passed. `test/security-contracts.sh` and the
+new `test/security-recovery-contract.sh` enforce both halves of this rule.
+
+### Final support-state decisions
+
+No `security.*` entry reaches `support: supported` after this layer; the
+target for every entry, including `security.recovery` itself, remains
+`adapted`/`experimental`. Specifically, and unchanged from their originating
+layers: `pam_faillock` is not adopted (confirmed under real repeated-failure
+load in this layer, not merely decided); `pam_systemd_home` is not adopted,
+the v0.1 backend is ordinary shadow-backed Unix accounts via `pam_unix`
+only; Omanixy does not own system suspend/sleep policy - no
+`omarchy-system-sleep-monitor`, `omarchy-sleep-lock.service`,
+`systemd-inhibit` listener, or automatic pre-suspend lock owner is
+introduced by this or any layer, by design, not omission, and
+`test/security-contracts.sh` bans that vocabulary from `modules/home`; no
+laptop lid/clamshell policy is introduced, real lid hardware validation
+stays `required_before_supported`; and third-party QML plugins execute
+unsandboxed inside the same shell process as every security-sensitive
+surface, which remains documented rather than hidden and is one reason
+every native security integration stays experimental rather than supported.
+
+### Scope
+
+This layer promotes `security.recovery` from `blocked`/`blocked` to its
+already-declared target of `adapted`/`experimental`, and re-states (with
+`required_before_promotion` cleared and `required_before_supported`
+populated where genuinely outstanding) the six entries Layers 2-7 already
+promoted: `security.pam-password`, `security.lock`,
+`security.pam-fingerprint`, `security.polkit-agent`, `security.idle`, and
+`security.notification-daemon`. After this layer, all seven `security.*`
+ledger entries are promoted to their declared target and no entry remains
+`blocked`. `experimental`, not `supported`, for `security.recovery` and for
+every entry it depends on, because live nested-compositor evidence for the
+native lock and idle surfaces, enrolled fingerprint hardware, a real TOD
+driver, and real lid hardware all remain genuinely unavailable in this
+environment and are recorded as such rather than faked; every case this
+layer could exercise against a real backend in a booted VM - PAM, polkit,
+and the notification daemon - passed. `programs.omanixy.security.*` options
+all remain default `false`. Every `security.*` entry remains `maturity:
+audited`. Issue #4 remains open until this layer's pull request merges.
