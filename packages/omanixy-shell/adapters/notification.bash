@@ -1,4 +1,4 @@
-# shellcheck disable=SC2154 # shared adapter state is initialized by common.bash.
+# shellcheck disable=SC2154
 weather_status() {
   (($# == 0)) || fail 'Usage: omarchy-weather-status' 2
   local place weather encoded_place

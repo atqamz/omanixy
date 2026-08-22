@@ -5,7 +5,7 @@ name=${COMPAT_ADAPTER_NAME:-${0##*/}}
 state_home=${XDG_STATE_HOME:-$HOME/.local/state}
 data_home=${XDG_DATA_HOME:-$HOME/.local/share}
 config_home=${XDG_CONFIG_HOME:-$HOME/.config}
-# shellcheck disable=SC2034 # shared by the domain adapters concatenated after this file.
+# shellcheck disable=SC2034
 omarchy_state="$state_home/omarchy"
 
 fail() {

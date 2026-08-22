@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# Drives the real IdlePolicy.js directly (via require), not a disconnected
-# reimplementation - the same pattern security-lock-fingerprint-behavior.sh
-# uses for FingerprintPolicy.js.
 set -euo pipefail
 
 policy_file=$1

@@ -1,4 +1,4 @@
-# shellcheck disable=SC2154 # shared adapter state is initialized by common.bash.
+# shellcheck disable=SC2154
 bluetooth_device() {
   (($# == 2)) || fail 'Usage: omarchy-bluetooth-device [pair|connect|disconnect|forget] <MAC>' 2
   [[ $2 =~ ^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$ ]] || fail 'Bluetooth address is invalid' 2

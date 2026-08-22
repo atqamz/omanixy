@@ -1,32 +1,4 @@
 #!/usr/bin/env bash
-# Real generated-QML behavior test for the adapted notifications Service.qml,
-# following the same offscreen Quickshell pattern as
-# test/security-polkit-qml-behavior.sh.
-#
-# Two harnesses drive the same real, already-patched
-# shell/plugins/notifications/{Service.qml,NotificationLogic.js} from the
-# built notification-daemon-enabled runtime - not a hand-authored
-# reimplementation:
-#
-# Harness 1 (cases A-L) uses the REAL omanixy-notification-state adapter
-# against a real temporary HOME - popup/history files this test inspects
-# afterward are genuine adapter output. Only two mechanical, test-harness-
-# only transforms are applied: the popup PanelWindow -> Item (no offscreen
-# Wayland layer-shell surface), and the real NotificationServer {} listener
-# -> an inline fake QtObject exposing the identical "notification" signal
-# surface (the D-Bus registration ABI itself is separately, statically
-# proven by test/security-notifications-quickshell-contract.sh).
-#
-# Harness 2 (cases M/N/O) additionally fakes the three state-persistence
-# Process objects themselves (popupFileProc/readHistoryProc/
-# restorePopupsProc) to deterministically drive Quickshell's pinned
-# FailedToStart/exit ordering - but every reconciliation function invoked
-# (finishPopupFileJob, reconcilePopupFileJobFailedToStart,
-# reconcileReadHistoryFailedToStart, reconcileRestorePopupsFailedToStart,
-# runNextPopupFileJob) is the real generated Service.qml production
-# function; only the Process signal/state surface is a fake. Every
-# transform in both harnesses is an exact-count replacement that fails
-# closed on drift, exactly like the production patcher.
 set -euo pipefail
 
 compat_root=${1:?notification-daemon-enabled compatibility root required}
@@ -38,10 +10,6 @@ test_root=$(mktemp -d)
 trap 'chmod -R u+w "$test_root" 2>/dev/null || true; rm -rf "$test_root"' EXIT
 mkdir -p "$test_root/home" "$test_root/runtime" "$test_root/bin"
 
-# A real omanixy-notification-state on PATH, not a fake - the adapted
-# Service.qml's Process calls hit real bash/coreutils against a real
-# temporary HOME. The Nix build sandbox has no /usr/bin/env, so the
-# shebang is rewritten to the real, absolute bash path actually in PATH.
 real_bash=$(command -v bash)
 cat >"$test_root/bin/omanixy-notification-state" <<EOF
 #!/usr/bin/env bash
@@ -59,19 +27,12 @@ setup_fixture() {
   cp "$compat_root/shell/plugins/notifications/NotificationLogic.js" "$fixture_dir/NotificationLogic.js"
   cp "$compat_root/shell/plugins/notifications/components/NotificationCard.qml" "$fixture_dir/components/NotificationCard.qml"
   chmod u+w "$fixture_dir/Service.qml" "$fixture_dir/NotificationLogic.js"
-  # Harness-only: Service.qml's `import "components"` relies on the real
-  # PluginRegistry's own plugin-loading machinery to resolve as a directory
-  # import; loading Service.qml standalone through a bare Loader needs an
-  # explicit qmldir to resolve the same sibling directory the same way.
   cat >"$fixture_dir/components/qmldir" <<'EOF'
 module fixture-notifications.components
 NotificationCard 1.0 NotificationCard.qml
 EOF
 }
 
-# ================================================================
-# Harness 1 (cases A-L): real adapter, fake NotificationServer only.
-# ================================================================
 
 harness1_dir="$test_root/h1"
 mkdir -p "$harness1_dir"
@@ -537,16 +498,10 @@ if ! grep -Fq 'NOTIF_QML_PASS_PART1' "$harness1_dir/quickshell-part1.log"; then
   exit 1
 fi
 
-# ---------------------------------------------------------------
-# On-disk proofs for cases A-J - genuine adapter output, checked after
-# part 1 exits and strictly before part 2 (case K) floods and trims
-# history, so an assertion here can never race that legitimate eviction.
-# ---------------------------------------------------------------
 state_dir="$test_root/home/.local/state/omarchy/notifications"
 history_dir="$state_dir/history"
 settings_file="$test_root/home/.local/state/omarchy/notifications.json"
 
-# A: a real popup file exists with no exec field anywhere in the state dir.
 if grep -rq '"exec"' "$state_dir" 2>/dev/null; then
   printf 'persisted state unexpectedly contains an exec field somewhere under %s\n' "$state_dir" >&2
   grep -rl '"exec"' "$state_dir" >&2
@@ -557,8 +512,6 @@ if grep -rq 'touch /tmp/pwned' "$state_dir" 2>/dev/null; then
   exit 1
 fi
 
-# B: the DND-silenced notification landed in history, not in the live
-# popup directory.
 if ! grep -rq 'Silenced-B-marker' "$history_dir" 2>/dev/null; then
   printf 'case B: DND-silenced notification did not reach real history state under %s\n' "$history_dir" >&2
   exit 1
@@ -568,8 +521,6 @@ if find "$state_dir" -maxdepth 1 -name '*.json' -exec grep -q 'Silenced-B-marker
   exit 1
 fi
 
-# C: exactly one persisted artifact for the replaced notification, holding
-# the updated content - never a duplicate for the pre-replacement content.
 c_files=$(grep -rl 'Updated-C-marker' "$state_dir" 2>/dev/null | wc -l)
 if [[ $c_files -ne 1 ]]; then
   printf 'case C: expected exactly one persisted file reflecting the replacement, found %s\n' "$c_files" >&2
@@ -580,10 +531,6 @@ if grep -rq '"summary":"Original-C"' "$state_dir" 2>/dev/null; then
   exit 1
 fi
 
-# D: the settings file reflects the final (restored-to-off) DND state, and
-# reflected the "on" state at the point the second instance hydrated it
-# (proven in-QML above); here we only prove the file itself is well-formed
-# and present.
 if [[ ! -f $settings_file ]]; then
   printf 'case D: expected a real notifications.json settings file at %s\n' "$settings_file" >&2
   exit 1
@@ -593,8 +540,6 @@ if ! grep -q '"dnd"' "$settings_file"; then
   exit 1
 fi
 
-# E: the dismissed popup's file is archived into history, not left as a
-# live popup file and not merely deleted.
 if find "$state_dir" -maxdepth 1 -name '*.json' -exec grep -q 'Dismiss-E-marker' {} \; -print 2>/dev/null | grep -q .; then
   printf 'case E: dismissed popup unexpectedly still has a live popup file\n' >&2
   exit 1
@@ -604,8 +549,6 @@ if ! grep -rq 'Dismiss-E-marker' "$history_dir" 2>/dev/null; then
   exit 1
 fi
 
-# F: the expired popup is archived into history the same way a dismissed
-# one is.
 if find "$state_dir" -maxdepth 1 -name '*.json' -exec grep -q 'Expire-F-marker' {} \; -print 2>/dev/null | grep -q .; then
   printf 'case F: expired popup unexpectedly still has a live popup file\n' >&2
   exit 1
@@ -615,8 +558,6 @@ if ! grep -rq 'Expire-F-marker' "$history_dir" 2>/dev/null; then
   exit 1
 fi
 
-# I: the hostile omarchy-exec hint's target file must never have been
-# created - the click path performs no execution of any kind.
 if [[ -e $hostile_marker ]]; then
   printf 'case I: the hostile omarchy-exec hint was executed - marker file exists at %s\n' "$hostile_marker" >&2
   exit 1
@@ -626,9 +567,6 @@ if grep -rq 'Hostile-I-marker' "$state_dir" 2>/dev/null && grep -rq '"exec"' "$s
   exit 1
 fi
 
-# ================================================================
-# Harness 1, part 2 (cases K, L): same fixture, same HOME, fresh process.
-# ================================================================
 
 cat >"$harness1_dir/shell-part2.qml" <<'EOF'
 import QtQuick
@@ -802,11 +740,6 @@ if ! grep -Fq 'NOTIF_QML_PASS_PART2' "$harness1_dir/quickshell-part2.log"; then
   exit 1
 fi
 
-# ================================================================
-# Harness 2 (cases M/N/O): real production reconciliation functions,
-# fake Process signal/state surface only, for popupFileProc/
-# readHistoryProc/restorePopupsProc.
-# ================================================================
 
 harness2_dir="$test_root/h2"
 mkdir -p "$harness2_dir"

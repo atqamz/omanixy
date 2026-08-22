@@ -1,21 +1,4 @@
 #!/usr/bin/env bash
-# Real generated-QML behavior test for the adapted PolkitAgent.qml, following
-# the same offscreen Quickshell pattern as test/qml-patch-behavior.sh.
-#
-# The production source under test is the real, already-patched
-# shell/plugins/polkit/PolkitAgent.qml from the built polkit-agent-enabled
-# runtime - not a hand-authored reimplementation. Only two mechanical,
-# test-harness-only transforms are applied on top of it, exactly as
-# permitted by the Layer-5 spec: PanelWindow -> Item (a real PanelWindow
-# needs a Wayland layer-shell surface no offscreen environment provides,
-# mirroring qml-patch-behavior.sh's Bar.qml handling), and the real
-# PolkitAgent {} native listener object -> an inline, deterministic fake
-# QtObject the harness drives directly (the real one needs a live polkit
-# D-Bus daemon). Both transforms are exact-count replacements that fail
-# closed on drift, exactly like the production patcher - this is not a
-# best-effort sed pass. The fake is defined inline (rather than as a
-# separate sibling .qml file) because Quickshell's engine does not
-# implicitly register same-directory QML files as types.
 set -euo pipefail
 
 compat_root=${1:?polkit-agent-enabled compatibility root required}

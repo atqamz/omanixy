@@ -1,46 +1,4 @@
 #!/usr/bin/env python3
-"""Fail-closed scan of the patched Service.qml's Process.command executable surface.
-
-Discovery reuses the shared QML source-discovery primitives
-(scripts/source_discovery.py) that the layer-1 contract audit already relies
-on for finding command bindings, so multiline arrays, non-array dynamic
-bindings, and procedural `.command =` mutations are found the same way
-everywhere in this repo instead of via a second, inconsistent parser.
-Comments are lexically masked out first, then quoted-string and template-
-literal content is lexically masked a second time to locate genuine
-command bindings - a comment marker or command-looking text sitting inside
-a string or template literal cannot satisfy or spoof the audit. The real
-literal values used for the allowlist check are still read back out of the
-comment-only-masked text, by the position each binding was found at, so a
-legitimate command array's actual executable name is never itself
-blanked.
-
-security.lock's executable source additionally rejects any live backtick
-template literal outright, before command discovery even runs. QML/JS
-template literals admit full ECMAScript grammar - regex literals in
-particular make "}" -> interpolation-depth counting unprovable without a
-real parser (division vs. regexp-literal ambiguity, character classes,
-escaped slashes, flags) - and no amount of extra lexing in the shared
-source-discovery module can close that gap for a security guard. Since the
-real, reviewed lock Service.qml contains zero template literals, this
-scanner treats any that appear as unverifiable rather than trying to prove
-their content safe. A backtick that survives comment-stripping and
-string-masking is, by construction, a live template delimiter rather than
-one sitting inertly inside an ordinary quoted string or comment, so this
-check cannot be spoofed by a harmless backtick character in normal text.
-
-Every array binding discovered this way is then tokenized and validated
-here against an explicit allowlist: the executable position must be a
-literal string naming an allowed executable, a bash -c shape is always
-rejected regardless of position, and a timeout wrapper's own flags,
-duration, and wrapped executable must all be literal and the wrapped
-executable checked against a separate allowlist, so the wrapper cannot be
-used to smuggle in an arbitrary command. Trailing argument positions (e.g. a
-dynamic path passed to readlink) may remain dynamic - only the identity of
-what gets executed is in scope for this audit, not the data handed to it.
-Any binding this cannot prove is a literal, allowed executable is
-rejected - ambiguity fails closed.
-"""
 
 from __future__ import annotations
 
@@ -86,14 +44,6 @@ def unescape(literal: str) -> str:
 
 
 def tokenize(array_body: str) -> list[tuple[str, bool]]:
-    """Split a command array body into ordered (value, is_literal) tokens.
-
-    Non-literal slots (property references, expressions, nested calls) are
-    kept as their raw, unparsed text so a positional check (e.g. the bash -c
-    detector) can still match literal keywords that happen to sit next to
-    dynamic content, without ever treating the dynamic slot itself as a
-    known-safe literal.
-    """
 
     tokens: list[tuple[str, bool]] = []
     pos = 0
@@ -183,13 +133,8 @@ def scan(text: str, allowed_direct: set[str]) -> Tally:
         masked = source_discovery.mask_string_literals(stripped)
     except source_discovery.UnsafeSource as exc:
         fail(f"unsafe source, cannot prove executable surface is closed: {exc}")
-        raise  # unreachable, fail() always raises SystemExit
+        raise
 
-    # A backtick surviving comment-stripping and string-masking is a live
-    # template delimiter, not one sitting inertly inside an ordinary quoted
-    # string or comment (both of those are already stripped/blanked above).
-    # security.lock rejects that outright rather than trying to prove its
-    # content safe - see the module docstring.
     if "`" in masked:
         fail("template literals are unsupported in security.lock executable source")
 

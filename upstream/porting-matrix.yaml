@@ -443,7 +443,7 @@ items:
       - test/runtime-closure.sh
     notes:
       - The pinned network panel speed-test action is hidden and the speed-test plugin is not copied into the compatibility root.
-      - No third-party endpoint, token, background worker, or fabricated sample is retained in the issue #3 runtime.
+      - "No third-party endpoint, token, background worker, or fabricated sample is retained in the issue #3 runtime."
 
   - id: bluetooth.native-state
     classification: exact

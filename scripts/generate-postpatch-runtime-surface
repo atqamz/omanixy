@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Generate post-patch consumer identity and executable probes."""
 
 from __future__ import annotations
 

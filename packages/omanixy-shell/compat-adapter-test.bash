@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC1091 # the test harness resolves all adapter modules at runtime.
+# shellcheck disable=SC1091
 set -euo pipefail
 
 adapter_dir=${OMANIXY_ADAPTER_DIR:-${BASH_SOURCE[0]%/*}}

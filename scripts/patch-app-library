@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Add the user-owned-only launcher removal boundary to pinned AppLibrary.qml."""
 
 from pathlib import Path
 import sys

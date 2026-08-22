@@ -1,28 +1,4 @@
 #!/usr/bin/env python3
-"""Narrow post-patch to the pinned shell/plugins/services/idle/{Service.qml,
-IdleModel.js} for the Quattro idle owner.
-
-Layer 6 owns user-session idle detection and bounded lock-on-idle
-orchestration only. It deliberately removes everything the pinned source
-does beyond that:
-
-- the terminal screensaver path (omarchy-launch-screensaver, its Hyprland
-  raw-event window tracking, and the screensaver launch-grace timer) -
-  presentation policy, not required for a secure lock-on-idle capability;
-- omarchy-system-lock/omarchy-system-wake (incidental host policy - keyboard
-  layout reset, 1Password locking, DPMS/backlight/clamshell mutation - none
-  of which Layer 6 owns), replaced by the already-audited Layer-3 lock IPC
-  (["omanixy-shell", "lock", "lock"], direct argv) and no wake action at
-  all, since Layer 6 never blanks the display in the first place;
-- the bash -c/-lc stay-awake marker probe and writer, replaced by the
-  narrow, fixed-domain omanixy-idle-state helper (probe / set awake / set
-  idle, direct argv only).
-
-The lock request itself gains a bounded, deterministic retry policy
-(packages/omanixy-shell/IdlePolicy.js) in place of the pinned source's
-single fire-and-forget lockSystem() call, since Layer 6 must not lose
-lock-on-idle to one transient IPC failure, nor retry unboundedly.
-"""
 
 from pathlib import Path
 import sys
@@ -518,8 +494,6 @@ def apply_qml(text: str) -> str:
     ])
     text = replace_once(text, probe_old, probe_new, "stay-awake state probe Process")
 
-    # refreshStayAwakeState is untouched by any prior transform above - the
-    # pinned source's own version, gated only on stayAwakeStateProbe.running.
     refresh_old = block([
         "  function refreshStayAwakeState() {",
         "    if (!stayAwakeStateProbe.running) stayAwakeStateProbe.running = true",
@@ -534,10 +508,6 @@ def apply_qml(text: str) -> str:
     ])
     text = replace_once(text, refresh_old, refresh_new, "refreshStayAwakeState function")
 
-    # setIdleEnabled is the last untouched pinned function before the
-    # IdleMonitor/Timer/Process declarations - anchor point to add the new
-    # trust-revocation and FailedToStart-recovery functions the probe/writer
-    # Process blocks below now call.
     set_idle_enabled_old = block([
         "  function setIdleEnabled(value) {",
         '    return applyStayAwake(!value, true, "ipc")',

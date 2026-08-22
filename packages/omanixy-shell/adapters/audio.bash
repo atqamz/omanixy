@@ -1,4 +1,4 @@
-# shellcheck disable=SC2154 # shared adapter state is initialized by common.bash.
+# shellcheck disable=SC2154
 pipewire_dump() {
   timed 2 'PipeWire inspection' pw-dump
 }

@@ -1,9 +1,4 @@
 #!/usr/bin/env bash
-# Drives the real, patched PolkitModel.js directly (via require), not a
-# disconnected reimplementation. Proves authorizationLabel behavior and that
-# the now-unused fingerprint-detection helpers patch-polkit-agent removes
-# (promptLooksFingerprint, fingerprintConfiguredFromPamConfig) are actually
-# gone from both the module surface and its exports.
 set -euo pipefail
 
 policy_file=$1

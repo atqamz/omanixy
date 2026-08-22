@@ -1,30 +1,4 @@
 #!/usr/bin/env python3
-"""Narrow post-patches to the pinned Service.qml for the native lock.
-
-Two modes, selected by --fingerprint:
-
-disabled (default): removes the fingerprint PAM conversation and its retry
-loop entirely (no fingerprintPam PamContext, no
-startFingerprint()/handleFingerprintFinished(), no fprintd probe) - byte-for-
-byte what this script has always produced.
-
-enabled: keeps a hardened fingerprint conversation instead of removing it.
-The upstream fingerprintCheckProc's own "bash -c ... fprintd-list ... | grep"
-probe and its unbounded 250ms retry are never reintroduced as-is - the probe
-is replaced by the audited omarchy-lock-fingerprint-ready adapter (a bounded,
-argument-free helper with a resolved 0/1/2 exit ABI), and the retry loop
-gains a finite fingerprintMaxAttempts budget that only resets on a genuinely
-new lock acquisition (beginLock), never on a screen change, a DPMS event, or
-a password failure. Password submission always aborts any in-flight
-fingerprint conversation and stops the retry timer; fingerprint failure,
-exhaustion, or the absence of hardware never touches password state or calls
-finishUnlock().
-
-Both modes convert the stranded-lock and DPMS Process commands from bash -c
-string shapes to direct argv, reusing the exact Hyprland DPMS dispatch and
-timeout bound already validated in packages/omanixy-shell/adapters/display.bash
-and common.bash's timed().
-"""
 
 from pathlib import Path
 import sys
@@ -46,9 +20,6 @@ def apply_shared(text: str) -> str:
     stranded_new = '    command: ["omarchy-hyprland-session-locked"]'
     text = replace_once(text, stranded_old, stranded_new, "stranded-lock helper invocation")
 
-    # Same bound as packages/omanixy-shell/adapters/common.bash's timed():
-    # timeout --kill-after=1s 3s, so a wedged hyprctl cannot stall the lock
-    # screen's wake/blank path indefinitely.
     wake_old = '    command: ["bash", "-c", "omarchy-system-wake"]'
     wake_new = '    command: ["timeout", "--kill-after=1s", "3s", "hyprctl", "dispatch", "hl.dsp.dpms({ action = \\"enable\\" })"]'
     text = replace_once(text, wake_old, wake_new, "wake DPMS invocation")

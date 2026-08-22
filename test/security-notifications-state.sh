@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# Drives the real omanixy-notification-state adapter (notification-state.bash)
-# directly, the same way security-idle-state.sh drives the idle adapter -
-# never a disconnected reimplementation of its exit-code contract.
 set -euo pipefail
 
 notification_state_adapter=${1:?adapters/notification-state.bash path required}
@@ -27,9 +24,6 @@ popup_dir="$home/.local/state/omarchy/notifications"
 history_dir="$popup_dir/history"
 images_dir="$popup_dir/images"
 
-# The external ABI is strictly 0/1/2 - nothing else may leak past this
-# adapter. home is one of: an absolute path, a relative path (to test
-# rejection), or the literal "__UNSET__" (unset HOME entirely).
 run() {
   local home=$1
   shift
@@ -61,7 +55,6 @@ assert_exit() {
   esac
 }
 
-# --- HOME validation, every verb ---
 for verb in init read-popups read-history clear-history sweep-images; do
   assert_exit "$verb with unset HOME" 2 __UNSET__ "$verb"
   assert_exit "$verb with relative HOME" 2 'relative/path' "$verb"
@@ -70,7 +63,6 @@ assert_exit 'persist-popup with unset HOME' 2 __UNSET__ persist-popup 1-1 '{}'
 assert_exit 'archive-popup with relative HOME' 2 'relative/path' archive-popup 1-1
 assert_exit 'delete-popup with unset HOME' 2 __UNSET__ delete-popup 1-1
 
-# --- invalid verb / arity ---
 assert_exit 'unknown top-level verb' 2 "$home" bogus
 assert_exit 'no verb at all' 2 "$home"
 assert_exit 'persist-popup with no args' 2 "$home" persist-popup
@@ -81,14 +73,12 @@ assert_exit 'read-popups with extra arg' 2 "$home" read-popups extra
 assert_exit 'clear-history with extra arg' 2 "$home" clear-history extra
 assert_exit 'init with extra arg' 2 "$home" init extra
 
-# --- stem validation: only <digits>-<digits> is ever accepted ---
 for bad_stem in '' '../../etc/passwd' '/etc/passwd' '1-1/../2' '1-1*' 'abc-1' '1-1 ' '1--1'; do
   assert_exit "archive-popup rejects stem '$bad_stem'" 2 "$home" archive-popup "$bad_stem"
   assert_exit "delete-popup rejects stem '$bad_stem'" 2 "$home" delete-popup "$bad_stem"
   assert_exit "persist-popup rejects stem '$bad_stem'" 2 "$home" persist-popup "$bad_stem" '{}'
 done
 
-# --- init ---
 assert_exit 'init creates only the expected state directories' 0 "$home" init
 [[ -d $popup_dir ]] || { printf 'init did not create popup dir\n' >&2; exit 1; }
 [[ -d $history_dir ]] || { printf 'init did not create history dir\n' >&2; exit 1; }
@@ -98,7 +88,6 @@ assert_exit 'init creates only the expected state directories' 0 "$home" init
   exit 1
 }
 
-# --- persist-popup / read-popups / delete-popup ---
 assert_exit 'persist-popup writes exactly the expected file' 0 "$home" persist-popup 1000-1 '{"id":1}'
 [[ -f "$popup_dir/1000-1.json" ]] || { printf 'persist-popup did not create the popup file\n' >&2; exit 1; }
 [[ "$(cat "$popup_dir/1000-1.json")" == '{"id":1}' ]] || { printf 'persist-popup wrote unexpected content\n' >&2; exit 1; }
@@ -115,13 +104,11 @@ assert_exit 'delete-popup removes only the exact popup artifact' 0 "$home" delet
 [[ -f "$popup_dir/2000-2.json" ]] || { printf 'delete-popup removed an unrelated popup file\n' >&2; exit 1; }
 assert_exit 'delete-popup on an already-absent stem is a no-op, not found' 1 "$home" delete-popup 1000-1
 
-# --- archive-popup moves only the exact popup artifact to history ---
 assert_exit 'archive-popup moves the exact popup to history' 0 "$home" archive-popup 2000-2
 [[ ! -e "$popup_dir/2000-2.json" ]] || { printf 'archive-popup left the popup file behind\n' >&2; exit 1; }
 [[ -f "$history_dir/2000-2.json" ]] || { printf 'archive-popup did not create the history file\n' >&2; exit 1; }
 assert_exit 'archive-popup on an already-absent stem is a no-op, not found' 1 "$home" archive-popup 2000-2
 
-# --- persist-history / read-history / history limit never exceeds 10 ---
 run "$home" clear-history
 for i in $(seq 1 12); do
   assert_exit "persist-history entry $i" 0 "$home" persist-history "$((i * 1000))-$i" "{\"id\":$i}"
@@ -131,12 +118,10 @@ history_lines=$(wc -l <"$test_root/history.out")
 [[ $history_lines -le 10 ]] || { printf 'history exceeded the 10-entry limit: %s lines\n' "$history_lines" >&2; exit 1; }
 history_files=$(find "$history_dir" -maxdepth 1 -name '*.json' | wc -l)
 [[ $history_files -le 10 ]] || { printf 'history directory exceeded the 10-file limit: %s files\n' "$history_files" >&2; exit 1; }
-# The two oldest entries (1, 2) must have been trimmed away.
 [[ ! -f "$history_dir/1000-1.json" ]] || { printf 'trimming did not remove the oldest history entry\n' >&2; exit 1; }
 [[ ! -f "$history_dir/2000-2.json" ]] || { printf 'trimming did not remove the second-oldest history entry\n' >&2; exit 1; }
 [[ -f "$history_dir/12000-12.json" ]] || { printf 'trimming removed the newest history entry\n' >&2; exit 1; }
 
-# --- clear-history does not touch live popup state ---
 assert_exit 'persist-popup a live popup before clear-history' 0 "$home" persist-popup 9999-9 '{"id":9}'
 assert_exit 'clear-history clears only recorded history' 0 "$home" clear-history
 [[ -f "$popup_dir/9999-9.json" ]] || { printf 'clear-history touched an unrelated live popup file\n' >&2; exit 1; }
@@ -144,13 +129,11 @@ remaining_history=$(find "$history_dir" -maxdepth 1 -name '*.json' | wc -l)
 [[ $remaining_history == 0 ]] || { printf 'clear-history left history files behind\n' >&2; exit 1; }
 run "$home" delete-popup 9999-9
 
-# --- corrupt/unreadable state: bounded failure, never a crash ---
 rm -rf "$history_dir"
 assert_exit 'read-history tolerates a missing history directory' 0 "$home" read-history
 run "$home" read-history >"$test_root/empty-history.out"
 [[ ! -s "$test_root/empty-history.out" ]] || { printf 'read-history on a missing dir must be empty, not fabricated\n' >&2; exit 1; }
 
-# --- image copy bounds ---
 assert_exit 'init recreates history dir' 0 "$home" init
 big_source="$test_root/big.bin"
 head -c 6000000 </dev/zero >"$big_source"
@@ -178,20 +161,14 @@ assert_exit 'persist-popup with a FIFO image source does not hang and degrades' 
 rm -f "$fifo"
 run "$home" delete-popup 8000-8
 
-# --- role/arity validation on image pairs ---
 assert_exit 'persist-popup rejects an invalid role literal' 2 "$home" persist-popup 1-2 '{}' bogus "$small_source"
 assert_exit 'persist-popup rejects a duplicate role' 2 "$home" persist-popup 1-3 '{}' appIcon "$small_source" appIcon "$small_source"
 assert_exit 'persist-popup rejects an odd trailing arg count' 2 "$home" persist-popup 1-4 '{}' appIcon
 
-# --- traversal/escape: destination is always derived internally ---
 assert_exit 'persist-history with a legitimate stem succeeds' 0 "$home" persist-history 3000-3 '{"id":3}' appIcon "$small_source"
 [[ -f "$images_dir/3000-3-appIcon" ]] || { printf 'persist-history image copy did not land under the images dir\n' >&2; exit 1; }
 [[ ! -e "$test_root/home/3000-3-appIcon" ]] || { printf 'an image must never escape the derived images directory\n' >&2; exit 1; }
 
-# --- serialized state payload bound ---
-# Independently documented in the adapter (NOTIFICATION_STATE_MAX_PAYLOAD_BYTES) -
-# duplicated here as a literal the same way the 10-entry history limit
-# above is, not derived from the adapter source.
 max_payload=65536
 
 build_payload_of_size() {
@@ -204,11 +181,6 @@ build_payload_of_size() {
 payload_at_limit_minus_1=$(build_payload_of_size $((max_payload - 1)))
 payload_at_limit=$(build_payload_of_size "$max_payload")
 payload_over_limit=$(build_payload_of_size $((max_payload + 1)))
-# "Huge" is deliberately kept below Linux's own per-argument hard limit
-# (MAX_ARG_STRLEN, 32 pages = 128 KiB) - a payload at or beyond that fails
-# exec() itself with E2BIG before the adapter ever runs, which would prove
-# the kernel's incidental limit rejects it, not the adapter's own
-# documented 64 KiB bound. Comfortably between the two proves the latter.
 payload_huge=$(build_payload_of_size 98304)
 
 assert_exit 'persist-popup accepts a payload one byte under the limit' 0 "$home" persist-popup 2001-1 "$payload_at_limit_minus_1"
@@ -228,17 +200,10 @@ assert_exit 'persist-popup rejects a very large payload without hanging' 2 "$hom
 assert_exit 'persist-history also enforces the payload bound' 2 "$home" persist-history 2004-5 "$payload_over_limit"
 [[ ! -e "$history_dir/2004-5.json" ]] || { printf 'an over-bound history payload must never be persisted\n' >&2; exit 1; }
 
-# The queue continues after an oversized persistence failure: an ordinary
-# persist-popup call after the rejected ones above must still succeed, and
-# no partial/corrupt JSON is ever left behind by a rejected call.
 assert_exit 'persist-popup still works after an oversized-payload rejection' 0 "$home" persist-popup 2005-6 '{"id":6}'
 [[ -f "$popup_dir/2005-6.json" ]] || { printf 'persistence must continue working after a bounded rejection\n' >&2; exit 1; }
 run "$home" delete-popup 2005-6
 
-# --- transactional validation: an invalid later pair leaves zero artifacts ---
-# (Section 6 hardening: validate the complete argument structure before any
-# image-copy side effect, so an earlier valid pair's image is never
-# orphaned by a later invalid one.)
 assert_exit 'persist-popup: valid first pair + invalid second pair leaves no artifacts' 2 \
   "$home" persist-popup 9001-1 '{"id":1}' appIcon "$small_source" bogus "$small_source"
 [[ ! -e "$images_dir/9001-1-appIcon" ]] || { printf 'an invalid later pair must not leave an orphaned image from an earlier valid pair\n' >&2; exit 1; }

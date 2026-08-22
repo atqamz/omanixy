@@ -145,11 +145,6 @@ jq -e '
   and (.security_contracts | map(.name) | index("/etc/pam.d/omarchy-lock-password") != null)
 ' "$snapshot" >/dev/null
 
-# Section 5/7 case I: on the real pinned repo (not an arbitrary fixture) the
-# closure is fully resolved and every dynamic/ambiguous execution has an
-# exact, pinned, reviewed disposition - the pinned snapshot must actually
-# reach the 0/0/0 state the audit exists to enforce, not merely be capable of
-# reporting non-zero when something is wrong.
 jq -e '
   ([.security_helper_edges[] | select(.disposition == null)] | length == 0)
   and (.security_dead_dispositions | length == 0)
@@ -162,13 +157,6 @@ for plugin in lock polkit notifications; do
 done
 test ! -e "$compatibility_root/shell/plugins/services/idle"
 
-# Layers 2 and 4 own every declarative PAM capability, in exactly one place:
-# the NixOS security module. Home Manager and the runtime package must never
-# declare a PAM service themselves - only reference the fingerprint readiness
-# adapter's helper name, which is not a PAM declaration. Layer 5 owns
-# security.polkit (the native NixOS capability only, never a PAM service of
-# its own); idle and notification daemon ownership remain out of scope until
-# their own stack layers.
 if rg -n 'security\.pam\.services|/etc/pam\.d/omarchy-lock-(password|fingerprint)\b|pam_fprintd|pam_unix' \
   "$repo/modules/home" "$repo/packages"; then
   printf '%s\n' 'PAM declaration found outside the layer-2/4 NixOS security module' >&2
@@ -187,9 +175,6 @@ if rg -n 'IdleMonitor|NotificationServer|org\.freedesktop\.Notifications' \
   exit 1
 fi
 
-# Layer 5 (polkit) must never imperatively mutate a known-conflicting
-# session polkit agent - it may only assert against one being enabled
-# alongside the Quattro agent, never set, stop, or kill it.
 if rg -n 'services\.(hyprpolkitagent|polkit-gnome)\.enable\s*=\s*(false|true)' \
   "$repo/modules/home"; then
   printf '%s\n' 'Omanixy must not imperatively set a competing polkit agent service' >&2
@@ -207,9 +192,6 @@ if rg -n 'programs\.omanixy\.features.*(lock|polkit|idle|notifications)|features
   exit 1
 fi
 
-# Layer 6 (idle) must never imperatively mutate a known-conflicting Home
-# Manager idle daemon - it may only assert against one being enabled
-# alongside Layer 6's own idle owner, never set, stop, or kill it.
 if rg -n 'services\.(hypridle|swayidle)\.enable\s*=\s*(false|true)' \
   "$repo/modules/home"; then
   printf '%s\n' 'Omanixy must not imperatively set a competing idle daemon service' >&2
@@ -221,36 +203,18 @@ if rg -n 'systemctl.*(hypridle|swayidle)|kill.*(hypridle|swayidle)|pkill.*(hypri
   exit 1
 fi
 
-# Layer 6 deliberately omits the terminal screensaver path (Section 8) -
-# none of its vocabulary may appear as live wiring in the Home Manager
-# module (the pinned patcher's own removed-code commentary, and the
-# generic upstream contract-audit script's full helper inventory, both
-# legitimately reference these names without wiring them up - those are
-# proven not to reach the final artifact by
-# test/security-idle-executable-surface.sh and
-# test/security-idle-no-dpms-widening.sh instead of a repo-wide string ban).
 if rg -n 'omarchy-launch-screensaver|omarchy-screensaver|\bttfx\b|\bsocat\b' \
   "$repo/modules/home"; then
   printf '%s\n' 'screensaver vocabulary leaked into the Home Manager module - Layer 6 deliberately omits it' >&2
   exit 1
 fi
 
-# Pre-suspend locking and sleep-monitor services are permanently, by design,
-# not owned by Omanixy (Section 11/61 of issue #4; confirmed final at
-# Layer 8, not merely deferred to it) - none of that vocabulary may appear as
-# live wiring in the Home Manager module.
 if rg -n 'omarchy-system-sleep-monitor|omarchy-sleep-lock\.service|systemd-inhibit|omarchy-system-lock\b' \
   "$repo/modules/home"; then
   printf '%s\n' 'sleep/suspend-monitor vocabulary leaked into the Home Manager module - intentionally omitted, consumer-owned suspend policy' >&2
   exit 1
 fi
 
-# Layer 7 (notifications) must never imperatively mutate a known-conflicting
-# notification daemon - it may only assert against one being enabled
-# alongside the Quattro daemon, never set, stop, or kill it. Home Manager's
-# own reference to NotificationServer/org.freedesktop.Notifications in the
-# daemon option's description and conflict-assertion messages is expected
-# from Layer 7 onward and is not itself a violation.
 if rg -n 'services\.(mako|dunst|swaync|fnott)\.enable\s*=\s*(false|true)' \
   "$repo/modules/home"; then
   printf '%s\n' 'Omanixy must not imperatively set a competing notification daemon service' >&2
@@ -262,9 +226,6 @@ if rg -n 'systemctl.*(mako|dunst|swaync|fnott)|kill.*(mako|dunst|swaync|fnott)|p
   exit 1
 fi
 
-# The historical omarchy-exec hint execution path and the compositor-focus
-# fallback are permanently unsupported in the native daemon - neither may
-# reappear as live wiring in the packaged runtime.
 if rg -n 'omarchy-hyprland-focus-app' \
   "$repo/modules" "$repo/packages"; then
   printf '%s\n' 'the compositor-focus fallback is intentionally omitted from the native notification daemon' >&2

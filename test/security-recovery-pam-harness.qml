@@ -98,11 +98,6 @@ ShellRoot {
     console.log("HARNESS_EVENT begin mode=" + root.mode + " config=" + root.pamConfig + " user=" + root.pamUser)
     if (!pam.start()) {
       console.log("HARNESS_EVENT start-failed")
-      // Qt.quit() called synchronously here, before the event loop has
-      // actually started spinning, is dropped ("no receivers connected to
-      // handle it") and the process then hangs until an external timeout
-      // kills it. Defer to the next turn of the event loop, by which time
-      // it is guaranteed to be running.
       Qt.callLater(function() { root.finish("start-failed") })
     }
   }

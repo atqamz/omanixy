@@ -205,15 +205,6 @@ in
       systemd.packages = [ config.services.fprintd.package ];
       environment.systemPackages = [ config.services.fprintd.package ];
 
-      # services.fprintd.package's own default already resolves to the TOD
-      # variant when services.fprintd.tod.enable is set, independent of
-      # services.fprintd.enable, so the registrations above already carry a
-      # TOD-capable daemon with no change needed. The one thing the upstream
-      # module only wires inside its own services.fprintd.enable-gated
-      # config block is this environment variable telling that daemon where
-      # to find the driver; since this capability never sets
-      # services.fprintd.enable, that block never runs, so it is mirrored
-      # here instead - narrowly, and only this one variable.
       systemd.services.fprintd.environment = lib.mkIf config.services.fprintd.tod.enable {
         FP_TOD_DRIVERS_DIR = "${config.services.fprintd.tod.driver}${config.services.fprintd.tod.driver.driverPath}";
       };

@@ -33,18 +33,6 @@ pkgs.testers.runNixOSTest {
     };
   };
 
-  # A second, password+fingerprint-enabled node dedicated to the fingerprint
-  # scenarios below. It needs no Home Manager pairing: the harness drives
-  # Quickshell.Services.Pam.PamContext directly against the raw
-  # omarchy-lock-fingerprint PAM service, never the production lock plugin.
-  # programs.omanixy.security.pam.fingerprint.enable never sets
-  # services.fprintd.enable itself (modules/nixos/default.nix); it only
-  # registers the resolved services.fprintd.package with
-  # services.dbus.packages/systemd.packages/environment.systemPackages, the
-  # same real D-Bus activation surface services.fprintd.enable would
-  # register, without widening any other PAM service's fprintAuth default.
-  # No fingerprint reader exists in this VM, so the real fprintd daemon this
-  # node genuinely D-Bus-activates is expected to report zero devices.
   nodes.fingerprintMachine = { ... }: {
     imports = [ self.nixosModules.default ];
 
@@ -99,10 +87,6 @@ pkgs.testers.runNixOSTest {
         return run_su(machine_ref, m_uid, inner)
 
     def leftover_quickshell(machine_ref):
-        # The bracket trick (qu[i]ckshell) keeps this pattern from matching
-        # the literal pgrep/su/bash wrapper command lines that necessarily
-        # contain the same search string, so it only matches a real
-        # quickshell process.
         return int(machine_ref.succeed("pgrep -fc 'qu[i]ckshell -n -p' || true").strip() or "0")
 
     class Checks:
@@ -120,7 +104,6 @@ pkgs.testers.runNixOSTest {
             assert_scenario(output, scenario_id)
             self.lines = []
 
-    # --- Scenario 1: real PAM conversation, correct and wrong password ---
     c = Checks()
     status, output = run_harness(machine, uid, "single", "omarchy-lock-password", password="${testUserPassword}")
     print("=== SCENARIO 1a: correct password ===")
@@ -133,7 +116,6 @@ pkgs.testers.runNixOSTest {
     c.record("wrong-password-failure", "HARNESS_DONE completed:Failed" in output)
     c.finish("pam-password.live-conversation")
 
-    # --- Scenario 2: repeated wrong password (>=20 attempts), then still retryable ---
     c = Checks()
     unix_chkpwd_baseline = int(machine.succeed("pgrep -c unix_chkpwd || true").strip() or "0")
     print(f"unix_chkpwd baseline before repeat scenario: {unix_chkpwd_baseline}")
@@ -153,8 +135,6 @@ pkgs.testers.runNixOSTest {
     attempt_lines = [l for l in output.splitlines() if "HARNESS_EVENT attempt" in l]
     event_lines = [l for l in output.splitlines() if "HARNESS_EVENT" in l]
     max_events = 20 * 8 + 20
-    # Bounded on both sides: a generous multiplier of the 20-attempt
-    # stimulus, not an arbitrary byte count.
     c.record(
         "attempt-count-bound", 20 <= len(attempt_lines) <= 21,
         f"attempts={len(attempt_lines)}",
@@ -168,16 +148,12 @@ pkgs.testers.runNixOSTest {
     print(f"unix_chkpwd helper processes immediately after repeat scenario: {proc_count}")
     c.record("helper-no-growth-immediate", proc_count <= unix_chkpwd_baseline, f"count={proc_count} baseline={unix_chkpwd_baseline}")
 
-    # A short observation window after the stimulus has already stopped: the
-    # count must not keep growing on its own (no repeating sub-second
-    # PAM/log loop left running).
     time.sleep(2)
     proc_count_after_wait = int(machine.succeed("pgrep -c unix_chkpwd || true").strip() or "0")
     print(f"unix_chkpwd helper processes after a 2s post-stimulus observation window: {proc_count_after_wait}")
     c.record("helper-no-growth-after-wait", proc_count_after_wait == proc_count, f"{proc_count} -> {proc_count_after_wait}")
     c.finish("pam-password.repeated-failure")
 
-    # --- Scenario 3: PAM cancel mid-conversation ---
     c = Checks()
     t0 = time.time()
     status, output = run_harness(machine, uid, "cancel", "omarchy-lock-password", watchdog_ms=15000, extra_timeout=20)
@@ -195,7 +171,6 @@ pkgs.testers.runNixOSTest {
     c.record("no-orphan-process", leftover == 0, f"leftover={leftover}")
     c.finish("pam-password.cancel")
 
-    # --- Scenario 4: missing PAM service (fingerprint disabled on this node -> no /etc/pam.d file) ---
     c = Checks()
     machine.fail("test -e /etc/pam.d/omarchy-lock-fingerprint")
     status, output = run_harness(machine, uid, "single", "omarchy-lock-fingerprint", password="irrelevant")
@@ -209,10 +184,6 @@ pkgs.testers.runNixOSTest {
     )
     c.finish("pam-password.missing-service")
 
-    # ============================================================
-    # Fingerprint scenarios, on fingerprintMachine: real fprintd backend,
-    # no physical reader present in this VM.
-    # ============================================================
     fingerprintMachine.wait_for_unit("multi-user.target")
     fingerprintMachine.succeed("id ${testUser}")
     fuid = fingerprintMachine.succeed("id -u ${testUser}").strip()
@@ -228,21 +199,6 @@ pkgs.testers.runNixOSTest {
     outage_dropin = "/run/systemd/system/fprintd.service.d/99-recovery-test-outage.conf"
 
     def induce_outage(machine_ref):
-        # NixOS provisions fprintd.service's main unit fragment as a real
-        # symlink directly under /etc/systemd/system (persistent-tier
-        # search path, read-only in this disposable test VM's root), which
-        # ranks above /run/systemd/system for resolving *which* fragment
-        # defines the unit - so a plain `systemctl mask [--runtime]`
-        # (confirmed empirically: it left LoadState=loaded, still fully
-        # answering GetDevices) can neither write there nor out-rank it.
-        # systemd.service.d/ drop-ins, unlike the main fragment, are always
-        # merged in from every search-path tier regardless of which tier
-        # the base fragment itself resolved from - so a *runtime* drop-in
-        # under /run genuinely does take effect on top of the real /etc
-        # fragment. Overriding ExecStart to a command that always fails
-        # makes every future start attempt (manual or D-Bus-activated)
-        # genuinely fail, without touching any Omanixy-owned or
-        # nixpkgs-owned file.
         machine_ref.succeed(f"mkdir -p {outage_dropin.rsplit('/', 1)[0]}")
         machine_ref.succeed(
             "printf '[Service]\\nExecStart=\\nExecStart=/run/current-system/sw/bin/false\\n' "
@@ -265,7 +221,6 @@ pkgs.testers.runNixOSTest {
                 devices = None
         return status, out, devices
 
-    # --- Fingerprint scenario A: real backend, no device ---
     c = Checks()
     c.record(
         "pam-service-exists",
@@ -273,13 +228,6 @@ pkgs.testers.runNixOSTest {
     )
     is_enabled = fingerprintMachine.succeed("systemctl is-enabled fprintd.service 2>&1 || true").strip()
     print(f"fprintd.service is-enabled: {is_enabled!r}")
-    # A D-Bus system-activated service is never [Install]-enabled by a
-    # symlink; registration alone (services.dbus.packages/systemd.packages)
-    # never flips systemctl is-enabled to "enabled". This is the runtime
-    # complement to the module's own build-time
-    # services.fprintd.enable == false assertion (modules/nixos/default.nix)
-    # - if that assertion were ever violated the build itself would already
-    # have failed before this VM ever booted.
     c.record("fprintd-enable-false", is_enabled != "enabled", f"is-enabled={is_enabled!r}")
 
     activatable = fingerprintMachine.succeed(
@@ -316,7 +264,6 @@ pkgs.testers.runNixOSTest {
     c.record("password-still-works", "HARNESS_DONE completed:Success" in output)
     c.finish("fingerprint.no-device")
 
-    # --- Fingerprint scenario B: real backend deliberately made unavailable ---
     c = Checks()
     owner_before_outage = fingerprintMachine.execute(
         "busctl call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus GetNameOwner s net.reactivated.Fprint 2>&1"
@@ -324,11 +271,6 @@ pkgs.testers.runNixOSTest {
     print(f"name owner before outage stimulus: {owner_before_outage!r}")
 
     fingerprintMachine.succeed("systemctl stop fprintd.service 2>&1 || true")
-    # Bounded poll for a fully synchronous stop: `systemctl stop` normally
-    # already blocks until the unit reaches an inactive state, but this
-    # confirms it explicitly (and bounds the wait) before the process-level
-    # belt-and-braces kill below, rather than assuming the default
-    # synchronous behavior held.
     deadline = time.time() + 30
     stop_state = None
     while time.time() < deadline:
@@ -339,12 +281,6 @@ pkgs.testers.runNixOSTest {
             break
         time.sleep(1)
     print(f"fprintd.service ActiveState after stop: {stop_state}")
-    # Belt-and-braces: guarantee no real fprintd process instance from
-    # before the outage stimulus is still alive and still holding the bus
-    # name, independent of whatever systemd itself reports. The bracketed
-    # "fprint[d]" (mirroring the qu[i]ckshell trick used elsewhere in this
-    # file) keeps pkill's own argv - which literally contains this same
-    # search text - from matching and killing itself.
     fingerprintMachine.succeed("pkill -9 -f '/libexec/fprint[d]' 2>&1 || true")
 
     induce_outage(fingerprintMachine)
@@ -373,7 +309,6 @@ pkgs.testers.runNixOSTest {
     c.record("password-still-works", "HARNESS_DONE completed:Success" in output)
     c.finish("fingerprint.backend-unavailable")
 
-    # --- Fingerprint scenario C: backend recovery ---
     c = Checks()
     restore_outage(fingerprintMachine)
 
@@ -399,17 +334,12 @@ pkgs.testers.runNixOSTest {
     c.record("password-still-works-again", "HARNESS_DONE completed:Success" in output)
     c.finish("fingerprint.backend-recovery")
 
-    # --- Fingerprint scenario D: finite real-backend-unavailable stress (20 attempts) ---
     c = Checks()
     fingerprintMachine.succeed("systemctl stop fprintd.service 2>&1 || true")
     fingerprintMachine.succeed("pkill -9 -f '/libexec/fprint[d]' 2>&1 || true")
     induce_outage(fingerprintMachine)
 
     def journal_cursor(machine_ref, unit):
-        # `-n 0` prints no log entries at all; `--show-cursor` still emits a
-        # trailing "-- cursor: s=...;..." line naming the current tail
-        # position, which is the real baseline every subsequent
-        # `--after-cursor` count is measured from.
         out = machine_ref.succeed(f"journalctl -u {unit} --no-pager -n 0 --show-cursor 2>&1").strip()
         return out.splitlines()[-1].split("cursor:", 1)[1].strip()
 
@@ -436,11 +366,6 @@ pkgs.testers.runNixOSTest {
     leftover = leftover_quickshell(fingerprintMachine)
     print(f"leftover quickshell processes immediately after the stress run: {leftover}")
 
-    # Real backend/system journal evidence, not a process-count proxy: the
-    # fprintd.service unit's own journal (systemd's control-plane messages
-    # about it plus any of its own stdout/stderr) is counted from the
-    # pre-stress baseline cursor, bounded to a generous multiplier of the
-    # 20-attempt stimulus.
     backend_events = journal_count_since(fingerprintMachine, "fprintd.service", backend_baseline_cursor)
     max_backend_events = 20 * 20 + 100
     print(f"fprintd.service journal events since baseline: {backend_events} (max {max_backend_events})")
@@ -452,10 +377,6 @@ pkgs.testers.runNixOSTest {
     print(f"leftover quickshell processes after a 2s post-stimulus observation window: {leftover_after_wait}")
     print(f"fprintd.service journal events after the same window: {backend_events_after_wait}")
     c.record("stress-no-runaway-retry", leftover_after_wait == leftover, f"{leftover} -> {leftover_after_wait}")
-    # Real quiescence: the same real backend journal, re-measured after a
-    # short no-stimulus window, must not have grown on its own - not merely
-    # "no Quickshell harness process remains", which is a separate fact
-    # recorded by stress-no-quickshell-process below.
     c.record("stress-backend-log-quiescent", backend_events_after_wait == backend_events, f"before={backend_events} after={backend_events_after_wait}")
 
     c.record("stress-no-quickshell-process", leftover_after_wait == 0, f"leftover_after_wait={leftover_after_wait}")
@@ -469,7 +390,6 @@ pkgs.testers.runNixOSTest {
     c.record("password-still-works-after-stress", "HARNESS_DONE completed:Success" in output)
     c.finish("fingerprint.backend-stress")
 
-    # --- Scenario 6: systemd user-service crash-loop bound (no Wayland compositor present) ---
     c = Checks()
     machine.execute(f"su -l ${testUser} -c 'XDG_RUNTIME_DIR=/run/user/{uid} systemctl --user reset-failed omanixy-shell' 2>&1")
     status, output = run_su(machine, uid, "systemctl --user start omanixy-shell")
@@ -500,7 +420,6 @@ pkgs.testers.runNixOSTest {
     c.record("start-limit-hit", result_prop == "start-limit-hit", f"Result={result_prop}")
     c.record("restart-count-bounded", n_restarts is not None and int(n_restarts) <= 6, f"NRestarts={n_restarts}")
 
-    # Not permanently wedged: reset-failed + start must be re-attemptable.
     reset_status, reset_output = run_su(machine, uid, "systemctl --user reset-failed omanixy-shell")
     print("=== SCENARIO 6c: reset-failed ===")
     print(f"status={reset_status}")

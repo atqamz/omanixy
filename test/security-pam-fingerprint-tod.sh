@@ -11,21 +11,12 @@ driver_path=${7:?TOD driver package store path required}
 
 test "$toplevel_forced_ok" = true
 
-# services.fprintd.package's own default already resolves to the TOD-aware
-# daemon when services.fprintd.tod.enable is set - independent of
-# services.fprintd.enable, and therefore already carried by the plain
-# registration this capability performs with no widening needed.
 test "$package_path" = "$expected_package_path"
 
-# The one environment variable this capability mirrors from upstream's own
-# services.fprintd.enable-gated block resolves to the selected driver's
-# real path, not a placeholder or an empty value.
 test -n "$env_value"
 test "$env_value" = "$expected_env_value"
 grep -qF "$driver_path" <<<"$env_value"
 
-# The generated PAM service still references the TOD-aware package, not a
-# stale plain default.
 grep -qF "$package_path/lib/security/pam_fprintd.so" "$service_file"
 
 printf '%s\n' 'security pam fingerprint TOD checks passed'

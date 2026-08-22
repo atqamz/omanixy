@@ -334,6 +334,19 @@ The flake must expose a real public output only when it has a consumer need:
 An internal runtime or IPC executable may exist when the runtime requires it.
 That does not justify a broad CLI for symmetry.
 
+A `checks.${system}` fixture that must force real NixOS assertion checking
+pairs the tested module with a minimal, otherwise-unrelated boot and
+root-filesystem stub module.
+`config.system.build.toplevel` is the only attribute that runs
+`assertions`/`warnings` checking (nixpkgs' `lib.asserts.checkAssertWarn`,
+wired in `nixos/modules/system/activation/top-level.nix`); evaluating any
+other `config.*` attribute does not, and forcing that one attribute's
+evaluation (not a build) is enough to exercise it without invoking a
+derivation builder.
+Every minimal fixture otherwise trips the generic "no root filesystem" and
+"no bootloader" assertions, independent of whatever invariant the fixture
+actually tests, which is why the stub module exists.
+
 ## Generic public boundary
 
 Public modules must not depend on `atqamz/universe`, Atqa-specific dotfiles,

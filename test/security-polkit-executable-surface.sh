@@ -11,12 +11,6 @@ export PYTHONPATH="$scripts_dir"
 fixture=$(mktemp -d)
 trap 'chmod -R u+w "$fixture"; rm -rf "$fixture"' EXIT
 
-# The real, final PolkitAgent.qml has no process-execution surface of any
-# shape at all - patch-polkit-agent removed the only Process the pinned
-# source had. The invariant is stronger than "no command binding": it is
-# zero Process object instantiations, zero command bindings, and zero
-# exec/execDetached/run calls, since a bare Process object with no command
-# property can still execute arbitrary commands via .exec(...).
 scan_output=$("$python_bin" "$scanner" "$service_file" 2>&1)
 printf '%s\n' "$scan_output" >&2
 grep -Fq '0 Process objects, 0 command bindings, 0 exec/run calls found' <<<"$scan_output"
@@ -47,12 +41,6 @@ assert_accepted_raw() {
   fi
 }
 
-# Original command-binding shapes: a bare unknown-executable array, a
-# bash -c shape, a dynamic (non-literal) command expression, a procedural
-# .command = assignment, and a multiline array equivalent. All of these
-# also declare (or imply) a Process object, so the current scanner rejects
-# them via the Process-object ban as much as via the command-binding check
-# - both invariants are exercised together, which is the point.
 assert_rejected_raw "array-unknown-tool" 'Item {
   Process {
     command: ["mystery-tool"]
@@ -106,11 +94,6 @@ assert_rejected_raw "laptop-closed-reintroduced" 'Item {
 }
 '
 
-# Case A: a Process object whose only executable surface is a runtime
-# .exec(...) call with a literal argument - no command: property at all.
-# This is exactly the shape the pinned Quickshell Process::exec(QList<QString>)
-# overload allows and the previous scanner generation (command-binding-only)
-# could not see.
 assert_rejected_because "A-process-exec-literal" "Process object instantiation" 'Item {
   Process {
     id: p
@@ -119,7 +102,6 @@ assert_rejected_because "A-process-exec-literal" "Process object instantiation" 
 }
 '
 
-# Case B: same shape, dynamic argument.
 assert_rejected_because "B-process-exec-dynamic" "Process object instantiation" 'Item {
   Process {
     id: p
@@ -128,8 +110,6 @@ assert_rejected_because "B-process-exec-dynamic" "Process object instantiation" 
 }
 '
 
-# Case C: unqualified exec() called from inside a Process's own scope -
-# implicitly resolves to that Process instance own exec method.
 assert_rejected_because "C-unqualified-exec" "Process object instantiation" 'Item {
   Process {
     Component.onCompleted: exec(["mystery-tool"])
@@ -137,8 +117,6 @@ assert_rejected_because "C-unqualified-exec" "Process object instantiation" 'Ite
 }
 '
 
-# Case D: the original command: property binding shape, restated for the
-# permanent adversarial record alongside the newer exec/run cases.
 assert_rejected_because "D-command-binding" "Process object instantiation" 'Item {
   Process {
     id: p
@@ -147,9 +125,6 @@ assert_rejected_because "D-command-binding" "Process object instantiation" 'Item
 }
 '
 
-# Case E: procedural .command = assignment plus running = true, entirely
-# inside a Process object (as opposed to the no-process procedural-
-# assignment case above, which has no Process object to catch it either).
 assert_rejected_because "E-procedural-assign-running" "Process object instantiation" 'Item {
   Process {
     id: p
@@ -161,12 +136,6 @@ assert_rejected_because "E-procedural-assign-running" "Process object instantiat
 }
 '
 
-# Case F: an arbitrary object.run([...]) call with a LITERAL array argument.
-# The shared source_discovery.DYNAMIC_RUN_RE deliberately excludes a literal
-# array argument (it is designed for security.lock's allowlist model, which
-# needs to inspect rather than reject a literal); this scanner's own local
-# RUN_CALL_RE has no such exclusion, since the invariant here is absence of
-# any run(...) call at all.
 assert_rejected_because "F-run-literal" "run call" 'Item {
   function go() {
     runner.run(["mystery-tool"])
@@ -174,7 +143,6 @@ assert_rejected_because "F-run-literal" "run call" 'Item {
 }
 '
 
-# Case G: same call, dynamic argument.
 assert_rejected_because "G-run-dynamic" "run call" 'Item {
   function go() {
     runner.run(dynamicCommand)
@@ -182,8 +150,6 @@ assert_rejected_because "G-run-dynamic" "run call" 'Item {
 }
 '
 
-# Case H/I: Quickshell.exec/execDetached remain rejected, now via the local
-# EXEC_CALL_RE rather than an imported source_discovery pattern.
 assert_rejected_because "H-quickshell-exec" "exec/execDetached call" 'Item {
   function go() {
     Quickshell.exec(["mystery-tool"])
@@ -198,7 +164,6 @@ assert_rejected_because "I-quickshell-execdetached" "exec/execDetached call" 'It
 }
 '
 
-# Case J: multiline p.exec([...]) - proves detection is not a per-line regex.
 assert_rejected_because "J-multiline-exec" "Process object instantiation" 'Item {
   Process {
     id: p
@@ -210,9 +175,6 @@ assert_rejected_because "J-multiline-exec" "Process object instantiation" 'Item 
 }
 '
 
-# Comment/string false-positive safety: Process/.exec/.run-looking text
-# sitting inertly in a // comment, a /* */ comment, or an ordinary quoted
-# string must not itself trip the scanner.
 assert_accepted_raw "line-comment-fake" 'Item {
   // Process { command: ["mystery-tool"] }
   // exec(["mystery-tool"])
@@ -230,9 +192,6 @@ assert_accepted_raw "string-fake" 'Item {
 }
 '
 
-# A real executable call sitting after fake text in a comment or string must
-# still be caught - the fake text must not "use up" or otherwise weaken the
-# scan.
 assert_rejected_because "fake-comment-then-real-process" "Process object instantiation" 'Item {
   // Process { command: ["fake-not-real"] }
   Process {
@@ -250,8 +209,6 @@ assert_rejected_because "fake-string-then-real-exec" "exec/execDetached call" 'I
 }
 '
 
-# Template-literal policy is unchanged: any live backtick is rejected
-# outright, independent of whether it mentions Process/exec/run at all.
 # shellcheck disable=SC2016
 assert_rejected_because "template-literal" "template literals are unsupported" 'Item {
   property string note: `plain template no process`

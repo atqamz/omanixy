@@ -309,6 +309,28 @@ If the store symlink is broken, activation removes the broken link and seeds a
 new writable baseline; this is recovery, not preservation of unavailable bytes.
 Disabling and re-enabling the module does not silently replace customization.
 
+## Adapter contract rationale
+
+The idle adapter keeps the pinned stay-awake marker at
+`$HOME/.local/state/omarchy/indicators/stay-awake`.
+It reports an indeterminate probe when an existing parent directory is not
+searchable, because marker absence cannot be established safely in that case.
+
+The lock adapter maps missing `hyprctl` or `jq` to exit status 2 because the
+pinned recovery state machine retries only that status.
+The fingerprint probe treats only the documented `fprintd-list` output shapes
+as classified results and checks the positive enrolled-device result before a
+negative result so a multi-reader system cannot be downgraded by an earlier
+device.
+
+The notification-state adapter uses the pinned Omarchy ownership root rather
+than `XDG_STATE_HOME`.
+It accepts only numeric timestamp-and-ID stems, bounds serialized payloads at
+64 KiB independently of kernel argument limits, and treats image persistence
+as bounded best effort.
+It validates every image pair before creating any artifact, writes terminated
+JSON records, and removes matching images when history entries are evicted.
+
 Quattro's user plugin directory remains discoverable.
 The new-install baseline enables the native or adapted tray, media, audio,
 network, Bluetooth, monitor, power, weather, clipboard, emoji, launcher, and
@@ -354,6 +376,15 @@ is invoked.
 It distinguishes unavailable, not-ready, timeout, malformed, and IPC-level
 target/function errors.
 
+The native lock operation uses the same wrapper as other shell IPC calls:
+`omanixy-shell lock lock` returns exit code 0 with trimmed stdout equal to
+`ok`, `missing-pam`, or `failed`.
+The policy classifies `ok` as accepted and both `missing-pam` and `failed` as
+terminal unavailable.
+Any other exit-0 output is unrecognized and indeterminate.
+A non-zero exit code is an IPC-level failure, including a shell that is not
+running or responding and the wrapper's bounded timeout.
+
 Examples:
 
 ```text
@@ -363,6 +394,17 @@ journalctl --user -u omanixy-shell
 ```
 
 ## Baseline and deferred surfaces
+
+### VM harness event-loop timing
+
+Quickshell VM test harnesses that call `Qt.quit()` through a `finish()` helper
+from `Component.onCompleted` must defer the call with `Qt.callLater` when the
+event loop has not started spinning.
+A synchronous quit in that early-failure path can be dropped because no event
+loop receivers are connected, leaving the process until an external timeout
+kills it.
+Deferring to the next turn ensures that `finish()` runs while the event loop
+is active.
 
 The baseline proves that Quickshell starts, Quattro loads from the pinned
 compatibility root, the configured native and adapted widgets render, and

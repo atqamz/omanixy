@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Remove the unsupported pinned terminal provider action."""
 
 from pathlib import Path
 import sys

@@ -1,35 +1,4 @@
 #!/usr/bin/env python3
-"""Fail-closed scan of the patched Service.qml's process-execution surface
-for the Quattro idle owner.
-
-Unlike security.polkit's scanner (which proves an executable surface of
-zero, because the adapted polkit agent needs none at all), the adapted idle
-service legitimately owns three Process objects with real command
-bindings: the Layer-3 lock IPC call, and the omanixy-idle-state probe/set
-calls. This scanner therefore keeps security.lock's allowlist model - a
-bounded set of literal, audited direct-argv commands - rather than
-requiring zero Process objects, but incorporates the Layer-5 lesson that a
-command-binding inventory alone is not sufficient: the pinned Quickshell
-Process type also exposes Q_INVOKABLE exec(...), so this scanner
-additionally rejects any exec/execDetached/run call outright, anywhere in
-the file, regardless of arguments - the adapted idle service's own code
-never calls any of them, only ever sets `command:`/`.command =` and
-`running = true` declaratively/procedurally.
-
-Unlike security.lock's per-first-token allowlist (which allows a literal
-executable name in position 0 with otherwise-checked trailing arguments),
-this scanner allowlists exact, complete argv arrays: "omanixy-shell" and
-"omanixy-idle-state" are only ever invoked with one of a small, fixed set
-of full argument lists (see ALLOWED_EXACT_ARGVS), so nothing narrower than
-exact-array identity proves the intended contract.
-
-Discovery reuses the shared QML source-discovery lexical primitives
-(scripts/source_discovery.py) for comment/string masking and the shared
-ARRAY_COMMAND_RE/DYNAMIC_*_RE regexes for locating command bindings, the
-same way scan-lock-executable-surface does; the exec/run-rejection and
-exact-argv-allowlist policy are local to this script and do not modify
-scripts/source_discovery.py.
-"""
 
 from __future__ import annotations
 
@@ -48,18 +17,6 @@ ALLOWED_EXACT_ARGVS = {
     ("omanixy-idle-state", "set", "idle"),
 }
 
-# Zero tolerance, regardless of arguments: the adapted idle service's own
-# code never calls exec/execDetached/run/startDetached on anything, only
-# ever declares command:/.command= and toggles running. A bare Process
-# object with no command property at all could otherwise still execute
-# arbitrary commands via one of these (see security.polkit's Layer-5
-# remediation). Process.startDetached() launches the process's already-set
-# `command` completely untracked - Quickshell never sees it exit, `running`
-# never becomes true, and it survives Quickshell dying - so even an
-# otherwise-allowlisted argv reaching it would be a real bypass: a tracked,
-# bounded lock/probe/writer invocation would silently become an untracked
-# one. It is a bare, parameterless call, so it never carries a command
-# array of its own to inspect.
 EXEC_CALL_RE = re.compile(r"\b(?:[A-Za-z_][A-Za-z0-9_]*\.)?exec(?:Detached)?\s*\(")
 RUN_CALL_RE = re.compile(r"\b(?:[A-Za-z_][A-Za-z0-9_]*\.)?run\s*\(")
 START_DETACHED_CALL_RE = re.compile(r"\b(?:[A-Za-z_][A-Za-z0-9_]*\.)?startDetached\s*\(")
@@ -84,11 +41,6 @@ def unescape(literal: str) -> str:
 
 
 def tokenize(array_body: str) -> list[tuple[str, bool]]:
-    """Split a command array body into ordered (value, is_literal) tokens,
-    mirroring scan-lock-executable-surface's own tokenizer (kept local and
-    duplicated rather than shared, matching this repository's convention of
-    one bespoke policy - including its own lexing helpers where needed -
-    per audited security surface)."""
 
     tokens: list[tuple[str, bool]] = []
     pos = 0
@@ -154,7 +106,7 @@ def scan(text: str) -> int:
         masked = source_discovery.mask_string_literals(stripped)
     except source_discovery.UnsafeSource as exc:
         fail(f"unsafe source, cannot prove executable surface is closed: {exc}")
-        raise  # unreachable, fail() always raises SystemExit
+        raise
 
     if "`" in masked:
         fail("template literals are unsupported in security.idle executable source")
@@ -171,14 +123,6 @@ def scan(text: str) -> int:
         matches.append((match.start(), "run call", match))
     for match in START_DETACHED_CALL_RE.finditer(masked):
         matches.append((match.start(), "startDetached call", match))
-    # A Quickshell.exec(...)/execDetached(...) call with a literal array
-    # argument also matches ARRAY_COMMAND_RE (that shape is what security.
-    # lock's own allowlist model inspects). Sorting the exec/run/
-    # startDetached-call kinds first at a tied start position means such a
-    # call is always reported as such - even when an array it names would
-    # otherwise be an allowed direct binding - rather than being masked by
-    # the array check either accepting or independently rejecting the same
-    # span for an unrelated reason.
     exec_kinds = ("exec/execDetached call", "run call", "startDetached call")
     matches.sort(key=lambda item: (item[0], item[1] not in exec_kinds))
 

@@ -1,47 +1,3 @@
-# Layer 8 (security-recovery) final, cross-cutting real-backend evidence for
-# the security.recovery ledger entry's `recovery.cross-feature-boot` and
-# `recovery.cross-feature-crash` rows (upstream/security-recovery-matrix.yaml),
-# referenced by upstream/porting-matrix.yaml's security.recovery entry and by
-# docs/decisions/0005-quattro-security-session-boundary.md's "Cross-feature
-# boot and crash recovery" note.
-#
-# Every earlier layer-8 sibling (test/security-recovery-pam-vm.nix,
-# test/security-recovery-polkit-vm.nix,
-# test/security-recovery-notifications-vm.nix) proved its own surface in
-# isolation. This file selects all three simultaneously -
-# `programs.omanixy.security.pam.password.enable`,
-# `programs.omanixy.security.polkit.system.enable` (NixOS) paired with
-# `programs.omanixy.security.polkit.agent.enable` and
-# `programs.omanixy.security.notifications.daemon.enable` (Home Manager) - in
-# one booted NixOS VM, and proves the combination itself introduces no new
-# failure mode: no extra PAM service, no extra polkit agent, no extra
-# notification daemon spawned as a side effect of combining the three, and no
-# cross-contamination when the process holding all three real objects is
-# killed and restarted.
-#
-# Lock and idle are deliberately excluded, unchanged from the other layer-8
-# VM tests: both require a live nested Wayland compositor this KVM/QEMU host
-# cannot reach (see the ADR's "Nested-compositor environment limitation"
-# section and upstream/security-recovery-matrix.yaml's
-# `recovery.lock-nested-compositor`/`recovery.idle-nested-compositor` rows).
-# Fingerprint hardware is naturally absent here too and is not exercised by
-# this file; that no-device path is already covered live by
-# test/security-recovery-pam-vm.nix's own scenario 5.
-#
-# The combined harness below deliberately mirrors how the real, production
-# `omanixy-shell.service` would run all three in one process: a bare
-# `PamContext` (never the production lock plugin's `WlSessionLock`-bound
-# `Service.qml`, exactly like test/security-recovery-pam-vm.nix's own
-# harness), a bare `PolkitAgent` at the real `/org/omarchy/PolkitAgent` path
-# (never the production `PanelWindow`-bound `PolkitAgent.qml`, exactly like
-# test/security-recovery-polkit-vm.nix's own harness), and the real,
-# unmodified production `Service.qml`/`NotificationLogic.js` a
-# notification-daemon-enabled build ships, loaded via `Loader` with only its
-# `PanelWindow` mechanically swapped for a plain `Item` (no Wayland
-# layer-shell surface, exactly like test/security-recovery-notifications-vm.nix
-# already proved) - all three real Quickshell objects, in one real Quickshell
-# process, on the exact same pinned `quickshell-omanixy` derivation production
-# runs.
 { pkgs, self, home-manager }:
 let
   lib = pkgs.lib;
@@ -51,18 +7,6 @@ let
   testPassword = "omanixy-recovery-test-fixture-password";
   testActionId = "org.omanixy.test.security-recovery-cross-feature";
 
-  # The notification-daemon-enabled runtime, extracted the same narrow way
-  # test/security-recovery-notifications-vm.nix already does: only
-  # `.config.home.packages` is read (cheap evaluation, no activation
-  # package built), and only `programs.omanixy.security.notifications.daemon`
-  # is turned on for this extraction - `security.polkit.agent` is
-  # deliberately left off here because this harness never loads the
-  # production, `PanelWindow`-bound `PolkitAgent.qml` the compat root would
-  # otherwise carry (it uses the bare native type directly, exactly like
-  # test/security-recovery-polkit-vm.nix), so there is nothing in the compat
-  # root for that option to add that this file would ever read; enabling it
-  # here would also require an `osConfig` this standalone extraction has none
-  # of, for no benefit.
   notifHome = home-manager.lib.homeManagerConfiguration {
     pkgs = pkgs;
     modules = [
@@ -81,26 +25,10 @@ let
     (throw "security-recovery-cross-feature-vm: omanixy-shell runtime package not found in home.packages")
     notifHome.config.home.packages;
 
-  # The exact pinned quickshell-omanixy derivation production builds and
-  # runs, reused as-is so the harness runs under the identical ABI/module set
-  # production does - the same binary every layer-8 sibling reuses.
   quickshellBin = runtimePkg.passthru.quickshell;
   compatRoot = runtimePkg.passthru.omarchyCompatibilityRoot;
   notifStateBinDir = "${runtimePkg.passthru.compatibilityBin}/bin";
 
-  # The identical mechanical PanelWindow -> Item substitution
-  # test/security-recovery-notifications-vm.nix already proved: no Wayland
-  # layer-shell surface is available or needed for D-Bus ownership/delivery,
-  # and the real NotificationServer instantiation itself is left completely
-  # untouched.
-  #
-  # The source Service.qml lives inside compatRoot, a derivation output -
-  # reading it via builtins.readFile here would force Nix to build that
-  # derivation during evaluation (import-from-derivation), which breaks
-  # `nix flake check --no-build`. pkgs.runCommand defers the read/patch to
-  # the build phase instead, mirroring
-  # test/security-recovery-notifications-vm.nix's own fix for the identical
-  # pattern.
   panelOld = "    PanelWindow {\n      id: popupWindow\n      required property var modelData\n      screen: modelData\n      visible: popupModel.count > 0\n\n      WlrLayershell.namespace: \"omarchy-notifications\"\n      WlrLayershell.layer: WlrLayer.Overlay\n      WlrLayershell.keyboardFocus: WlrKeyboardFocus.None\n      exclusionMode: ExclusionMode.Ignore\n      color: \"transparent\"\n\n";
   panelNew = "    Item {\n      id: popupWindow\n      required property var modelData\n      visible: popupModel.count > 0\n\n";
   anchorsOld = "      anchors { top: true; bottom: true; left: true; right: true }\n\n";
@@ -152,11 +80,6 @@ let
       "$out"
   '';
 
-  # The combined harness: a bare PamContext, a bare PolkitAgent at the real
-  # production D-Bus path, and (via Loader) the real patched notification
-  # Service.qml - three real Quickshell native objects sharing one process,
-  # driven entirely over IPC so the test script never reaches into internal
-  # QML state by hand.
   harnessQml = ''
     import QtQuick
     import Quickshell
@@ -264,10 +187,6 @@ let
     }
   '';
 
-  # Laid out exactly like the notifications sibling's own fixture directory
-  # (test/security-recovery-notifications-vm.nix's harnessDir) so QML import
-  # resolution behaves identically, with the combined shell.qml above in
-  # place of that file's Loader-only root.
   harnessDir = pkgs.runCommand "cross-feature-harness-fixture" { } ''
     mkdir -p $out/fixture-notifications/components
     cp ${compatRoot}/shell/plugins/notifications/NotificationLogic.js $out/fixture-notifications/NotificationLogic.js
@@ -285,11 +204,6 @@ let
     EOF
   '';
 
-  # polkitd refuses to check an unregistered action id before any agent is
-  # ever consulted - the same test-only .policy file
-  # test/security-recovery-polkit-vm.nix already established the need for,
-  # registering this file's own distinct action id. Test-only: never
-  # installed by modules/ or packages/.
   testActionPolicy = pkgs.runCommand "omanixy-cross-feature-test-action-policy" { } ''
     mkdir -p "$out/share/polkit-1/actions"
     cat > "$out/share/polkit-1/actions/${testActionId}.policy" <<EOF
@@ -391,8 +305,6 @@ let
           echo "CHECK notifications-ownership FAIL owner=$owner"
         fi
 
-        # Real PAM conversation against the real generated
-        # omarchy-lock-password service.
         qs_ipc pam start >/dev/null
         if wait_for pam '.responseRequired == true' 20; then
           qs_ipc pam respond "$FIXTURE_PASSWORD" >/dev/null
@@ -409,7 +321,6 @@ let
           echo "CHECK pam-conversation FAIL no-prompt"
         fi
 
-        # Real polkit authentication against the real running polkitd.
         "$PKCHECK" -a "$ACTION_ID" -u -p $$ >pkcheck.log 2>&1 &
         p1=$!
         if wait_for polkit '.isResponseRequired == true' 40; then
@@ -427,7 +338,6 @@ let
           kill "$p1" 2>/dev/null || true
         fi
 
-        # Real delivery through the real, unmodified NotificationServer.
         notify-send -a TestClient -u normal "CrossFeature boot hello" "body text"
         sleep 1
         count=$(popup_count)
@@ -437,10 +347,6 @@ let
           echo "CHECK notifications-delivery FAIL popup_count=$count"
         fi
 
-        # Combining all three capabilities must not spawn any extra process:
-        # exactly one quickshell process exists throughout this scenario,
-        # holding the one PamContext, the one PolkitAgent, and the one
-        # NotificationServer together.
         qs_procs=$(pgrep -fc 'qu[i]ckshell -n -p' || true)
         if [ "$qs_procs" = "1" ]; then
           echo "CHECK single-process PASS qs_procs=$qs_procs"
@@ -469,7 +375,6 @@ let
         fi
         echo "CHECK crash-setup PASS"
 
-        # Establish real, live/in-flight state on all three surfaces at once.
         qs_ipc pam start >/dev/null
         if wait_for pam '.responseRequired == true' 20; then
           echo "CHECK crash-pam-inflight PASS"
@@ -486,9 +391,6 @@ let
           cat pkcheck-inflight.log
         fi
 
-        # A live notification carrying a real pending default action,
-        # matching a real independent client - not a fixture with no action
-        # to resurrect.
         rm -f action-result.txt
         (notify-send -a TestClient -A default=Open "CrossFeature pending action" >action-result.txt 2>&1) &
         action_pid=$!
@@ -503,13 +405,9 @@ let
 
         unix_chkpwd_before=$(pgrep -c unix_chkpwd 2>/dev/null); unix_chkpwd_before=''${unix_chkpwd_before:-0}
 
-        # Simulate the real omanixy-shell.service process crashing while PAM,
-        # polkit, and notification state all exist at once.
         kill -9 "$hpid" 2>/dev/null || true
         wait "$hpid" 2>/dev/null
 
-        # Bounded, not necessarily fast: a real pkcheck client must not hang
-        # forever just because the process that was going to answer it died.
         n=0
         while kill -0 "$p1" 2>/dev/null && [ "$n" -lt 60 ]; do sleep 0.5; n=$((n + 1)); done
         if kill -0 "$p1" 2>/dev/null; then
@@ -535,9 +433,6 @@ let
           echo "CHECK crash-no-helper-leak FAIL before=$unix_chkpwd_before after=$unix_chkpwd_after"
         fi
 
-        # The bounded systemd restart: a fresh combined harness process,
-        # mirroring the real omanixy-shell.service's Restart=on-failure
-        # bringing the process back after a crash.
         QML2_IMPORT_PATH="$HARNESS_DIR" "$QS" -n -p "$HARNESS_DIR" >harness2.log 2>&1 &
         h2pid=$!
 
@@ -549,17 +444,12 @@ let
           exit 0
         fi
 
-        # No stale polkit authentication flow: the fresh harness registers
-        # cleanly at the same real D-Bus path the crashed one held, with no
-        # lingering "already registered" conflict from the dead process.
         if wait_for polkit '.isRegistered == true' 60; then
           echo "CHECK crash-polkit-fresh-registration PASS"
         else
           echo "CHECK crash-polkit-fresh-registration FAIL"
         fi
 
-        # A fresh authentication request against the fresh harness succeeds
-        # cleanly.
         "$PKCHECK" -a "$ACTION_ID" -u -p $$ >pkcheck-fresh.log 2>&1 &
         p2=$!
         if wait_for polkit '.isResponseRequired == true' 40; then
@@ -577,7 +467,6 @@ let
           kill "$p2" 2>/dev/null || true
         fi
 
-        # A fresh PAM conversation still works.
         qs_ipc pam start >/dev/null
         if wait_for pam '.responseRequired == true' 20; then
           qs_ipc pam respond "$FIXTURE_PASSWORD" >/dev/null
@@ -594,9 +483,6 @@ let
           echo "CHECK crash-pam-fresh FAIL no-prompt"
         fi
 
-        # The pre-crash notification's popup file persists (data-only state
-        # surviving the crash) and is restored by the fresh harness's own
-        # Component.onCompleted restorePopups() path.
         n=0
         while [ "$n" -lt 30 ] && [ "$(popup_count)" -lt 1 ]; do n=$((n + 1)); sleep 0.2; done
         popup_after_restart=$(popup_count)
@@ -606,11 +492,6 @@ let
           echo "CHECK crash-notification-restored FAIL count=$popup_after_restart"
         fi
 
-        # The restored row is data-only: invoking it must never resurrect the
-        # pre-crash sender's action as live. The original notify-send client
-        # (still running, still listening for its own ActionInvoked signal)
-        # is the independent witness - if the restored row's action ever
-        # fired, its output would contain "default".
         qs_ipc notifications invokeLast >/dev/null
         sleep 2
         action_result=$(cat action-result.txt 2>/dev/null || true)
@@ -630,11 +511,6 @@ let
         ;;
     esac
 
-    # Correctness/failure is reported exclusively via the CHECK lines above,
-    # never via this script's own process exit code - the last command of a
-    # case branch is frequently a `wait` on a deliberately-killed background
-    # process, whose (128+signal) exit status must never leak out as this
-    # script's own.
     exit 0
   '';
 
@@ -655,10 +531,6 @@ pkgs.testers.runNixOSTest {
     programs.omanixy.security.pam.password.enable = true;
     programs.omanixy.security.polkit.system.enable = true;
 
-    # polkitd refuses to check an unregistered action id before any agent is
-    # ever consulted; this test-only rule/policy pair (never installed by
-    # modules/ or packages/) registers this file's own distinct action id,
-    # requiring authentication as the disposable VM-only test user itself.
     security.polkit.extraConfig = ''
       polkit.addRule(function(action, subject) {
         if (action.id == "${testActionId}") {
@@ -705,9 +577,6 @@ pkgs.testers.runNixOSTest {
     assert "ExecStart" in unit_file, unit_file
     print("home-manager-provisioned omanixy-shell.service unit is present (never started by this test)")
 
-    # No extra PAM service as a side effect of combining capabilities: only
-    # the one password service this layer's PAM option generates exists;
-    # fingerprint is off, so its service must not exist either.
     machine.succeed("test -e /etc/pam.d/omarchy-lock-password")
     machine.fail("test -e /etc/pam.d/omarchy-lock-fingerprint")
 

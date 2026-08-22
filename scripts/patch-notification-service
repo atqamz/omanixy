@@ -1,35 +1,4 @@
 #!/usr/bin/env python3
-"""Narrow post-patch to the pinned shell/plugins/notifications/{Service.qml,
-NotificationLogic.js} for the Quattro notification daemon.
-
-Layer 7 owns optional org.freedesktop.Notifications ownership, popup
-presentation, DND, bounded local history/popup persistence, and standard
-live freedesktop notification actions. It deliberately removes everything
-the pinned source does beyond that:
-
-- the `omarchy-exec` hint and its persisted `exec` role (snapshot, history,
-  popup) - carrying an arbitrary shell command through persisted state and
-  later running it via Util.execDetached is a real execution path from
-  untrusted notification content, and the native daemon must never restore
-  it under any name;
-- the compositor-focus fallback (omarchy-hyprland-focus-app) - a click with
-  no live "default" FDO action simply dismisses the toast now, since FDO
-  notification ownership does not require notification-driven compositor
-  focus mutation;
-- every `bash -c`/`bash -lc` file-state job (mkdir/awk/mv/rm/head/stat/sort
-  pipelines) - replaced by direct-argv calls to the narrow, fixed-domain
-  `omanixy-notification-state` helper, which owns HOME/stem validation,
-  bounded image copying, and history trimming internally. No shell
-  interpreter is reachable from the adapted Service.qml at all.
-
-Every state-owning Process this patch introduces or touches gains the same
-FailedToStart-safe awaiting-result pattern Layer 6 established: the pinned
-Quickshell Process ABI's onErrorOccurred(QProcess::FailedToStart) only ever
-emits runningChanged(), never exited(), so a boolean awaiting-result flag
-plus Qt.callLater is the only correct way to reconcile a start failure
-without double-processing a normal exit or leaving the popup-file job queue
-deadlocked.
-"""
 
 from pathlib import Path
 import sys

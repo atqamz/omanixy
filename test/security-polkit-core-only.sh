@@ -13,12 +13,6 @@ core_polkit_expected_changed=${8:?core+polkit expected-changed self derivations 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
-# Parallels test/security-lock-core-only.sh: programs.omanixy.security.
-# polkit.agent must not widen the dependency surface of a core-only build.
-# Unlike security.lock, the adapted polkit agent needs no compat helper at
-# all (patch-polkit-agent removes the only external Process the pinned
-# source had), so the bin/ delta here is expected to be exactly empty -
-# stronger than the lock case, not merely "one new helper and nothing else".
 jq -e '.selectedFeatures == ["core"] and .selectedCapabilities == ["core-runtime"]' \
   "$core_polkit_compat_bin/feature-surface.json" >/dev/null
 jq -e '.selectedFeatures == ["core"] and .selectedCapabilities == ["core-runtime"]' \
@@ -46,29 +40,10 @@ for helper in \
   fi
 done
 
-# Declared-input-level proof: exact equality, not merely "no new package
-# name" - achievable here (unlike a hypothetical capability that genuinely
-# needs a new package) because polkit rides entirely on what the selected
-# Quickshell package itself already links against.
 diff -u \
   <(jq -S . "$core_declared_runtime_inputs") \
   <(jq -S . "$core_polkit_declared_runtime_inputs")
 
-# Raw store-path closure proof. Unlike a hash-stripped package-NAME
-# comparison (which only proves no new package name appears anywhere, and
-# would silently accept a same-named-but-differently-built external
-# dependency, or a byte-for-byte content change disguised as "the same
-# package"), this compares the actual store paths in each closure directly.
-#
-# The Omanixy-owned compatibility root, and everything that references its
-# store path in its own build (ipc, compatAdapter, the runtime script, the
-# compatibility bin, and the final package itself), are EXPECTED to change
-# identity, because the compatibility root's contents genuinely differ
-# (the polkit plugin becomes reachable). Passing their exact store paths in
-# - rather than filtering by an /^omanixy-/ name pattern - means only that
-# specific, named, reviewed set of self-derivations is allowed to differ;
-# anything else that changed identity would show up as an unexpected
-# difference below and fail this check.
 comm -13 <(sort "$core_closure_paths") <(sort "$core_polkit_closure_paths") >"$work/new-paths"
 comm -23 <(sort "$core_closure_paths") <(sort "$core_polkit_closure_paths") >"$work/removed-paths"
 
@@ -84,9 +59,6 @@ if [[ -n "$unexpected_removed" ]]; then
   exit 1
 fi
 
-# After excluding ONLY the explicitly-expected-changed Omanixy self
-# derivations, every remaining (i.e. external) store path must be
-# byte-identical between the two closures - not merely same-named.
 comm -23 <(sort "$core_closure_paths") <(sort "$core_expected_changed") >"$work/core-external"
 comm -23 <(sort "$core_polkit_closure_paths") <(sort "$core_polkit_expected_changed") >"$work/core-polkit-external"
 diff -u "$work/core-external" "$work/core-polkit-external"

@@ -13,22 +13,13 @@ core_notification_daemon_expected_changed=${8:?core+notification-daemon expected
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
-# Mirrors test/security-polkit-core-only.sh's structure: unlike idle, the
-# notification daemon requires no lock prerequisite, so plain core is the
-# correct baseline, not core+lock.
 
-# Enabling the daemon adds exactly one new compat helper
-# (omanixy-notification-state) and nothing else.
 diff -u \
   <(find "$core_compat_bin/bin" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort) \
   <(find "$core_notification_daemon_compat_bin/bin" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort | grep -Fxv omanixy-notification-state)
 test -L "$core_notification_daemon_compat_bin/bin/omanixy-notification-state"
 test ! -e "$core_compat_bin/bin/omanixy-notification-state"
 
-# No lock/fingerprint/polkit/idle/terminal-emulator leakage, and no libnotify
-# client widening: the daemon needs no notify-send client capability of its
-# own (test/security-notifications-client-independence.sh proves the
-# reverse direction).
 for helper in \
   omarchy-hyprland-session-locked omarchy-lock-fingerprint-ready \
   omanixy-idle-state omarchy-notification-send \
@@ -47,18 +38,10 @@ if grep -Eiq 'fprintd|^/nix/store/[a-z0-9]+-mako-|^/nix/store/[a-z0-9]+-dunst-|^
   exit 1
 fi
 
-# declaredRuntimeInputs is exact-equal: the notification daemon rides
-# entirely on the coreutils/bash the core capability set already provides;
-# the omanixy-notification-state helper needs nothing beyond that.
 diff -u \
   <(jq -S . "$core_declared_runtime_inputs") \
   <(jq -S . "$core_notification_daemon_declared_runtime_inputs")
 
-# Raw store-path closure proof: only the specific, named, reviewed set of
-# Omanixy self-derivations expected to change identity (because the
-# compatibility root's contents genuinely differ - the notifications plugin
-# becomes reachable) may differ; anything else that changed identity fails
-# this check.
 comm -13 <(sort "$core_closure_paths") <(sort "$core_notification_daemon_closure_paths") >"$work/new-paths"
 comm -23 <(sort "$core_closure_paths") <(sort "$core_notification_daemon_closure_paths") >"$work/removed-paths"
 

@@ -1,4 +1,4 @@
-# shellcheck disable=SC2154 # shared adapter state is initialized by common.bash.
+# shellcheck disable=SC2154
 weather_location() {
   local file="$omarchy_state/settings/weather.json"
   case "${1:-}" in

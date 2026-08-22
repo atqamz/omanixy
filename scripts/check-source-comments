@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 EXCLUDED_DIR_NAMES = {".git", ".jj", "result"}
-EXCLUDED_FILENAMES = {"flake.lock", "codedb.snapshot"}
+EXCLUDED_FILENAMES = {".gitignore", "LICENSE", "codedb.snapshot", "flake.lock"}
 EXTENSION_LANGUAGE = {
     ".py": "python",
     ".nix": "nix",
@@ -545,8 +545,17 @@ CALL_HEAD_PATTERN = re.compile(r"(writeShellScript|writeShellApplication|runComm
 WRITETEXT_NAME_PATTERN = re.compile(r'writeText(?:Dir)?\s+"([^"]+)"\s*$')
 SHELL_APPLICATION_TEXT_CONTEXT_PATTERN = re.compile(r"(writeShellApplication|writeShellScriptBin)\b")
 PRIORITY_WRAPPER_PATTERN = re.compile(r"lib\.(?:mkForce|mkDefault|mkOverride\s+\d+)\s*$")
+PAM_SERVICE_TEXT_BINDING_PATTERN = re.compile(
+    r'(?<![A-Za-z0-9_.\'-])security\.pam\.services\.(?:"[^"]*"|[A-Za-z_][A-Za-z0-9_\'-]*)\.text\s*=\s*$'
+)
 
-EMBEDDED_CODE_BINDING_NAMES = {"buildPhase", "installPhase", "configurePhase", "checkPhase"}
+EMBEDDED_CODE_BINDING_NAMES = {
+    "buildPhase": "shell",
+    "installPhase": "shell",
+    "configurePhase": "shell",
+    "checkPhase": "shell",
+    "testScript": "python",
+}
 AMBIGUOUS_CODE_SHAPED_BINDING_NAMES = {"text"}
 EMBEDDED_CODE_CALL_HEADS = {
     "writeShellScript": "shell",
@@ -561,6 +570,8 @@ def _lookback_context(text, string_start_pos):
     wrapper_match = PRIORITY_WRAPPER_PATTERN.search(binding_window)
     if wrapper_match:
         binding_window = binding_window[:wrapper_match.start()].rstrip()
+    if PAM_SERVICE_TEXT_BINDING_PATTERN.search(binding_window):
+        return "pam-service-data", "text"
     binding_match = BINDING_NAME_PATTERN.search(binding_window)
     if binding_match:
         return "binding", binding_match.group(1)
@@ -571,6 +582,8 @@ def _lookback_context(text, string_start_pos):
 
 
 def _is_nix_code_shaped_context(context_kind, context_name):
+    if context_kind == "pam-service-data":
+        return False
     if context_kind == "binding":
         return context_name in EMBEDDED_CODE_BINDING_NAMES or context_name in AMBIGUOUS_CODE_SHAPED_BINDING_NAMES
     if context_kind == "call":
@@ -580,7 +593,7 @@ def _is_nix_code_shaped_context(context_kind, context_name):
 
 def classify_nix_string_binding(context_kind, context_name, text=None, string_start_pos=None):
     if context_kind == "binding" and context_name in EMBEDDED_CODE_BINDING_NAMES:
-        return "shell"
+        return EMBEDDED_CODE_BINDING_NAMES[context_name]
     if context_kind == "binding" and context_name in AMBIGUOUS_CODE_SHAPED_BINDING_NAMES:
         if text is None or string_start_pos is None:
             return None

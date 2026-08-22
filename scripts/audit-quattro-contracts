@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Inventory the static contracts exposed by the pinned Quattro source."""
 
 from __future__ import annotations
 
@@ -15,10 +14,6 @@ import source_discovery
 
 TEXT_SUFFIXES = {".qml", ".js", ".sh"}
 
-# Every file recursively found under these roots is a security source: the
-# roots are the allowlist, never the individual files inside them. Adding,
-# removing, renaming, or editing a file under a root changes the snapshot
-# even when it matches no recognized pattern.
 SECURITY_SOURCE_ROOTS = (
     "shell/plugins/lock/",
     "shell/plugins/polkit/",
@@ -26,14 +21,6 @@ SECURITY_SOURCE_ROOTS = (
     "shell/plugins/notifications/",
 )
 
-# omarchy-* helpers reached from a security source or an already-audited
-# security helper. Every helper the scanner discovers by traversal must have
-# exactly one disposition here or the drift-checkable output records it
-# unresolved: unresolved.length must be zero for the audit to pass.
-#
-# Only "audited-source" edges are traversed further; every other disposition
-# is a deliberate stop: the edge is recorded and hashed evidence is not
-# claimed beyond it.
 SECURITY_HELPER_DISPOSITIONS = {
     "bin/omarchy-apply-lock": "audited-source",
     "bin/omarchy-system-lock": "audited-source",
@@ -77,14 +64,6 @@ _DispositionKey = TypeVar("_DispositionKey")
 def dead_dispositions(
     dispositions: dict[_DispositionKey, str], reachable: set[_DispositionKey]
 ) -> set[_DispositionKey]:
-    """Disposition entries never reached by traversal or current scan output.
-
-    A dead entry cannot be resolved by adding evidence: the only fix is
-    removing it. The scanner refuses to run rather than relying on manual
-    review to notice an unused policy row. Used for both the helper-edge
-    disposition table (str keys) and the dynamic-execution disposition table
-    ((path, line, name) keys) below.
-    """
 
     return set(dispositions) - reachable
 
@@ -118,11 +97,6 @@ SHELL_EVAL_LITERAL_RE = re.compile(
 
 
 def classify_dynamic_category(shape: str) -> str:
-    """Best-effort taxonomy label for a dynamic/ambiguous execution record.
-
-    This is review metadata, not a correctness signal: presence in
-    security_dynamic_executions is what fail-closed behavior depends on.
-    """
 
     if DYNAMIC_EVAL_RE.search(shape):
         return "eval"
@@ -135,16 +109,6 @@ def classify_dynamic_category(shape: str) -> str:
     return "ambiguous-shell-shape"
 
 
-# Every recorded dynamic/ambiguous execution inside a security source or an
-# audited-source security helper needs an exact, pinned, reviewed
-# disposition: either a legitimate runtime-determined dispatch (forwarding
-# "$@", running a caller-supplied command), or a known artifact of the
-# scanner's deliberately non-parsing line/delimiter splitter misreading
-# something that is not a command at all (an awk program, a `[[ ]]`/`(( ))`
-# test expression, a `2>&1`/`||` redirection sequence broken by single-char
-# splitting). Keyed on the exact (path, line, name) triple so a disposition
-# only ever covers the one shape it was reviewed against, never a class of
-# shapes: a changed line invalidates its entry and the audit fails closed.
 SECURITY_DYNAMIC_EXECUTION_DISPOSITIONS: dict[tuple[str, int, str], str] = {
     ("bin/omarchy-apply-lock", 17, '"$@"'):
         "as_root() forwards its own caller's fixed, file-local argv",
@@ -198,19 +162,10 @@ def record(path: str, line: int, name: str, **extra: object) -> dict[str, object
 
 
 def shell_command_line(line: str) -> str:
-    """Extract the command portion of a shell line, stripping a function
-    opener or case arm. A leading variable-assignment prefix is left intact:
-    shell_executables already distinguishes a bare assignment (no command)
-    from an assignment prefix to a real command, and stripping it here would
-    promote the assigned value itself to "the executable"."""
 
     function_body = re.match(r"^\s*[A-Za-z_][A-Za-z0-9_]*\s*\(\s*\)\s*\{", line)
     if function_body:
         return line[function_body.end():]
-    # The pattern text must contribute a non-whitespace character of its own;
-    # otherwise a bare subshell-closing paren (e.g. `  ) 9>lock &`) would be
-    # mistaken for a zero-width case-arm pattern and swallow the following
-    # command word.
     case_arm = re.match(r"^\s*[^;&\s][^;&]*\)\s*", line)
     if case_arm:
         return line[case_arm.end():]
@@ -221,11 +176,6 @@ HEREDOC_START_RE = re.compile(r"<<(-?)\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\2")
 
 
 def scan_shell_names(text: str) -> list[tuple[str, int, str]]:
-    """Discover every command head (helper or external) in shell script text.
-    Heredoc bodies are skipped entirely: their content is literal data (e.g. a
-    PAM config block), never shell syntax, so scanning it as commands would
-    misreport words like a heredoc-embedded `auth` line as external
-    executables."""
 
     shell_functions = {
         match.group(1)
@@ -361,16 +311,6 @@ def collect_security_helper_edges(
     security: list[dict[str, object]],
     dynamic: list[dict[str, object]],
 ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
-    """Traverse the omarchy-* helper graph reached from security sources.
-
-    Returns (helper_edges, external_executables_from_helpers). Only edges
-    dispositioned as audited-source are traversed further; every other
-    disposition is a deliberate stop. Traversed files feed the same
-    environment/filesystem/service/security/dynamic contract collections as
-    QML/JS sources, so an audited helper's contracts are not lost. A command
-    head whose executable identity cannot be statically resolved is recorded
-    into dynamic rather than silently dropped or misread as a literal name.
-    """
 
     edges: dict[str, dict[str, object]] = {}
     externals: list[dict[str, object]] = []

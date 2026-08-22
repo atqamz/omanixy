@@ -1,27 +1,3 @@
-# Final Layer 8 acceptance mapping for issue atqamz/omanixy#4.
-#
-# Maps every acceptance criterion issue #4 was opened against to exact
-# evidence, validated by test/security-issue-4-acceptance.sh. Two statuses
-# only:
-#
-#   satisfied            - a real test in this repo directly proves the
-#                           criterion; `tests` names the file(s), and the
-#                           contract requires each one to actually be wired
-#                           into flake.nix's checks.
-#   experimental-boundary - the criterion is honestly bounded rather than
-#                           proven: the native surface it concerns remains
-#                           experimental (never promoted to supported) or a
-#                           specific piece of live evidence is genuinely
-#                           unavailable in this environment. `matrix_case`
-#                           names the upstream/security-recovery-matrix.yaml
-#                           row whose non-passed status the contract
-#                           cross-checks, so this file can never claim a
-#                           checked-looking state for a test that did not
-#                           actually happen.
-#
-# No third status exists: a criterion is either backed by a real passing
-# test, or explicitly, machine-verifiably marked as a boundary - never
-# silently implied to be satisfied by omission.
 
 items:
   - id: no-imperative-pam-mutation

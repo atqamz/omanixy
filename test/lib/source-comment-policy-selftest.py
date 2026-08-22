@@ -425,6 +425,11 @@ def test_nix_build_phase_binding_classifies_as_shell():
     assert _kinds(scan_nix(Path("x.nix"), src)) == {"narrative-comment"}
 
 
+def test_nix_test_script_binding_classifies_as_python():
+    src = 'testScript = \'\'\n# a python comment\nmachine.succeed("true")\n\'\';\n'
+    assert _kinds(scan_nix(Path("x.nix"), src)) == {"narrative-comment"}
+
+
 def test_nix_unregistered_binding_name_treated_as_data():
     src = 'someWeirdNewBuilderScriptBody = \'\'\n#!/bin/sh\necho hi\n\'\';\n'
     assert scan_nix(Path("x.nix"), src) == []
@@ -435,21 +440,16 @@ def test_nix_call_head_lookback_prefers_nearest_enclosing():
     assert _kinds(scan_nix(Path("x.nix"), src)) == {"narrative-comment"}
 
 
-def test_nix_ambiguous_text_binding_outside_shell_application_fails_closed():
+def test_nix_pam_service_text_binding_bare_is_data():
     src = (
         'x = { security.pam.services."omarchy-lock-password".text = \'\'\n'
         '    auth sufficient pam_permit.so\n'
         '\'\'; };\n'
     )
-    try:
-        scan_nix(Path("x.nix"), src)
-    except NixLexError:
-        pass
-    else:
-        raise AssertionError("expected NixLexError")
+    assert scan_nix(Path("x.nix"), src) == []
 
 
-def test_nix_real_pam_service_text_binding_fails_closed():
+def test_nix_real_pam_service_text_binding_is_data():
     src = (
         '{ config, ... }:\n'
         '{\n'
@@ -458,29 +458,19 @@ def test_nix_real_pam_service_text_binding_fails_closed():
         '  \'\';\n'
         '}\n'
     )
-    try:
-        scan_nix(Path("x.nix"), src)
-    except NixLexError:
-        pass
-    else:
-        raise AssertionError("expected NixLexError")
+    assert scan_nix(Path("x.nix"), src) == []
 
 
-def test_nix_ambiguous_text_binding_wrapped_in_mkforce_fails_closed():
+def test_nix_pam_service_text_binding_wrapped_in_mkforce_is_data():
     src = (
         'x = { security.pam.services."omarchy-lock-password".text = lib.mkForce \'\'\n'
         '    auth sufficient pam_permit.so\n'
         '\'\'; };\n'
     )
-    try:
-        scan_nix(Path("x.nix"), src)
-    except NixLexError:
-        pass
-    else:
-        raise AssertionError("expected NixLexError")
+    assert scan_nix(Path("x.nix"), src) == []
 
 
-def test_nix_real_pam_service_text_binding_wrapped_in_mkforce_fails_closed():
+def test_nix_real_pam_service_text_binding_wrapped_in_mkforce_is_data():
     src = (
         '{ config, lib, ... }:\n'
         '{\n'
@@ -488,6 +478,36 @@ def test_nix_real_pam_service_text_binding_wrapped_in_mkforce_fails_closed():
         '    auth sufficient ${config.security.pam.package}/lib/security/pam_permit.so\n'
         '  \'\';\n'
         '}\n'
+    )
+    assert scan_nix(Path("x.nix"), src) == []
+
+
+def test_nix_ambiguous_text_binding_bare_outside_pam_path_fails_closed():
+    src = 'x = { foo.text = \'\'\n# ambiguous\ndata\n\'\'; };\n'
+    try:
+        scan_nix(Path("x.nix"), src)
+    except NixLexError:
+        pass
+    else:
+        raise AssertionError("expected NixLexError")
+
+
+def test_nix_pam_like_binding_name_outside_services_path_fails_closed():
+    src = 'x = { security.pam.text = \'\'\n# ambiguous, not a services.*.text path\ndata\n\'\'; };\n'
+    try:
+        scan_nix(Path("x.nix"), src)
+    except NixLexError:
+        pass
+    else:
+        raise AssertionError("expected NixLexError")
+
+
+def test_nix_pam_service_text_path_nested_under_unrelated_prefix_fails_closed():
+    src = (
+        'x = { foo.security.pam.services.bar.text = \'\'\n'
+        '# ambiguous, nested under an unrelated foo. prefix\n'
+        'data\n'
+        '\'\'; };\n'
     )
     try:
         scan_nix(Path("x.nix"), src)
@@ -918,6 +938,14 @@ def test_generic_markdown_prose_ignored_by_policy():
     with tempfile.TemporaryDirectory() as tmp_path_str:
         tmp_path = Path(tmp_path_str)
         (tmp_path / "README.md").write_text("# Heading\n// not code\n")
+        assert main(["prog", str(tmp_path)]) == 0
+
+
+def test_generic_non_source_metadata_ignored_by_policy():
+    with tempfile.TemporaryDirectory() as tmp_path_str:
+        tmp_path = Path(tmp_path_str)
+        (tmp_path / ".gitignore").write_text(".superpowers/\n")
+        (tmp_path / "LICENSE").write_text("License text\n")
         assert main(["prog", str(tmp_path)]) == 0
 
 

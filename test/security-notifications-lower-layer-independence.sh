@@ -1,8 +1,4 @@
 #!/usr/bin/env bash
-# Proves enabling the notification daemon alongside every prior experimental
-# security capability changes nothing about their own byte content or
-# reachability (Layer-7 spec section 39): no lock, fingerprint, polkit, or
-# idle widening.
 set -euo pipefail
 
 all_security_lock_qml=${1:?lock Service.qml (all capabilities on) required}

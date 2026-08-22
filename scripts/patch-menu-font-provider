@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Remove the pinned font provider outside the supported menu contract."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-# shellcheck disable=SC2154 # shared adapter state is initialized by common.bash.
+# shellcheck disable=SC2154
 clipboard_paste_text() {
   local shift_insert=false copy_only=false history_index="" text=""
   while (($#)); do
@@ -186,7 +186,7 @@ screenshot_selection() {
     fail "$name: screenshot freeze could not start"
   }
   kill -0 "$freeze_pid" 2>/dev/null || fail "$name: screenshot freeze backend failed"
-  # shellcheck disable=SC2329 # RETURN trap invokes this cleanup function indirectly.
+  # shellcheck disable=SC2329
   cleanup_selection() {
     if kill -0 "$freeze_pid" 2>/dev/null; then kill "$freeze_pid" 2>/dev/null || :; fi
     wait "$freeze_pid" 2>/dev/null || :
@@ -234,7 +234,7 @@ screenshot() {
   need jq
   screenshot_original_cursor_mode=$(timed 3 'Hyprland cursor mode lookup' hyprctl getoption cursor:no_hardware_cursors -j | jq -er '.int') ||
     fail "$name: Hyprland cursor mode is unavailable"
-  # shellcheck disable=SC2329 # EXIT trap invokes this cleanup function indirectly.
+  # shellcheck disable=SC2329
   screenshot_restore_cursor_mode() {
     screenshot_set_cursor_mode "$screenshot_original_cursor_mode" ||
       printf '%s: screenshot cursor mode restoration failed\n' "$name" >&2

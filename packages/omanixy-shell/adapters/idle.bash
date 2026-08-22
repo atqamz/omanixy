@@ -1,10 +1,6 @@
 idle_state_marker_path() {
   [[ -n ${HOME:-} ]] || return 2
   [[ $HOME == /* ]] || return 2
-  # Preserves the pinned Omarchy compatibility path exactly
-  # ($HOME/.local/state/omarchy/indicators/stay-awake, not
-  # $XDG_STATE_HOME-relative) so anything else that reads or writes this
-  # fixed marker keeps working unchanged.
   printf '%s\n' "$HOME/.local/state/omarchy/indicators/stay-awake"
 }
 
@@ -13,9 +9,6 @@ idle_state_probe() {
   local marker parent
   marker=$(idle_state_marker_path) || exit 2
   parent=${marker%/*}
-  # A parent directory that exists but is not searchable makes existence
-  # unprovable rather than merely absent - fail closed as indeterminate
-  # instead of silently reporting "no marker".
   if [[ -d $parent && ! -x $parent ]]; then
     exit 2
   fi

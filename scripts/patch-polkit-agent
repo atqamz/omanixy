@@ -1,23 +1,4 @@
 #!/usr/bin/env python3
-"""Narrow post-patch to the pinned PolkitAgent.qml and PolkitModel.js for the
-Quattro polkit agent.
-
-Removes upstream's PAM-file fingerprint inference and laptop-lid presentation
-policy entirely: no FileView reading /etc/pam.d/polkit-1, no
-omarchy-hw-laptop-closed Process, no fingerprintConfigured/laptopClosed
-state, no loadPamConfig()/refreshLidState(). Omanixy does not infer, and does
-not take over, the host's own polkit-1 PAM authentication policy.
-
-The resulting waiting presentation is authentication-method-neutral: it is
-driven only by the pinned Quickshell AuthFlow.isResponseRequired signal, never
-by parsing PAM text or hardware lid state. The final generated QML has no
-external Process.command surface at all (proven separately by
-scan-polkit-executable-surface).
-
-PolkitModel.js loses its now-unused fingerprint-detection helpers
-(promptLooksFingerprint, fingerprintConfiguredFromPamConfig); only
-authorizationLabel remains, unchanged.
-"""
 
 from pathlib import Path
 import sys

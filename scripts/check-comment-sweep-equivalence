@@ -1,0 +1,192 @@
+#!/usr/bin/env python3
+import ast
+import importlib.machinery
+import importlib.util
+import subprocess
+import tomllib
+from pathlib import Path
+
+import yaml
+
+
+DOCSTRING_OWNERS = (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+
+
+def _leading_string_expr(node):
+    if not isinstance(node, DOCSTRING_OWNERS):
+        return None
+    body = getattr(node, "body", None)
+    if not body:
+        return None
+    first = body[0]
+    if (
+        isinstance(first, ast.Expr)
+        and isinstance(first.value, ast.Constant)
+        and isinstance(first.value.value, str)
+    ):
+        return first
+    return None
+
+
+def _strip_docstrings(tree):
+    for node in ast.walk(tree):
+        body = getattr(node, "body", None)
+        doc_node = _leading_string_expr(node) if isinstance(body, list) else None
+        if doc_node is not None:
+            node.body = node.body[1:]
+            if not node.body and isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+                node.body.append(ast.Pass())
+    return tree
+
+
+def compare_python(path, before_text, after_text):
+    before_tree = _strip_docstrings(ast.parse(before_text, filename=str(path)))
+    after_tree = _strip_docstrings(ast.parse(after_text, filename=str(path)))
+    return ast.dump(before_tree, annotate_fields=True, include_attributes=False) == \
+        ast.dump(after_tree, annotate_fields=True, include_attributes=False)
+
+
+def compare_nix(path, before_text, after_text):
+    return _nix_parse(_strip_nix_narrative_comments(path, before_text)) == _nix_parse(after_text)
+
+
+def _nix_parse(text):
+    result = subprocess.run(
+        ["nix-instantiate", "--parse", "-"],
+        input=text, capture_output=True, text=True, encoding="utf-8", check=True,
+    )
+    return result.stdout
+
+
+_CHECK_SOURCE_COMMENTS_PATH = Path(__file__).resolve().parent / "check-source-comments"
+
+
+def _load_check_source_comments():
+    loader = importlib.machinery.SourceFileLoader("check_source_comments", str(_CHECK_SOURCE_COMMENTS_PATH))
+    spec = importlib.util.spec_from_file_location(
+        "check_source_comments", _CHECK_SOURCE_COMMENTS_PATH, loader=loader
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+_check_source_comments = _load_check_source_comments()
+_ShellLexer = _check_source_comments._ShellLexer
+_scan_nix = _check_source_comments.scan_nix
+_scan_js_region = _check_source_comments._scan_js_region
+
+
+def _line_starts(text):
+    starts = [0]
+    for i, char in enumerate(text):
+        if char == "\n":
+            starts.append(i + 1)
+    return starts
+
+
+def _nix_comment_spans(path, text):
+    starts = _line_starts(text)
+    spans = []
+    for violation in _scan_nix(path, text):
+        if violation.kind != "narrative-comment":
+            continue
+        line_start = starts[violation.line - 1]
+        if "\n" not in violation.text:
+            line_end = text.find("\n", line_start)
+            if line_end == -1:
+                line_end = len(text)
+            start = text.rfind(violation.text, line_start, line_end)
+            if start == -1:
+                raise ValueError(f"{path}: cannot locate Nix comment at line {violation.line}")
+        else:
+            expected = line_start + violation.col
+            if not text.startswith(violation.text, expected):
+                raise ValueError(f"{path}: cannot locate Nix comment at line {violation.line}")
+            start = expected
+        spans.append((start, start + len(violation.text)))
+    return spans
+
+
+def _comment_span_offsets(text, comment_tokens):
+    line_starts = _line_starts(text)
+    spans = []
+    for line, col, comment_text in comment_tokens:
+        start = line_starts[line - 1] + col
+        spans.append((start, start + len(comment_text)))
+    return spans
+
+
+def _strip_spans_and_normalize_whitespace(text, spans):
+    expanded_spans = []
+    for start, end in spans:
+        line_start = text.rfind("\n", 0, start) + 1
+        line_end = text.find("\n", end)
+        if line_end == -1:
+            line_end = len(text)
+        if text[line_start:start].strip(" \t") == "" and text[end:line_end].strip(" \t") == "":
+            if _has_line_continuation(text, line_start):
+                expanded_spans.append((start, end))
+            else:
+                end_of_line = line_end + 1 if line_end < len(text) else line_end
+                expanded_spans.append((line_start, end_of_line))
+        else:
+            expanded_spans.append((start, end))
+    parts = []
+    cursor = 0
+    for start, end in sorted(expanded_spans):
+        parts.append(text[cursor:start].rstrip(" \t"))
+        cursor = end
+    parts.append(text[cursor:])
+    return "".join(parts)
+
+
+def _has_line_continuation(text, line_start):
+    if line_start == 0:
+        return False
+    previous_line_start = text.rfind("\n", 0, line_start - 1) + 1
+    previous_line = text[previous_line_start:line_start].rstrip("\n")
+    backslashes = 0
+    for char in reversed(previous_line):
+        if char != "\\":
+            break
+        backslashes += 1
+    return backslashes % 2 == 1
+
+
+def _strip_nix_narrative_comments(path, text):
+    return _strip_spans_and_normalize_whitespace(text, _nix_comment_spans(path, text))
+
+
+def compare_shell(path, before_text, after_text):
+    return _shell_noncomment_tokens(path, before_text) == _shell_noncomment_tokens(path, after_text)
+
+
+def _shell_noncomment_tokens(path, text):
+    return _strip_spans_and_normalize_whitespace(text, _shell_comment_spans(path, text))
+
+
+def _shell_comment_spans(path, text):
+    return _comment_span_offsets(text, _ShellLexer(path, text).run())
+
+
+def compare_js(path, before_text, after_text):
+    return _js_noncomment_tokens(path, before_text) == _js_noncomment_tokens(path, after_text)
+
+
+def _js_noncomment_tokens(path, text):
+    return _strip_spans_and_normalize_whitespace(text, _js_comment_spans(path, text))
+
+
+def _js_comment_spans(path, text):
+    raw_spans = []
+    _scan_js_region(path, text, 0, len(text), raw_spans, in_interpolation=False)
+    return _comment_span_offsets(text, raw_spans)
+
+
+def compare_yaml(path, before_text, after_text):
+    return yaml.safe_load(before_text) == yaml.safe_load(after_text)
+
+
+def compare_toml(path, before_text, after_text):
+    return tomllib.loads(before_text) == tomllib.loads(after_text)
