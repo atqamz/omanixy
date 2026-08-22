@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 EXCLUDED_DIR_NAMES = {".git", ".jj", "result"}
-EXCLUDED_FILENAMES = {".gitignore", "LICENSE", "codedb.snapshot", "flake.lock"}
+EXCLUDED_FILENAMES = {".git", ".gitignore", "LICENSE", "codedb.snapshot", "flake.lock"}
 EXTENSION_LANGUAGE = {
     ".py": "python",
     ".nix": "nix",

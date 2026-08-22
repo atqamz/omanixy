@@ -84,8 +84,9 @@ is recomputed from the current presentation selection on every activation.
 The NixOS module is valid and intentionally has no privileged declarations for
 this baseline.
 
-Security and session plugins remain intentionally unreachable in this
-foundation layer.
+Security and session plugins are disabled by default in this foundation
+configuration and become reachable only through their separate ownership
+options.
 `omarchy.lock`, `omarchy.polkit`, `omarchy.idle`, and
 `omarchy.notifications` stay disabled in the generated configuration and are
 absent from the immutable compatibility view.
@@ -93,15 +94,18 @@ The `notification` presentation group continues to mean the
 `notification-send` client capability only.
 It does not grant ownership of `org.freedesktop.Notifications`.
 
-Future security options will be separate ownership controls rather than new
-members of `programs.omanixy.features`.
-The conceptual controls are an external or consumer-owned provider by
-default, an explicitly enabled native Quattro lock, an independently optional
-fingerprint capability, an independently optional Quattro polkit agent, an
-independently optional Quattro idle manager, and an independently optional
-Quattro notification daemon.
-Option names remain unfrozen until their layer has a reviewed contract and
-validation evidence.
+The Home Manager ownership controls are
+`programs.omanixy.security.lock.enable`,
+`programs.omanixy.security.lock.fingerprint.enable`,
+`programs.omanixy.security.polkit.agent.enable`,
+`programs.omanixy.security.idle.enable`, and
+`programs.omanixy.security.notifications.daemon.enable`.
+The paired NixOS capability controls are
+`programs.omanixy.security.pam.password.enable`,
+`programs.omanixy.security.pam.fingerprint.enable`, and
+`programs.omanixy.security.polkit.system.enable`.
+They remain independently optional and disabled by default, and known
+external-owner conflicts fail closed rather than being taken over.
 
 The package output is
 `packages.${system}.omanixy-shell`.
@@ -426,8 +430,9 @@ Unsupported user-edited menu actions remain outside the Omanixy support
 claim and fail as explicit missing or rejected commands rather than reporting
 success.
 
-Issue #4 remains responsible for native locking, PAM, fingerprint, polkit,
-idle, notification ownership, and lock recovery hardening.
+The security layers provide native locking, PAM, fingerprint, polkit, idle,
+notification ownership, and lock recovery hardening as separate opt-in
+controls.
 The default baseline does not enable those security-sensitive surfaces.
 
 ## Debugging and upgrades

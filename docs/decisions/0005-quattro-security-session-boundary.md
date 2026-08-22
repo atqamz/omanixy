@@ -4,7 +4,9 @@
 
 Accepted for the issue #4 foundation layer.
 
-The security runtime remains blocked and unreachable after this decision.
+The security runtime remains disabled by default; reviewed opt-in lock, PAM,
+fingerprint, polkit, idle, and notification ownership controls implement this
+boundary in the subsequent security layers.
 
 ## Context
 
