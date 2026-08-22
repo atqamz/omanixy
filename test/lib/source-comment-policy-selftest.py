@@ -400,6 +400,11 @@ def test_nix_install_phase_comment_rejected():
     assert _kinds(scan_nix(Path("x.nix"), src)) == {"narrative-comment"}
 
 
+def test_nix_post_build_hook_comment_rejected():
+    src = 'x = { postBuild = \'\'\n# narrative\necho hi\n\'\'; };\n'
+    assert _kinds(scan_nix(Path("x.nix"), src)) == {"narrative-comment"}
+
+
 def test_nix_writeshellapplication_text_binding_comment_rejected():
     src = 'x = pkgs.writeShellApplication { name = "n"; text = \'\'\n# narrative\necho hi\n\'\'; };\n'
     assert _kinds(scan_nix(Path("x.nix"), src)) == {"narrative-comment"}

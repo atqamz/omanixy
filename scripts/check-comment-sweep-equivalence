@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 import ast
+import argparse
 import importlib.machinery
 import importlib.util
+import json
 import subprocess
 import tomllib
 from pathlib import Path
@@ -190,3 +192,70 @@ def compare_yaml(path, before_text, after_text):
 
 def compare_toml(path, before_text, after_text):
     return tomllib.loads(before_text) == tomllib.loads(after_text)
+
+
+COMPARATORS = {
+    "python": compare_python,
+    "nix": compare_nix,
+    "shell": compare_shell,
+    "js": compare_js,
+    "qml": compare_js,
+    "yaml": compare_yaml,
+    "toml": compare_toml,
+}
+
+
+def compare_tree(before_root, after_root):
+    before_root = Path(before_root).resolve()
+    after_root = Path(after_root).resolve()
+    source_trees = []
+    for root in (before_root, after_root):
+        sources = {}
+        for path in _check_source_comments.discover_source_files(root):
+            language = _check_source_comments.classify_language(path, root)
+            if language == "unsupported":
+                raise ValueError(f"unsupported maintained source language: {path.relative_to(root)}")
+            if language is not None:
+                sources[path.relative_to(root)] = (path, language)
+        source_trees.append(sources)
+    before_sources, after_sources = source_trees
+    if set(before_sources) != set(after_sources):
+        missing = sorted(set(before_sources) - set(after_sources))
+        added = sorted(set(after_sources) - set(before_sources))
+        raise ValueError(f"source tree changed: missing={missing}, added={added}")
+    entries = []
+    for relative_path in sorted(before_sources):
+        before_path, before_language = before_sources[relative_path]
+        after_path, after_language = after_sources[relative_path]
+        if before_language != after_language:
+            raise ValueError(f"source language changed: {relative_path}")
+        equivalent = COMPARATORS[before_language](
+            relative_path,
+            before_path.read_text(encoding="utf-8", errors="surrogateescape"),
+            after_path.read_text(encoding="utf-8", errors="surrogateescape"),
+        )
+        entries.append({"path": str(relative_path), "language": before_language, "equivalent": equivalent})
+        if not equivalent:
+            raise ValueError(f"executable semantics changed: {relative_path}")
+    return entries
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser()
+    parser.add_argument("before_root", type=Path)
+    parser.add_argument("after_root", type=Path)
+    parser.add_argument("--report", type=Path, required=True)
+    args = parser.parse_args(argv)
+    entries = compare_tree(args.before_root, args.after_root)
+    report = {
+        "before": str(args.before_root.resolve()),
+        "after": str(args.after_root.resolve()),
+        "files": entries,
+        "equivalent": True,
+    }
+    args.report.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    print(f"comment-sweep-equivalence: {len(entries)} source files equivalent")
+
+
+if __name__ == "__main__":
+    main()

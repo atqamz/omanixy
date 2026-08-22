@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import subprocess
 import sys
+import tempfile
 import tomllib
 from pathlib import Path
 
@@ -21,6 +22,7 @@ compare_shell = ns["compare_shell"]
 compare_js = ns["compare_js"]
 compare_yaml = ns["compare_yaml"]
 compare_toml = ns["compare_toml"]
+compare_tree = ns["compare_tree"]
 ShellLexError = ns["_check_source_comments"].ShellLexError
 JsLexError = ns["_check_source_comments"].JsLexError
 
@@ -319,6 +321,36 @@ def test_toml_malformed_input_propagates_toml_decode_error():
         pass
     else:
         raise AssertionError("expected TOMLDecodeError")
+
+
+def test_tree_comparison_emits_equivalence_for_source_tree():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        before = root / "before"
+        after = root / "after"
+        before.mkdir()
+        after.mkdir()
+        (before / "x.py").write_text('"""doc"""\nx = 1\n', encoding="utf-8")
+        (after / "x.py").write_text("x = 1\n", encoding="utf-8")
+        entries = compare_tree(before, after)
+    assert entries == [{"path": "x.py", "language": "python", "equivalent": True}]
+
+
+def test_tree_comparison_rejects_executable_mutation():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        before = root / "before"
+        after = root / "after"
+        before.mkdir()
+        after.mkdir()
+        (before / "x.sh").write_text("printf '%s\\n' one\n", encoding="utf-8")
+        (after / "x.sh").write_text("printf '%s\\n' two\n", encoding="utf-8")
+        try:
+            compare_tree(before, after)
+        except ValueError as error:
+            assert "executable semantics changed" in str(error)
+        else:
+            raise AssertionError("expected executable mutation to be rejected")
 
 
 if __name__ == "__main__":
