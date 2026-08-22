@@ -1,0 +1,1112 @@
+#!/usr/bin/env python3
+import ast
+import io
+import os
+import re
+import sys
+import tokenize
+from dataclasses import dataclass
+from pathlib import Path
+
+EXCLUDED_DIR_NAMES = {".git", ".jj", "result"}
+EXCLUDED_FILENAMES = {"flake.lock", "codedb.snapshot"}
+EXTENSION_LANGUAGE = {
+    ".py": "python",
+    ".nix": "nix",
+    ".sh": "shell",
+    ".bash": "shell",
+    ".js": "js",
+    ".mjs": "js",
+    ".cjs": "js",
+    ".qml": "qml",
+    ".yaml": "yaml",
+    ".yml": "yaml",
+    ".toml": "toml",
+}
+SHEBANG_LANGUAGE = {
+    "python3": "python",
+    "python": "python",
+    "bash": "shell",
+    "sh": "shell",
+}
+NON_SOURCE_SUFFIXES = {".md", ".json", ".jsonc", ".lock"}
+
+
+@dataclass(frozen=True)
+class Violation:
+    path: Path
+    line: int
+    col: int
+    kind: str
+    text: str
+
+
+SHEBANG_PATTERN = re.compile(r"^#!.*$")
+SHELLCHECK_DISABLE_PATTERN = re.compile(r"^# shellcheck disable=SC\d+(,SC\d+)*$")
+
+DIRECTIVE_GRAMMARS = {
+    "shell": [SHELLCHECK_DISABLE_PATTERN],
+    "python": [],
+    "nix": [],
+    "js": [],
+    "qml": [],
+    "yaml": [],
+    "toml": [],
+}
+
+
+def is_shebang_line(language, line_number, col, text):
+    return line_number == 1 and col == 0 and SHEBANG_PATTERN.match(text) is not None
+
+
+def match_directive(language, comment_text):
+    return any(p.match(comment_text) for p in DIRECTIVE_GRAMMARS.get(language, []))
+
+
+def classify_language(path, root):
+    rel = path.relative_to(root)
+    if rel.name in EXCLUDED_FILENAMES:
+        return None
+    if rel.suffix in NON_SOURCE_SUFFIXES:
+        return None
+    if rel.name == "justfile":
+        return "shell"
+    if rel.suffix in EXTENSION_LANGUAGE:
+        return EXTENSION_LANGUAGE[rel.suffix]
+    if rel.suffix:
+        return "unsupported"
+    try:
+        with path.open("rb") as handle:
+            first_line = handle.readline()
+    except OSError:
+        return None
+    if not first_line.startswith(b"#!"):
+        return "unsupported"
+    interpreter_line = first_line.decode("utf-8", "replace").strip()
+    path_part = interpreter_line.rsplit("/", 1)[-1]
+    parts = path_part.split()
+    if not parts:
+        return "unsupported"
+    interpreter = parts[-1]
+    return SHEBANG_LANGUAGE.get(interpreter, "unsupported")
+
+
+def discover_source_files(root):
+    found = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in EXCLUDED_DIR_NAMES]
+        for filename in filenames:
+            candidate = Path(dirpath) / filename
+            if candidate.is_symlink():
+                continue
+            found.append(candidate)
+    return sorted(found)
+
+
+def scan_python(path, text, root=None):
+    violations = []
+    tokens = tokenize.generate_tokens(io.StringIO(text).readline)
+    for token in tokens:
+        if token.type != tokenize.COMMENT:
+            continue
+        line_number, col = token.start
+        if is_shebang_line("python", line_number, col, token.string):
+            continue
+        if match_directive("python", token.string):
+            continue
+        violations.append(Violation(path, line_number, col, "narrative-comment", token.string))
+    tree = ast.parse(text, filename=str(path))
+    for node in _docstring_owning_nodes(tree):
+        doc_node = _leading_string_expr(node)
+        if doc_node is not None:
+            violations.append(
+                Violation(path, doc_node.lineno, doc_node.col_offset, "docstring", "")
+            )
+    violations.extend(_scan_python_embedded_assignments(path, text, tree, root))
+    return violations
+
+
+def _docstring_owning_nodes(tree):
+    yield tree
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            yield node
+
+
+def _leading_string_expr(node):
+    body = getattr(node, "body", None)
+    if not body:
+        return None
+    first = body[0]
+    if (
+        isinstance(first, ast.Expr)
+        and isinstance(first.value, ast.Constant)
+        and isinstance(first.value.value, str)
+    ):
+        return first
+    return None
+
+
+class PythonEmbeddedStringError(Exception):
+    pass
+
+
+PYTHON_EMBEDDED_QML_ASSIGNMENTS = {
+    ("scripts/generate-postpatch-runtime-surface", "HEADLESS_KEYBOARD_PANEL"): "qml",
+}
+PYTHON_PINNED_DATA_ASSIGNMENTS = {
+    ("scripts/generate-postpatch-runtime-surface", "HEADLESS_SOURCE_PATCHES"): "data",
+    ("scripts/generate-postpatch-runtime-surface", "HEADLESS_TEXT_PATCHES"): "data",
+}
+PYTHON_EMBEDDED_ASSIGNMENT_FILES = {
+    rel_path for rel_path, _ in list(PYTHON_EMBEDDED_QML_ASSIGNMENTS) + list(PYTHON_PINNED_DATA_ASSIGNMENTS)
+}
+
+
+def _top_level_string_assignments(tree):
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
+            continue
+        yield node.targets[0].id, node
+
+
+def _is_triple_quoted(text, string_node):
+    segment = ast.get_source_segment(text, string_node)
+    return segment is not None and segment.startswith(('"""', "'''"))
+
+
+def _looks_like_source_code(value):
+    return "import " in value or "function" in value or value.lstrip().startswith("#!")
+
+
+def _scan_embedded_python_string(path, string_node, scanner):
+    violations = []
+    for v in scanner(path, string_node.value):
+        line = string_node.lineno + v.line - 1
+        col = v.col + string_node.col_offset + 3 if v.line == 1 else v.col
+        violations.append(Violation(path, line, col, v.kind, v.text))
+    return violations
+
+
+def _scan_python_embedded_assignments(path, text, tree, root):
+    if root is None:
+        return []
+    try:
+        rel_path = Path(path).relative_to(root).as_posix()
+    except ValueError:
+        return []
+    if rel_path not in PYTHON_EMBEDDED_ASSIGNMENT_FILES:
+        return []
+    violations = []
+    for name, node in _top_level_string_assignments(tree):
+        key = (rel_path, name)
+        if key in PYTHON_PINNED_DATA_ASSIGNMENTS:
+            continue
+        if not isinstance(node.value, ast.Constant) or not isinstance(node.value.value, str):
+            continue
+        if key in PYTHON_EMBEDDED_QML_ASSIGNMENTS:
+            violations.extend(_scan_embedded_python_string(path, node.value, scan_js))
+            continue
+        if _is_triple_quoted(text, node.value) and _looks_like_source_code(node.value.value):
+            raise PythonEmbeddedStringError(f"{path}: unclassified embedded code-shaped assignment {name!r}")
+    return violations
+
+
+class ShellLexError(Exception):
+    pass
+
+
+class _ShellLexer:
+    COMMENT_RECOGNIZING = {"NORMAL", "CMDSUB", "BACKTICK"}
+
+    def __init__(self, path, text):
+        self.path = path
+        self.text = text
+        self.pos = 0
+        self.line = 1
+        self.col = 0
+        self.stack = ["NORMAL"]
+        self.pending_heredocs = []
+        self.heredoc_delimiter = None
+        self.heredoc_strip_tabs = False
+        self.cmdsub_depth = []
+        self.cmdsub_case = []
+        self.violations = []
+
+    def peek(self, offset=0):
+        index = self.pos + offset
+        return self.text[index] if index < len(self.text) else ""
+
+    def advance(self):
+        char = self.text[self.pos]
+        self.pos += 1
+        if char == "\n":
+            self.line += 1
+            self.col = 0
+        else:
+            self.col += 1
+        return char
+
+    def at_word_boundary(self):
+        if self.pos == 0:
+            return True
+        prev = self.text[self.pos - 1]
+        return prev in " \t\n;&|()<>`" or prev == ""
+
+    def _match_keyword(self, word):
+        end = self.pos + len(word)
+        if self.text[self.pos:end] != word:
+            return False
+        next_char = self.text[end] if end < len(self.text) else ""
+        return next_char == "" or next_char in " \t\n;&|()<>`"
+
+    def run(self):
+        while self.pos < len(self.text):
+            top = self.stack[-1]
+            if top in self.COMMENT_RECOGNIZING:
+                self._step_normal()
+            elif top == "SQUOTE":
+                self._step_squote()
+            elif top == "DQUOTE":
+                self._step_dquote()
+            elif top == "DOLLAR_SQUOTE":
+                self._step_dollar_squote()
+            elif top == "ARITH":
+                self._step_arith()
+            elif top == "PARAMEXP":
+                self._step_paramexp()
+            elif top == "HEREDOC":
+                self._step_heredoc()
+        if len(self.stack) != 1 or self.stack[0] != "NORMAL":
+            raise ShellLexError(f"{self.path}: unterminated {self.stack[-1]} at EOF")
+        return self.violations
+
+    def _step_normal(self):
+        char = self.peek()
+        if char == "'":
+            self.advance()
+            self.stack.append("SQUOTE")
+            return
+        if char == '"':
+            self.advance()
+            self.stack.append("DQUOTE")
+            return
+        if char == "$" and self.peek(1) == "'":
+            self.advance()
+            self.advance()
+            self.stack.append("DOLLAR_SQUOTE")
+            return
+        if char == "`":
+            self.advance()
+            if self.stack[-1] == "BACKTICK":
+                self.stack.pop()
+            else:
+                self.stack.append("BACKTICK")
+            return
+        if char == "$" and self.peek(1) == "(" and self.peek(2) == "(":
+            self.advance()
+            self.advance()
+            self.advance()
+            self.stack.append("ARITH")
+            return
+        if char == "$" and self.peek(1) == "(":
+            self.advance()
+            self.advance()
+            self.stack.append("CMDSUB")
+            self.cmdsub_depth.append(0)
+            self.cmdsub_case.append(0)
+            return
+        if char == "$" and self.peek(1) == "{":
+            self.advance()
+            self.advance()
+            self.stack.append("PARAMEXP")
+            return
+        if self.stack[-1] == "CMDSUB" and self.at_word_boundary() and self._match_keyword("case"):
+            self.cmdsub_case[-1] += 1
+            for _ in range(4):
+                self.advance()
+            return
+        if self.stack[-1] == "CMDSUB" and self.at_word_boundary() and self._match_keyword("esac"):
+            if self.cmdsub_case[-1] > 0:
+                self.cmdsub_case[-1] -= 1
+            for _ in range(4):
+                self.advance()
+            return
+        if char == "(" and self.stack[-1] == "CMDSUB":
+            self.advance()
+            if self.cmdsub_case[-1] > 0:
+                return
+            self.cmdsub_depth[-1] += 1
+            return
+        if char == ")" and self.stack[-1] == "CMDSUB":
+            self.advance()
+            if self.cmdsub_case[-1] > 0:
+                return
+            if self.cmdsub_depth[-1] > 0:
+                self.cmdsub_depth[-1] -= 1
+            else:
+                self.stack.pop()
+                self.cmdsub_depth.pop()
+                self.cmdsub_case.pop()
+            return
+        if char == "<" and self.peek(1) == "<":
+            self._consume_heredoc_operator()
+            return
+        if char == "#" and self.at_word_boundary():
+            self._consume_comment()
+            return
+        if char == "\n":
+            self.advance()
+            self._consume_pending_heredocs()
+            return
+        self.advance()
+
+    def _consume_comment(self):
+        start_line, start_col = self.line, self.col
+        start = self.pos
+        while self.pos < len(self.text) and self.text[self.pos] != "\n":
+            self.advance()
+        comment_text = self.text[start:self.pos]
+        self.violations.append((start_line, start_col, comment_text))
+
+    def _consume_heredoc_operator(self):
+        self.advance()
+        self.advance()
+        strip_tabs = False
+        if self.peek() == "-":
+            self.advance()
+            strip_tabs = True
+        while self.peek() in (" ", "\t"):
+            self.advance()
+        delimiter_chars = []
+        if self.peek() in ("'", '"'):
+            quote_char = self.advance()
+            while self.pos < len(self.text) and self.peek() != quote_char:
+                delimiter_chars.append(self.advance())
+            if self.pos < len(self.text):
+                self.advance()
+        else:
+            while self.pos < len(self.text) and self.peek() not in " \t\n;&|()<>":
+                if self.peek() == "\\" and self.pos + 1 < len(self.text):
+                    self.advance()
+                delimiter_chars.append(self.advance())
+        delimiter = "".join(delimiter_chars)
+        if delimiter:
+            self.pending_heredocs.append((delimiter, strip_tabs))
+
+    def _consume_pending_heredocs(self):
+        if not self.pending_heredocs:
+            return
+        delimiter, strip_tabs = self.pending_heredocs.pop(0)
+        self.heredoc_delimiter = delimiter
+        self.heredoc_strip_tabs = strip_tabs
+        self.stack.append("HEREDOC")
+
+    def _step_heredoc(self):
+        start = self.pos
+        while self.pos < len(self.text) and self.text[self.pos] != "\n":
+            self.advance()
+        line = self.text[start:self.pos]
+        if self.pos < len(self.text):
+            self.advance()
+        candidate = line.lstrip("\t") if self.heredoc_strip_tabs else line
+        if candidate == self.heredoc_delimiter:
+            self.stack.pop()
+            if self.pending_heredocs:
+                delimiter, strip_tabs = self.pending_heredocs.pop(0)
+                self.heredoc_delimiter = delimiter
+                self.heredoc_strip_tabs = strip_tabs
+                self.stack.append("HEREDOC")
+
+    def _step_squote(self):
+        char = self.advance()
+        if char == "'":
+            self.stack.pop()
+
+    def _step_dollar_squote(self):
+        char = self.advance()
+        if char == "\\":
+            if self.pos < len(self.text):
+                self.advance()
+            return
+        if char == "'":
+            self.stack.pop()
+
+    def _step_dquote(self):
+        char = self.peek()
+        if char == "\\":
+            self.advance()
+            if self.pos < len(self.text):
+                self.advance()
+            return
+        if char == '"':
+            self.advance()
+            self.stack.pop()
+            return
+        if char == "$" and self.peek(1) == "(" and self.peek(2) == "(":
+            self.advance()
+            self.advance()
+            self.advance()
+            self.stack.append("ARITH")
+            return
+        if char == "$" and self.peek(1) == "(":
+            self.advance()
+            self.advance()
+            self.stack.append("CMDSUB")
+            self.cmdsub_depth.append(0)
+            self.cmdsub_case.append(0)
+            return
+        if char == "$" and self.peek(1) == "{":
+            self.advance()
+            self.advance()
+            self.stack.append("PARAMEXP")
+            return
+        if char == "`":
+            self.advance()
+            self.stack.append("BACKTICK")
+            return
+        self.advance()
+
+    def _step_paramexp(self):
+        char = self.peek()
+        if char == "}":
+            self.advance()
+            self.stack.pop()
+            return
+        if char == "'":
+            self.advance()
+            self.stack.append("SQUOTE")
+            return
+        if char == '"':
+            self.advance()
+            self.stack.append("DQUOTE")
+            return
+        if char == "$" and self.peek(1) == "{":
+            self.advance()
+            self.advance()
+            self.stack.append("PARAMEXP")
+            return
+        if char == "$" and self.peek(1) == "(" and self.peek(2) == "(":
+            self.advance()
+            self.advance()
+            self.advance()
+            self.stack.append("ARITH")
+            return
+        if char == "$" and self.peek(1) == "(":
+            self.advance()
+            self.advance()
+            self.stack.append("CMDSUB")
+            self.cmdsub_depth.append(0)
+            self.cmdsub_case.append(0)
+            return
+        self.advance()
+
+    def _step_arith(self):
+        char = self.peek()
+        if char == ")" and self.peek(1) == ")":
+            self.advance()
+            self.advance()
+            self.stack.pop()
+            return
+        self.advance()
+
+
+def scan_shell(path, text, root=None):
+    violations = []
+    for line_number, col, comment_text in _ShellLexer(path, text).run():
+        if is_shebang_line("shell", line_number, col, comment_text):
+            continue
+        if match_directive("shell", comment_text):
+            continue
+        violations.append(Violation(path, line_number, col, "narrative-comment", comment_text))
+    return violations
+
+
+class NixLexError(Exception):
+    pass
+
+
+def _line_col(text, pos):
+    line = text.count("\n", 0, pos) + 1
+    last_newline = text.rfind("\n", 0, pos)
+    col = pos - last_newline - 1 if last_newline != -1 else pos
+    return line, col
+
+
+BINDING_NAME_PATTERN = re.compile(r"([A-Za-z_][A-Za-z0-9_'-]*)\s*=\s*$")
+CALL_HEAD_PATTERN = re.compile(r"(writeShellScript|writeShellApplication|runCommand|writeText|writeTextDir)\b")
+WRITETEXT_NAME_PATTERN = re.compile(r'writeText(?:Dir)?\s+"([^"]+)"\s*$')
+SHELL_APPLICATION_TEXT_CONTEXT_PATTERN = re.compile(r"(writeShellApplication|writeShellScriptBin)\b")
+PRIORITY_WRAPPER_PATTERN = re.compile(r"lib\.(?:mkForce|mkDefault|mkOverride\s+\d+)\s*$")
+
+EMBEDDED_CODE_BINDING_NAMES = {"buildPhase", "installPhase", "configurePhase", "checkPhase"}
+AMBIGUOUS_CODE_SHAPED_BINDING_NAMES = {"text"}
+EMBEDDED_CODE_CALL_HEADS = {
+    "writeShellScript": "shell",
+    "writeShellApplication": "shell",
+    "runCommand": "shell",
+}
+
+
+def _lookback_context(text, string_start_pos):
+    window = text[max(0, string_start_pos - 200):string_start_pos]
+    binding_window = window.rstrip()
+    wrapper_match = PRIORITY_WRAPPER_PATTERN.search(binding_window)
+    if wrapper_match:
+        binding_window = binding_window[:wrapper_match.start()].rstrip()
+    binding_match = BINDING_NAME_PATTERN.search(binding_window)
+    if binding_match:
+        return "binding", binding_match.group(1)
+    call_matches = list(CALL_HEAD_PATTERN.finditer(window))
+    if call_matches:
+        return "call", call_matches[-1].group(1)
+    return None, None
+
+
+def _is_nix_code_shaped_context(context_kind, context_name):
+    if context_kind == "binding":
+        return context_name in EMBEDDED_CODE_BINDING_NAMES or context_name in AMBIGUOUS_CODE_SHAPED_BINDING_NAMES
+    if context_kind == "call":
+        return context_name in EMBEDDED_CODE_CALL_HEADS
+    return False
+
+
+def classify_nix_string_binding(context_kind, context_name, text=None, string_start_pos=None):
+    if context_kind == "binding" and context_name in EMBEDDED_CODE_BINDING_NAMES:
+        return "shell"
+    if context_kind == "binding" and context_name in AMBIGUOUS_CODE_SHAPED_BINDING_NAMES:
+        if text is None or string_start_pos is None:
+            return None
+        window = text[max(0, string_start_pos - 500):string_start_pos]
+        if SHELL_APPLICATION_TEXT_CONTEXT_PATTERN.search(window):
+            return "shell"
+        return None
+    if context_kind == "call" and context_name in EMBEDDED_CODE_CALL_HEADS:
+        return EMBEDDED_CODE_CALL_HEADS[context_name]
+    return None
+
+
+def classify_write_text_by_name(text, string_start_pos):
+    window = text[max(0, string_start_pos - 200):string_start_pos]
+    match = WRITETEXT_NAME_PATTERN.search(window)
+    if not match:
+        return None
+    return EXTENSION_LANGUAGE.get(Path(match.group(1)).suffix)
+
+
+def _dedent_nix_indented_string(body):
+    lines = body.split("\n")
+    indents = [len(line) - len(line.lstrip(" ")) for line in lines if line.strip(" ") != ""]
+    min_indent = min(indents) if indents else 0
+    return "\n".join(line[min_indent:] for line in lines)
+
+
+def _scan_embedded_nix_string(path, literal_text, base_line, base_col, language, embedded_violations):
+    scanner = EMBEDDED_LANGUAGE_SCANNERS.get(language)
+    if scanner is None:
+        return
+    dedented = _dedent_nix_indented_string(literal_text)
+    for v in scanner(path, dedented):
+        line = base_line + v.line - 1
+        col = v.col + base_col if v.line == 1 else v.col
+        embedded_violations.append(Violation(path, line, col, v.kind, v.text))
+
+
+def _consume_nix_line_comment(path, text, pos, violations):
+    start = pos
+    while pos < len(text) and text[pos] != "\n":
+        pos += 1
+    line, col = _line_col(text, start)
+    violations.append((line, col, text[start:pos]))
+    return pos
+
+
+def _consume_nix_block_comment(path, text, pos, violations):
+    start = pos
+    end = text.find("*/", pos + 2)
+    if end == -1:
+        raise NixLexError(f"{path}: unterminated block comment at {_line_col(text, pos)}")
+    end += 2
+    line, col = _line_col(text, start)
+    violations.append((line, col, text[start:end]))
+    return end
+
+
+def _skip_nix_double_quoted_string(path, text, pos, violations, embedded_violations):
+    pos += 1
+    while pos < len(text):
+        if text[pos] == "\\":
+            pos += 2
+            continue
+        if text.startswith("${", pos):
+            pos = _scan_nix_region(path, text, pos + 2, len(text), violations, embedded_violations, in_interpolation=True)
+            continue
+        if text[pos] == '"':
+            return pos + 1
+        pos += 1
+    raise NixLexError(f"{path}: unterminated double-quoted string")
+
+
+def _skip_nix_indented_string(path, text, pos, violations, embedded_violations, language=None):
+    pos += 2
+    body_start = pos
+    literal = [] if language is not None else None
+    segment_start = pos
+    while pos < len(text):
+        if text.startswith("''\\", pos):
+            if literal is not None:
+                literal.append(text[segment_start:pos] + "    ")
+            pos += 4
+            segment_start = pos
+            continue
+        if text.startswith("'''", pos):
+            if literal is not None:
+                literal.append(text[segment_start:pos] + "   ")
+            pos += 3
+            segment_start = pos
+            continue
+        if text.startswith("''${", pos):
+            if literal is not None:
+                literal.append(text[segment_start:pos] + "    ")
+            pos += 4
+            segment_start = pos
+            continue
+        if text.startswith("${", pos):
+            if literal is not None:
+                literal.append(text[segment_start:pos])
+            interp_start = pos
+            pos = _scan_nix_region(path, text, pos + 2, len(text), violations, embedded_violations, in_interpolation=True)
+            if literal is not None:
+                literal.append("".join(ch if ch == "\n" else " " for ch in text[interp_start:pos]))
+            segment_start = pos
+            continue
+        if text.startswith("''", pos):
+            if literal is not None:
+                literal.append(text[segment_start:pos])
+            end = pos + 2
+            if language is not None:
+                base_line, base_col = _line_col(text, body_start)
+                _scan_embedded_nix_string(path, "".join(literal), base_line, base_col, language, embedded_violations)
+            return end
+        pos += 1
+    raise NixLexError(f"{path}: unterminated indented string")
+
+
+def _scan_nix_region(path, text, pos, end, violations, embedded_violations, in_interpolation):
+    depth = 0
+    while pos < end:
+        char = text[pos]
+        if char == "#":
+            pos = _consume_nix_line_comment(path, text, pos, violations)
+            continue
+        if text.startswith("/*", pos):
+            pos = _consume_nix_block_comment(path, text, pos, violations)
+            continue
+        if char == '"':
+            pos = _skip_nix_double_quoted_string(path, text, pos, violations, embedded_violations)
+            continue
+        if text.startswith("''", pos):
+            context_kind, context_name = _lookback_context(text, pos)
+            language = classify_nix_string_binding(context_kind, context_name, text, pos)
+            if language is None and context_kind == "call" and context_name in ("writeText", "writeTextDir"):
+                language = classify_write_text_by_name(text, pos)
+            code_shaped = _is_nix_code_shaped_context(context_kind, context_name)
+            if language is None and code_shaped:
+                line, col = _line_col(text, pos)
+                raise NixLexError(f"{path}: unclassified embedded code-shaped string at {line}:{col}")
+            pos = _skip_nix_indented_string(path, text, pos, violations, embedded_violations, language)
+            continue
+        if in_interpolation and char == "{":
+            depth += 1
+            pos += 1
+            continue
+        if in_interpolation and char == "}":
+            if depth == 0:
+                return pos + 1
+            depth -= 1
+            pos += 1
+            continue
+        pos += 1
+    if in_interpolation:
+        raise NixLexError(f"{path}: unterminated interpolation")
+    return pos
+
+
+def scan_nix(path, text, root=None):
+    raw_violations = []
+    embedded_violations = []
+    _scan_nix_region(path, text, 0, len(text), raw_violations, embedded_violations, in_interpolation=False)
+    violations = []
+    for line_number, col, comment_text in raw_violations:
+        if is_shebang_line("nix", line_number, col, comment_text):
+            continue
+        if match_directive("nix", comment_text):
+            continue
+        violations.append(Violation(path, line_number, col, "narrative-comment", comment_text))
+    violations.extend(embedded_violations)
+    return violations
+
+
+class JsLexError(Exception):
+    pass
+
+
+JS_VALUE_ENDING_KEYWORDS = {"this", "super", "true", "false", "null", "undefined"}
+JS_REGEX_PRECEDING_KEYWORDS = {
+    "return", "typeof", "instanceof", "in", "of", "new", "delete", "void",
+    "throw", "case", "do", "else", "yield", "await",
+}
+
+
+def _regex_allowed(last_significant):
+    return last_significant in (None, "operator", "keyword")
+
+
+def _skip_js_simple_string(path, text, pos, quote):
+    pos += 1
+    while pos < len(text):
+        if text[pos] == "\\":
+            pos += 2
+            continue
+        if text[pos] == quote:
+            return pos + 1
+        pos += 1
+    raise JsLexError(f"{path}: unterminated string literal")
+
+
+def _skip_js_regex_literal(path, text, pos):
+    pos += 1
+    in_class = False
+    while pos < len(text):
+        char = text[pos]
+        if char == "\\":
+            pos += 2
+            continue
+        if char == "[":
+            in_class = True
+        elif char == "]":
+            in_class = False
+        elif char == "/" and not in_class:
+            pos += 1
+            while pos < len(text) and text[pos].isalpha():
+                pos += 1
+            return pos
+        elif char == "\n":
+            raise JsLexError(f"{path}: unterminated regex literal")
+        pos += 1
+    raise JsLexError(f"{path}: unterminated regex literal")
+
+
+def _skip_js_template_literal(path, text, pos, violations):
+    pos += 1
+    while pos < len(text):
+        char = text[pos]
+        if char == "\\":
+            pos += 2
+            continue
+        if char == "`":
+            return pos + 1
+        if text.startswith("${", pos):
+            pos = _scan_js_region(path, text, pos + 2, len(text), violations, in_interpolation=True)
+            continue
+        pos += 1
+    raise JsLexError(f"{path}: unterminated template literal")
+
+
+def _scan_js_region(path, text, pos, end, violations, in_interpolation):
+    depth = 0
+    last_significant = None
+    while pos < end:
+        char = text[pos]
+        if text.startswith("//", pos):
+            start = pos
+            pos = text.find("\n", pos)
+            pos = end if pos == -1 else pos
+            line, col = _line_col(text, start)
+            violations.append((line, col, text[start:pos]))
+            continue
+        if text.startswith("/*", pos):
+            start = pos
+            close = text.find("*/", pos + 2)
+            if close == -1:
+                raise JsLexError(f"{path}: unterminated block comment")
+            pos = close + 2
+            line, col = _line_col(text, start)
+            violations.append((line, col, text[start:pos]))
+            continue
+        if char == "'":
+            pos = _skip_js_simple_string(path, text, pos, "'")
+            last_significant = "value"
+            continue
+        if char == '"':
+            pos = _skip_js_simple_string(path, text, pos, '"')
+            last_significant = "value"
+            continue
+        if char == "`":
+            pos = _skip_js_template_literal(path, text, pos, violations)
+            last_significant = "value"
+            continue
+        if char == "/" and _regex_allowed(last_significant):
+            pos = _skip_js_regex_literal(path, text, pos)
+            last_significant = "value"
+            continue
+        if char in ")]":
+            last_significant = "value"
+            pos += 1
+            continue
+        if in_interpolation and char == "{":
+            depth += 1
+            last_significant = "operator"
+            pos += 1
+            continue
+        if in_interpolation and char == "}":
+            if depth == 0:
+                return pos + 1
+            depth -= 1
+            last_significant = "value"
+            pos += 1
+            continue
+        if char == ".":
+            last_significant = "dot"
+            pos += 1
+            continue
+        if char.isalnum() or char == "_" or char == "$":
+            start = pos
+            while pos < end and (text[pos].isalnum() or text[pos] in "_$"):
+                pos += 1
+            word = text[start:pos]
+            if last_significant == "dot":
+                last_significant = "value"
+            elif word in JS_VALUE_ENDING_KEYWORDS:
+                last_significant = "value"
+            elif word in JS_REGEX_PRECEDING_KEYWORDS:
+                last_significant = "keyword"
+            else:
+                last_significant = "value"
+            continue
+        if not char.isspace():
+            last_significant = "operator"
+        pos += 1
+    if in_interpolation:
+        raise JsLexError(f"{path}: unterminated template interpolation")
+    return pos
+
+
+def scan_js(path, text, root=None):
+    violations = []
+    _scan_js_region(path, text, 0, len(text), violations, in_interpolation=False)
+    real_violations = []
+    for line, col, comment_text in violations:
+        if match_directive("js", comment_text):
+            continue
+        real_violations.append(Violation(path, line, col, "narrative-comment", comment_text))
+    return real_violations
+
+
+class YamlLexError(Exception):
+    pass
+
+
+BLOCK_SCALAR_HEADER = re.compile(r":\s*[|>][+-]?\s*$")
+
+
+def _yaml_scan_quoted(line, start, quote_char):
+    pos = start
+    length = len(line)
+    while pos < length:
+        char = line[pos]
+        if quote_char == '"':
+            if char == "\\":
+                if pos + 1 < length:
+                    pos += 2
+                    continue
+                return length, False
+            if char == '"':
+                return pos + 1, True
+            pos += 1
+        else:
+            if char == "'":
+                if pos + 1 < length and line[pos + 1] == "'":
+                    pos += 2
+                    continue
+                return pos + 1, True
+            pos += 1
+    return length, False
+
+
+def _yaml_skip_or_continue_quote(line, pos, quote_char):
+    resume_pos, closed = _yaml_scan_quoted(line, pos + 1, quote_char)
+    return resume_pos, not closed
+
+
+def _yaml_consume_quote_continuation(line, pending_dquote, pending_squote):
+    quote_char = '"' if pending_dquote else "'"
+    resume_pos, closed = _yaml_scan_quoted(line, 0, quote_char)
+    if closed:
+        return resume_pos, False, False
+    return resume_pos, pending_dquote, pending_squote
+
+
+def scan_yaml(path, text, root=None):
+    violations = []
+    lines = text.split("\n")
+    in_block_scalar = False
+    block_scalar_indent = None
+    pending_dquote = False
+    pending_squote = False
+    for line_number, line in enumerate(lines, start=1):
+        if in_block_scalar:
+            indent = len(line) - len(line.lstrip(" "))
+            if line.strip() == "" or indent > block_scalar_indent:
+                continue
+            in_block_scalar = False
+        if pending_dquote or pending_squote:
+            pos, pending_dquote, pending_squote = _yaml_consume_quote_continuation(
+                line, pending_dquote, pending_squote
+            )
+            if pending_dquote or pending_squote:
+                continue
+        else:
+            pos = 0
+        while pos < len(line):
+            char = line[pos]
+            if char == "#" and (pos == 0 or line[pos - 1] in " \t"):
+                comment_text = line[pos:]
+                if match_directive("yaml", comment_text):
+                    pos = len(line)
+                    continue
+                violations.append(Violation(path, line_number, pos, "narrative-comment", comment_text))
+                pos = len(line)
+                continue
+            if char == '"':
+                pos, pending_dquote = _yaml_skip_or_continue_quote(line, pos, '"')
+                continue
+            if char == "'":
+                pos, pending_squote = _yaml_skip_or_continue_quote(line, pos, "'")
+                continue
+            pos += 1
+        if BLOCK_SCALAR_HEADER.search(line):
+            in_block_scalar = True
+            block_scalar_indent = len(line) - len(line.lstrip(" "))
+    if pending_dquote or pending_squote:
+        raise YamlLexError(f"{path}: unterminated quoted scalar at EOF")
+    return violations
+
+
+class TomlLexError(Exception):
+    pass
+
+
+def _toml_skip_basic_string(path, text, pos):
+    pos += 1
+    while pos < len(text):
+        if text[pos] == "\\":
+            pos += 2
+            continue
+        if text[pos] == '"':
+            return pos + 1
+        pos += 1
+    raise TomlLexError(f"{path}: unterminated basic string")
+
+
+def _toml_skip_literal_string(path, text, pos):
+    pos += 1
+    while pos < len(text):
+        if text[pos] == "'":
+            return pos + 1
+        pos += 1
+    raise TomlLexError(f"{path}: unterminated literal string")
+
+
+def _toml_skip_multiline(path, text, pos, delimiter):
+    quote_char = delimiter[0]
+    escapes = delimiter == '"""'
+    pos += 3
+    length = len(text)
+    while pos < length:
+        if escapes and text[pos] == "\\":
+            pos += 2
+            continue
+        if text.startswith(delimiter, pos):
+            extra = 0
+            while extra < 2 and text[pos + 3 + extra:pos + 4 + extra] == quote_char:
+                extra += 1
+            return pos + 3 + extra
+        pos += 1
+    raise TomlLexError(f"{path}: unterminated multiline string {delimiter}")
+
+
+def scan_toml(path, text, root=None):
+    violations = []
+    pos = 0
+    length = len(text)
+    while pos < length:
+        char = text[pos]
+        if text.startswith('"""', pos):
+            pos = _toml_skip_multiline(path, text, pos, '"""')
+            continue
+        if text.startswith("'''", pos):
+            pos = _toml_skip_multiline(path, text, pos, "'''")
+            continue
+        if char == '"':
+            pos = _toml_skip_basic_string(path, text, pos)
+            continue
+        if char == "'":
+            pos = _toml_skip_literal_string(path, text, pos)
+            continue
+        if char == "#":
+            start = pos
+            newline = text.find("\n", pos)
+            pos = length if newline == -1 else newline
+            line, col = _line_col(text, start)
+            violations.append(Violation(path, line, col, "narrative-comment", text[start:pos]))
+            continue
+        pos += 1
+    return violations
+
+
+SCANNERS = {
+    "python": scan_python,
+    "shell": scan_shell,
+    "nix": scan_nix,
+    "js": scan_js,
+    "qml": scan_js,
+    "yaml": scan_yaml,
+    "toml": scan_toml,
+}
+
+EMBEDDED_LANGUAGE_SCANNERS = {
+    "shell": scan_shell,
+    "python": scan_python,
+    "toml": scan_toml,
+    "qml": scan_js,
+    "js": scan_js,
+}
+
+
+def main(argv):
+    root = Path(argv[1] if len(argv) > 1 else ".").resolve()
+    violations = []
+    unsupported = []
+    for path in discover_source_files(root):
+        language = classify_language(path, root)
+        if language is None:
+            continue
+        if language == "unsupported":
+            unsupported.append(path.relative_to(root))
+            continue
+        text = path.read_text(encoding="utf-8", errors="surrogateescape")
+        violations.extend(SCANNERS[language](path, text, root))
+    for path in unsupported:
+        print(f"source-comment-policy: unsupported maintained source language: {path}")
+    for violation in violations:
+        print(f"{violation.path}:{violation.line}:{violation.col}: {violation.kind}: {violation.text}")
+    if unsupported or violations:
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))

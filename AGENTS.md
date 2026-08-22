@@ -139,3 +139,11 @@ before committing.
 - A narrow adapter is preferred over a downstream presentation fork.
 - Universe is a downstream consumer and must never become a public module
   dependency.
+
+## Source Comments
+
+Do not add narrative source comments or docstrings.
+Express behavior through code and test names.
+Put durable rationale in `docs/` or an ADR.
+Preserve only checker-recognized machine directives (see CONTRIBUTING.md).
+Run the source-comment-policy check before publishing changes.

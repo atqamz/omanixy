@@ -1935,6 +1935,13 @@
             python3 ${./test/lib/recovery-check-helpers-selftest.py} ${./test/lib/recovery-check-helpers.py}
             touch "$out"
           '';
+          source-comment-policy-selftest = pkgs.runCommand "omanixy-source-comment-policy-selftest"
+            {
+              nativeBuildInputs = [ pkgs.python3 ];
+            } ''
+            python3 ${./test/lib/source-comment-policy-selftest.py} ${./scripts/check-source-comments}
+            touch "$out"
+          '';
           security-recovery-contract-helpers-selftest = pkgs.runCommand "omanixy-security-recovery-contract-helpers-selftest"
             {
               nativeBuildInputs = [ pkgs.python3 ];
