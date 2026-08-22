@@ -239,6 +239,14 @@ def test_shell_param_double_prefix_removal_accepted():
     assert scan_shell(Path("x.sh"), 'y="${x##prefix}"\n') == []
 
 
+def test_shell_paramexp_escaped_dquote_in_pattern_and_replacement_accepted():
+    assert scan_shell(Path("x.sh"), 'value=${value//\\"/\\\\\\"}\n') == []
+
+
+def test_shell_paramexp_escaped_dquote_in_pattern_accepted():
+    assert scan_shell(Path("x.sh"), '${x//\\"/y}\n') == []
+
+
 def test_shell_hash_in_single_quotes_accepted():
     assert scan_shell(Path("x.sh"), "y='# not a comment'\n") == []
 
@@ -798,6 +806,16 @@ def test_yaml_unterminated_squote_fails_closed():
         pass
     else:
         raise AssertionError("expected YamlLexError")
+
+
+def test_yaml_apostrophe_in_prose_not_treated_as_quote_open():
+    src = "key: the user's setting\nother: 1\n"
+    assert scan_yaml(Path("x.yaml"), src) == []
+
+
+def test_yaml_apostrophe_in_prose_does_not_hide_real_comment():
+    src = "key: the user's setting\n# real comment\nother: 1\n"
+    assert _kinds(scan_yaml(Path("x.yaml"), src)) == {"narrative-comment"}
 
 
 def test_toml_real_comment_rejected():

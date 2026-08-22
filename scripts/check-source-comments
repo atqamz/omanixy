@@ -471,6 +471,11 @@ class _ShellLexer:
 
     def _step_paramexp(self):
         char = self.peek()
+        if char == "\\":
+            self.advance()
+            if self.pos < len(self.text):
+                self.advance()
+            return
         if char == "}":
             self.advance()
             self.stack.pop()
@@ -910,6 +915,11 @@ class YamlLexError(Exception):
 
 
 BLOCK_SCALAR_HEADER = re.compile(r":\s*[|>][+-]?\s*$")
+YAML_QUOTE_OPEN_CONTEXT = re.compile(r"(^\s*|:\s*|(?:^|\s)-\s*|,\s*|\[\s*|\{\s*)$")
+
+
+def _yaml_quote_can_open(line, pos):
+    return bool(YAML_QUOTE_OPEN_CONTEXT.search(line[:pos]))
 
 
 def _yaml_scan_quoted(line, start, quote_char):
@@ -980,10 +990,10 @@ def scan_yaml(path, text, root=None):
                 violations.append(Violation(path, line_number, pos, "narrative-comment", comment_text))
                 pos = len(line)
                 continue
-            if char == '"':
+            if char == '"' and _yaml_quote_can_open(line, pos):
                 pos, pending_dquote = _yaml_skip_or_continue_quote(line, pos, '"')
                 continue
-            if char == "'":
+            if char == "'" and _yaml_quote_can_open(line, pos):
                 pos, pending_squote = _yaml_skip_or_continue_quote(line, pos, "'")
                 continue
             pos += 1
