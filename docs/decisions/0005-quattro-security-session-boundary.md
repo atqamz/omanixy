@@ -1123,3 +1123,401 @@ polkit-disabled default build's (not merely the core-only comparison above),
 that `fprintd` is unreachable from its closure, and that the compatibility
 root contains exactly the polkit plugin files and none of layer 3/4's lock
 or idle/notification surface.
+
+## Layer 6 implementation note
+
+`4-06-security-idle` implements the `security.idle` ledger entry only, as
+`programs.omanixy.security.idle.enable` in the Home Manager module
+(`modules/home/default.nix`).
+Disabled by default, and kept structurally separate from
+`programs.omanixy.features`, matching the independent-dimension model this
+ADR already records.
+Unlike layers 4/5, this layer introduces no new PAM service or system
+capability at all - idle is a session-only concern, so there is
+deliberately no NixOS-side idle option.
+
+### Bounded ownership split, not a wholesale idle-manager port
+
+The pinned idle service does five things this layer does not want as one
+bundle: idle detection, a terminal screensaver choreography, lock-on-idle,
+display wake/DPMS, and a stay-awake marker.
+Layer 6 owns exactly the first, the last, and a *bounded* version of the
+third: user-session idle detection, inhibitor-aware idle state, bounded
+lock-on-idle orchestration, and user-controlled stay-awake state, plus
+explicit conflict detection with known Home Manager idle managers.
+It owns none of suspend-on-idle, pre-suspend locking, logind inhibitors,
+system sleep policy, terminal screensaver presentation, display blanking,
+DPMS wake policy, keyboard backlight, or clamshell policy.
+The resulting ownership chain is: Quickshell `IdleMonitor` detects idle,
+the Layer-6 service decides when to request a lock, Layer 3's native lock
+owns `WlSessionLock`+DPMS, the consumer/NixOS owns suspend/power policy,
+and Layer 8 owns suspend/resume/recovery.
+This is a deliberately narrower boundary than importing Omarchy's wider
+idle/sleep policy wholesale would draw.
+
+Three upstream helpers are read but not ported, each for a distinct reason
+recorded here rather than left as an implicit gap.
+`bin/omarchy-launch-screensaver` (the entire terminal screensaver
+choreography - `ttfx`, `socat`, a terminal launcher, and Hyprland raw-event
+window tracking - is omitted outright; the adapted service has no
+screensaver process, timer, tracking, or Hyprland connection of any kind).
+`bin/omarchy-system-lock` (keyboard layout reset, 1Password locking, and
+`pkill` calls are not ported; the adapted service's only lock action is the
+direct argv `omanixy-shell lock lock`, the same generic IPC contract the
+ADR's layer-1 "Lock provider and keybinding boundary" section already
+anticipated).
+`bin/omarchy-system-wake` (not ported at all, together with the
+brightness/clamshell helpers it chains into, because Layer 6 never blanks
+the display in the first place and so has nothing of its own to wake -
+reintroducing a wake call here would create a second, competing DPMS owner
+alongside Layer 3's).
+A fourth pair, `bin/omarchy-system-sleep-monitor`/`bin/omarchy-system-sleep-lock`,
+is not read at all in this layer.
+Pre-suspend locking and system sleep policy are explicitly deferred to the
+layer 8 recovery/support gate, and no claim of suspend safety is made
+anywhere in this layer's evidence.
+
+### Home Manager option and the lock/daemon-conflict handshake
+
+`programs.omanixy.security.idle.enable` requires
+`programs.omanixy.security.lock.enable` to also be `true` - enforced by an
+`assertions` entry mirroring the layer 3/4/5 paired-capability pattern,
+because Layer 6 owns no lock provider of its own and would otherwise have
+nothing to request.
+Idle is structurally independent of `programs.omanixy.security.lock.fingerprint`
+and `programs.omanixy.security.polkit.agent` in both directions: enabling
+either changes nothing about whether idle may be enabled, and idle never
+implicitly enables lock, fingerprint, or polkit itself.
+
+Two further `assertions` entries guard against a known-declarative
+conflict, mirroring layer 5's `hyprpolkitagent`/`polkit-gnome` guard
+exactly: enabling idle alongside `services.hypridle.enable` or
+`services.swayidle.enable` fails Home Manager evaluation closed with an
+actionable message.
+Omanixy never sets, stops, or kills either daemon itself, and leaves both
+fully alone whenever the Quattro idle owner is off.
+`security-idle-hm` proves the resulting 10-case matrix (idle×lock crossed
+with both conflict directions, both cases collapsing to vacuous while idle
+itself is off, and idle's independence from fingerprint and polkit), and
+`security-contracts` statically guards that neither daemon is ever
+imperatively assigned or killed anywhere in this repository, alongside
+guards against reintroducing the screensaver, system-lock/-wake, or
+sleep-monitor vocabulary into the Home Manager module.
+
+### Bounded lock-retry policy as a pure module
+
+`packages/omanixy-shell/IdlePolicy.js` is a pure decision-logic module,
+mirroring the `FingerprintPolicy.js` precedent layer 4 established:
+`isExhausted`, `canRequestLock`, `classifyLockResult`, and
+`shouldRetryLockResult`, all pure functions over an explicit state object
+rather than closures over QML properties.
+The retry budget is `lockMaxAttempts: 3`, a non-repeating (`repeat: false`)
+1000ms `Timer`, reset only at the start of a fresh idle cycle (never by
+activity alone re-arming mid-cycle) - matching the "tested stop condition
+before promotion" lesson layer 4's ADR note already drew from the pinned
+fingerprint retry's unbounded 250ms loop.
+An attempt is consumed *before* the `Process` starts, so a denied
+`canRequestLock()` call - exhausted, terminal failure already recorded,
+activity, or stay-awake - never itself counts as an attempt.
+
+The lock IPC's own three-way result contract
+(`shell/plugins/lock/Service.qml`'s `lock()` function returns `"ok"`,
+`"missing-pam"`, or `"failed"` on exit 0, or a non-zero exit for anything
+else) is classified into exactly four outcomes.
+`ACCEPTED` (exit 0, `"ok"`) and `TERMINAL_UNAVAILABLE` (exit 0,
+`"missing-pam"` or `"failed"`) both stop retrying outright - a terminal
+failure is never reinterpreted as success, and never retried as if it
+might resolve itself - while `TRANSIENT_ERROR` (non-zero exit) and
+`INDETERMINATE` (exit 0 with empty or unrecognized output) both retry,
+bounded by the same 3-attempt budget.
+No "is already locked" probe precedes a lock request; Layer 3's own lock
+IPC is already idempotent, so adding one here would only introduce a
+TOCTOU window between probe and request for no benefit.
+`security-idle-policy` drives this exact decision sequence -
+`canRequestLock` → increment → classify → `shouldRetryLockResult` -
+through 100-iteration adversarial loops for both transient and
+indeterminate results (both converge on exactly 3 actual `Process` starts
+and 3 final attempts, never 100, with no retry re-permitted after
+exhaustion), a terminal failure on the very first attempt (1 start, no
+retry), activity or stay-awake arriving while a retry is armed (cancels
+it, and the cancelled cycle never resumes attempts on its own), and a
+fresh idle cycle after a prior exhaustion (attempts reset to zero, a new
+attempt is immediately permitted) - never a shortcut like
+`isExhausted(100, 3)`.
+`security-idle-qml-behavior` proves the real generated `Service.qml`
+drives this same module rather than a disconnected reimplementation of its
+rules.
+
+### Stay-awake marker persistence and write-serialization
+
+The pinned stay-awake marker path,
+`$HOME/.local/state/omarchy/indicators/stay-awake`, is preserved exactly -
+user session state, never `shell.json`.
+`omanixy-idle-state` (`packages/omanixy-shell/adapters/idle.bash`) is a new
+narrow adapter replacing every upstream bash-string-interpolated state
+read/write with three verbs only - `probe`, `set awake`, `set idle` - and
+no arbitrary path/eval surface: `probe` exits `0` when the marker exists,
+`1` when absent, `2` when a parent directory exists but is unsearchable
+(existence is unprovable, so this fails closed as indeterminate rather than
+silently reporting absence); `set awake`/`set idle` exit `0` on success or
+`2` on failure; any invalid verb, extra argument, or unset/relative `HOME`
+exits `2`.
+`security-idle-state` proves this ABI hermetically, including the
+unsearchable-parent case and idempotent repeats of both `set` verbs.
+
+The generated `Service.qml` preserves the pinned write-serialization
+invariant: while a persist `Process` is already running, a further
+desired-state request is coalesced into a single pending flag rather than
+queued or dropped, and the *last* requested value wins once the in-flight
+write completes.
+`security-idle-qml-behavior` proves the exact awake→idle→awake-while-first-
+write-in-flight sequence the ledger's evidence describes resolves to
+awake, not to the first or an intermediate request.
+`stayAwakeStateLoaded` starts `false` and `idleEnabled` is defined as
+`stayAwakeStateLoaded && !stayAwake`, so idle stays disabled - fail-safe -
+until the initial probe actually resolves, and a probe error (exit `2`)
+leaves it `false` rather than assuming either state.
+
+### Pinned Quickshell IdleMonitor ABI and the fail-safe no-protocol path
+
+`Quickshell.Wayland`'s `IdleMonitor` (backed by `ext-idle-notify-v1`) is
+the sole idle/activity source; `respectInhibitors: true` is set
+unconditionally in the generated `Service.qml`, with no option anywhere in
+this layer to disable it, and no wall-clock polling or
+Hyprland-client-based activity detection is introduced alongside it.
+`security-idle-quickshell-contract` proves, as static source-contract
+evidence against the pinned revision
+(`quickshell-mirror/quickshell@28771c7c74b42e20afca0b1b63980cb46515537c`),
+several properties.
+`respectInhibitors` defaults to `true` at the C++ property level.
+An unsupported protocol (no `IdleNotificationManager` instance) logs a
+warning and leaves the notification null - and therefore `isIdle` false,
+via the `notification ? notification->bIsIdle.value() : false` binding -
+with no fallback timer invented anywhere in the pinned source.
+The configured timeout is converted from seconds to milliseconds exactly
+once, clamped non-negative, immediately before being handed to the backend.
+`respectInhibitors` (after a protocol-version-too-old fallback that forces
+it back to `true` with a warning) selects between
+`get_idle_notification`/`get_input_idle_notification`.
+A missing seat yields `nullptr` rather than a crash or a retry loop.
+`idled`/`resumed` map directly onto `isIdle` with no debouncing.
+This is static evidence against the pinned revision, not a claim that a
+real compositor/inhibitor interaction has been exercised - that remains a
+required-before-promotion item, deferred to layer 8, exactly as layer 5's
+polkit registration proof already models for a live D-Bus collision.
+
+### Executable surface scanning: a bounded allowlist, learning the layer-5 lesson
+
+`scripts/scan-idle-executable-surface` needs a third scanner shape,
+distinct from both prior layers'.
+Unlike `security.polkit-agent`'s zero-tolerance invariant (no `Process`
+object may exist at all), idle legitimately needs bounded `Process` usage,
+so a first-token allowlist alone - the shape layer 3's lock scanner
+started from - is not the right invariant either.
+The scanner allowlists exactly four exact-argv command forms
+(`["omanixy-shell","lock","lock"]`, `["omanixy-idle-state","probe"]`,
+`["omanixy-idle-state","set","awake"]`, `["omanixy-idle-state","set","idle"]`)
+and, independently and unconditionally, rejects every
+`exec`/`execDetached`/`.run(...)` call regardless of argument shape - the
+same lesson layer 5's remediation drew when it discovered `Process.command`
+is not the only execution API a pinned `Process` type exposes.
+An exec/run call is checked *before* an overlapping array-literal match at
+the same position, so a `Quickshell.exec([...])` wrapping an
+otherwise-allowlisted-looking argv is still rejected, and rejected with
+the accurate diagnostic (an exec call was found) rather than a
+coincidentally-also-true but misleading one.
+`security-idle-executable-surface` proves the real generated `Service.qml`
+passes with exactly four command bindings and zero exec/run calls, and a
+permanent adversarial matrix covers unknown executables, reintroduced
+`bash -c`/`bash -lc` shapes, every removed upstream helper
+(`omarchy-launch-screensaver`, `omarchy-system-lock`, `omarchy-system-wake`),
+`hyprctl`/`pkill`/`systemctl`/`systemd-inhibit`/`dbus-monitor`, unknown
+`omarchy-*` names, dynamic (non-literal) command construction, every
+`exec`/`execDetached`/`.run(...)` shape (including one wrapping an
+otherwise-allowed-looking argv), and template literals - plus
+comment/string false-positive safety and a real disallowed call still
+being caught correctly when it follows fake command-looking text.
+
+### `shell.json` ownership and managed-plugin proofs
+
+`security-idle-shell-json` mirrors `security-lock-shell-json` exactly:
+enabling idle changes nothing about `shell.json` handling across the same
+five starting states (absent, canonical seed, seed with `omarchy.idle`
+manually re-enabled, a historical v1 config, and a broken store symlink).
+`home.activation.omanixyShellState` is unaffected by
+`cfg.security.idle.enable`, and the pre-existing `idle.lock` timeout
+override in `shell.json` is preserved untouched either way.
+`security-idle-managed-plugin` mirrors `security-lock-managed-plugin`:
+`omanixyManagedSecurityPlugins` gains `"omarchy.idle"` when the capability
+is enabled, so `isEnabled`/`setEnabled` behave identically to the lock
+model - including against a hostile registry state and, separately,
+against the real `PluginRegistry.rescan()` scan-and-merge algorithm
+pointed at a hostile third-party plugin claiming the reserved
+`omarchy.idle` id, which still resolves to the real first-party manifest
+under `shell/plugins/services/idle/` (not `plugins/idle`).
+
+### Timeout parsing hardening
+
+`scripts/patch-idle-service` hardens the pinned `secondsFromConfig`
+timeout parser beyond the upstream original: a value is floored *then*
+checked for being strictly positive, not the reverse.
+A naive "check-positive-then-floor" ordering would let a fractional input
+between 0 and 1 (for example `0.5`) floor to `0` and recreate exactly the
+near-immediate-lock danger a fallback exists to prevent.
+Any non-finite, `NaN`, zero, or negative value falls back to the pinned
+`300`-second default.
+`security-idle-model` drives the real generated `IdleModel.js` directly
+and locks this in with an explicit `0.5 -> 300` case alongside the rest of
+the matrix (`300 -> 300`, `10.9 -> 10`, `1 -> 1`, `0 -> 300`, `-1 -> 300`,
+`"bad" -> 300`, `Infinity -> 300`), and proves the dead screensaver-era
+`eventParts`/`screensaverWindowsAfter` helpers are gone from both the
+module body and its `module.exports` surface.
+
+### Closure and no-DPMS-widening proofs
+
+`security-idle-closure` compares core+lock against core+lock+idle - never
+core-only against idle-only, since idle requires lock - at the same raw
+store-path granularity layer 5's `security-polkit-core-only` established.
+`declaredRuntimeInputs` is exact-equal (idle rides entirely on the
+`coreutils`/`bash` the lock capability's own `runtimeInputs` already
+provides, adding no package of its own), the compatibility-bin entry set
+gains exactly one helper (`omanixy-idle-state`), no terminal emulator,
+`fprintd`, or dedicated notification-daemon package is reachable from the
+idle-enabled closure, and after excluding the exact, named set of
+Omanixy-owned derivations expected to change identity because the
+compatibility root's contents genuinely differ, every remaining external
+dependency store path is byte-identical between the two closures.
+`security-idle-no-dpms-widening` proves a narrower, absolute claim at the
+byte level: Layer 3's own lock plugin `Service.qml` is compared
+byte-for-byte before and after idle is enabled, and must be identical -
+idle adds zero code to the lock plugin, consistent with never taking on a
+second, competing DPMS/hyprctl/brightness/clamshell owner.
+
+### Remediation: revocable trust and Process failure-to-start handling
+
+A follow-up pass to this same layer closes a set of runtime
+failure/revocation gaps the initial review left open, without changing
+the architecture this ADR already accepted.
+
+Persisted stay-awake trust is now revocable, not merely fail-safe at
+startup. `markStayAwakeStateUnknown(reason)` is the one coherent function
+every indeterminate signal routes through: it sets
+`stayAwakeStateLoaded = false` (which makes `idleEnabled` false
+immediately via its own existing binding), cancels any in-flight idle
+cycle and armed retry, and - critically - never infers `stayAwake` either
+way. "Unknown" is a distinct state from "marker absent"; a probe exit `2`
+(or any other unexpected exit) and a probe/writer `Process` that fails to
+start both revoke trust through this same path, rather than the previous
+behavior of silently doing nothing on exit `2` and having no handling at
+all for a failed-to-start `Process`. Recovery is symmetric: a later probe
+that actually resolves `0` or `1` restores trust exactly as it does at
+startup. `test/security-idle-qml-behavior.sh` proves the revocation and
+recovery cycle against the real generated `Service.qml`, including the
+case where the idle monitor was genuinely idle at the moment trust was
+lost - the fake `IdleMonitor` was extended to model the pinned ABI's own
+real coupling (disabling the monitor destroys its live notification, so
+`isIdle` falls back to false while disabled), so recovery never
+auto-resumes a stale cycle or reuses an exhausted attempt budget; only the
+next genuine idle transition starts a fresh one.
+
+Static evidence against the pinned Quickshell `Process` source
+(`src/io/process.{hpp,cpp}`) - extending
+`security-idle-quickshell-contract` - shows the two ABI transitions this
+remediation depends on. A normal finish (`onFinished`) clears the process
+handle and emits `exited(exitCode, exitStatus)` before `runningChanged()`.
+A process that fails to start (`onErrorOccurred(QProcess::FailedToStart)`)
+emits *only* `runningChanged()` - `exited()` is never reachable from that
+path at all. There is no QML `onError` signal to catch this case; the
+service instead pairs an explicit per-operation `*AwaitingResult` property
+(`lockAwaitingResult`, `stayAwakeProbeAwaitingResult`,
+`stayAwakeWriterAwaitingResult`) with the real `onRunningChanged` handler,
+which schedules exactly one `Qt.callLater` reconciliation when `running`
+becomes false while still awaiting a result. The awaiting-result flag is
+cleared synchronously inside the ordinary `onExited` handler, so if a
+normal exit's own `runningChanged()` fires (in either order relative to
+`exited()`) before the deferred reconciliation runs, the reconciliation's
+own guard (`!process.running && stillAwaitingResult`) finds the flag
+already cleared and does nothing - a normal exit can never be
+misclassified as a failed start, regardless of signal ordering.
+`test/security-idle-qml-behavior.sh`'s fakes deliberately update the
+`running` property before emitting `exited(...)`, exercising exactly the
+ordering that would expose a race if the guard were missing.
+
+A lock `Process` that fails to start has already consumed its attempt (the
+attempt counter increments in `requestLock()` before `Process.running` is
+ever set), so it is treated exactly like `IdlePolicy`'s
+`TRANSIENT_ERROR`: the same bounded, non-repeating retry, never refunded,
+never a fourth attempt. A 100-iteration synthetic `FailedToStart` stress
+sequence in the QML behavior test still caps at exactly 3 actual attempts,
+mirroring `security-idle-policy`'s own stress matrix for ordinary exit
+failures. A probe or writer `Process` that fails to start revokes trust
+through the same `markStayAwakeStateUnknown` path an indeterminate exit
+code does; a writer failure while persisting either "idle enable" or
+"idle disable" leaves `stayAwakeStateLoaded = false` until a later probe
+actually confirms the state, so automatic lock-on-idle can never become
+optimistically active from an unconfirmed write. Exactly one coalesced
+pending desired-state request - never zero, never a loop - is attempted
+after a failed write, preserving the pre-existing latest-request-wins
+serialization invariant.
+
+Cancelling an idle cycle (activity, stay-awake, or a trust revocation)
+never kills an already-running lock `Process`; the pinned Layer-3 lock IPC
+is allowed to complete on its own, and its eventual result is processed
+normally against whatever state exists by then - a stale `ACCEPTED`/
+`TERMINAL_UNAVAILABLE` is simply a no-op once the cycle has already ended,
+and a stale retry request is denied by the same `cycleActive` guard every
+other retry decision already uses. Layer 6 never signals or otherwise
+interrupts an in-flight lock request.
+
+`scripts/scan-idle-executable-surface` gains a fourth zero-tolerance
+rejection alongside `exec`/`execDetached`/`run`:
+`Process.startDetached()`, the pinned ABI's real, parameterless,
+Q_INVOKABLE method that launches whatever `command` already holds
+completely untracked - no `running` transition, no `exited()` ever
+possible. Even wrapping an already-allowlisted argv (for example
+`p.startDetached()` on a `Process` whose `command` is the exact
+`["omanixy-shell", "lock", "lock"]` allowlist entry) is rejected outright,
+the same defense-in-depth lesson Layer 5's remediation drew for `exec`/
+`execDetached`/`run`: an allowlisted argv is not itself proof of a safe
+execution path if a different, untracked API can still launch it.
+
+Finally, `IdleModel.js`'s `secondsFromConfig` gains an upper bound of
+`2147483` seconds - `floor(INT_MAX / 1000)`, the largest whole-second
+value that survives the pinned Quickshell backend's own
+`static_cast<int>(timeout * 1000)` conversion
+(`src/wayland/idle_notify/monitor.cpp`) before the `quint32` cast. This
+ceiling is derived from that pinned arithmetic range, not an Omanixy
+policy preference; any configured value past it falls back to the pinned
+300-second default exactly like any other invalid input, preserving the
+existing fail-safe behavior rather than silently clamping to the boundary.
+
+`security-idle-package-invariant` closes the one remaining structural
+gap: a direct Nix evaluation of `packages/omanixy-shell`'s own
+`idleRequiresLockValid` assertion, forced to `.drvPath` with a
+hand-constructed `{ idle = true; lock = false; }` security attrset that
+never goes through `programs.omanixy.security.idle` or the Home Manager
+assertion matrix at all - proving the package-level invariant holds for
+any caller, not only ones that reach it through Home Manager.
+
+### Scope
+
+This layer promotes `security.idle` from `blocked`/`blocked` to its
+already-declared target of `adapted`/`experimental`, and no other
+`security.*` ledger entry; `security.notification-daemon` and
+`security.recovery` remain `blocked`.
+`experimental`, not `supported`, because every proof in this layer is
+hermetic and fake-backend: no real nested Wayland idle transition against
+a live `ext-idle-notify-v1` compositor, no real inhibitor actually
+suppressing an idle transition, no real activity or lock-on-idle against a
+live session, no monitor hotplug/seat change, no suspend/resume while a
+cycle or lock request is in flight, no Quickshell crash/restart during an
+active idle cycle, and no real declarative-conflict scenario (an actual
+running `hypridle`/`swayidle` alongside the Quattro idle owner) has been
+exercised.
+These remain the ledger's `required_before_promotion` items for this
+entry, and are the layer 8 recovery/support gate's responsibility, not a
+new follow-up issue.
+Omanixy still owns no suspend-on-idle, pre-suspend locking, notification
+daemon, or recovery surface, and adds no new systemd unit; the native lock
+this layer requests continues to run in-process inside the existing
+`omanixy-shell` user service exactly as layer 3 left it.

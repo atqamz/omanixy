@@ -20,6 +20,9 @@ let
     })
     // (lib.optionalAttrs cfg.security.polkit.agent.enable {
       polkitAgent = true;
+    })
+    // (lib.optionalAttrs cfg.security.idle.enable {
+      idle = true;
     });
   runtime = omanixyRuntimeFor cfg.features (
     if securitySelection == { }
@@ -215,6 +218,48 @@ in
         so it never assumes or requires fingerprint hardware.
       '';
     };
+
+    security.idle.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Select the native Quattro idle owner
+        (shell/plugins/services/idle) for this session: an experimental,
+        disabled-by-default capability that requests the Omanixy native
+        lock after a period of user inactivity.
+
+        This is user-session idle detection and bounded lock-on-idle
+        orchestration only. It respects Wayland idle inhibitors (an
+        application that actively inhibits idle through the compositor
+        protocol keeps the session from being considered idle at all;
+        there is no option to turn that off). It does not suspend the
+        machine, does not own display DPMS blanking or wake, and does not
+        own any system sleep policy - those remain entirely the
+        consumer's or NixOS's own responsibility, exactly as before this
+        option existed.
+
+        This option requires `programs.omanixy.security.lock.enable` to
+        also be `true`: Layer 6 owns no lock provider of its own, only
+        bounded orchestration of the already-audited, already-reviewed
+        Layer-3 native lock IPC. There is no configurable alternative lock
+        provider, dispatcher, or arbitrary shell command - a consumer using
+        an external lock provider may continue using an external idle
+        manager instead of this option. It is otherwise fully independent
+        of `programs.omanixy.security.polkit.agent.enable` and
+        `programs.omanixy.security.lock.fingerprint.enable`: enabling idle
+        never implies or requires either.
+
+        Enabling this option asserts that no other Home Manager-managed
+        idle daemon this repository knows how to detect declaratively
+        (`services.hypridle.enable`, `services.swayidle.enable`) is also
+        enabled, since two idle managers intentionally competing to decide
+        when the session is idle is never correct. Omanixy does not stop,
+        mask, or otherwise mutate another idle manager's unit on your
+        behalf, and does not attempt to detect an idle manager it has no
+        declarative option for; it only refuses to evaluate a configuration
+        that declares a known-conflicting one alongside this option.
+      '';
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -370,6 +415,40 @@ in
           services.polkit-gnome.enable is also true. Both are session polkit
           authentication agents and must not intentionally compete. Disable
           one; Omanixy will not stop or kill the other agent for you.
+        '';
+      }
+      {
+        assertion = !cfg.security.idle.enable || cfg.security.lock.enable;
+        message = ''
+          programs.omanixy.security.idle.enable is true, but
+          programs.omanixy.security.lock.enable is not. Layer 6 owns no
+          lock provider of its own - only bounded orchestration of the
+          native Omanixy lock's already-audited IPC - so idle-on-inactivity
+          has nothing to request. Enable
+          programs.omanixy.security.lock.enable, or leave
+          programs.omanixy.security.idle.enable at its default (false) and
+          use an external idle manager with your existing lock provider
+          instead.
+        '';
+      }
+      {
+        assertion = !cfg.security.idle.enable
+          || !(config.services.hypridle.enable or false);
+        message = ''
+          programs.omanixy.security.idle.enable is true while
+          services.hypridle.enable is also true. Both are session idle
+          managers and must not intentionally compete. Disable one; Omanixy
+          will not stop or mask the other idle manager for you.
+        '';
+      }
+      {
+        assertion = !cfg.security.idle.enable
+          || !(config.services.swayidle.enable or false);
+        message = ''
+          programs.omanixy.security.idle.enable is true while
+          services.swayidle.enable is also true. Both are session idle
+          managers and must not intentionally compete. Disable one; Omanixy
+          will not stop or mask the other idle manager for you.
         '';
       }
     ];

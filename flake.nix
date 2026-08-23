@@ -87,6 +87,21 @@
           coreLockRuntime = runtimeForSecurity system [ "core" ] { lock = true; };
           polkitRuntime = runtimeForSecurity system null { polkitAgent = true; };
           corePolkitRuntime = runtimeForSecurity system [ "core" ] { polkitAgent = true; };
+          idleRuntime = runtimeForSecurity system null { lock = true; idle = true; };
+          coreLockIdleRuntime = runtimeForSecurity system [ "core" ] { lock = true; idle = true; };
+          # Section 15/30-31 of the Layer-6 remediation: proves
+          # packages/omanixy-shell/default.nix's own idleRequiresLockValid
+          # assertion fires for a caller that constructs the security
+          # attrset directly, bypassing programs.omanixy.security.idle and
+          # the Home Manager assertion matrix entirely. Both force real
+          # evaluation (.drvPath) rather than merely building an
+          # unevaluated attrset.
+          packageIdleWithoutLockEval = builtins.tryEval (
+            builtins.seq (runtimeForSecurity system null { idle = true; lock = false; }).drvPath true
+          );
+          packageIdleWithLockEval = builtins.tryEval (
+            builtins.seq (runtimeForSecurity system null { idle = true; lock = true; }).drvPath true
+          );
           capabilityRuntimePaths = pkgs.writeText "omanixy-capability-runtime-paths" (builtins.toJSON {
             "audio-control" = toString audioRuntime;
             "audio-default-output" = toString audioRuntime;
@@ -125,6 +140,7 @@
           polkitRuntimeClosureInfo = pkgs.closureInfo { rootPaths = [ polkitRuntime ]; };
           corePolkitRuntimeClosureInfo = pkgs.closureInfo { rootPaths = [ corePolkitRuntime ]; };
           coreRuntimeClosureInfo = pkgs.closureInfo { rootPaths = [ coreRuntime ]; };
+          coreLockIdleRuntimeClosureInfo = pkgs.closureInfo { rootPaths = [ coreLockIdleRuntime ]; };
           compatibilityRoot = runtime.passthru.omarchyCompatibilityRoot;
           baselineConfigForTests = builtins.removeAttrs
             (builtins.fromJSON (builtins.readFile ./upstream/shell-baseline.json))
@@ -705,6 +721,74 @@
           integratedPolkitAgentOffHyprNixosConfiguration = integratedPolkitHomeManagerNixosConfigurationFor false false true false;
           # 10/12: agent off, polkit-gnome on - PASS, same reasoning.
           integratedPolkitAgentOffGnomeNixosConfiguration = integratedPolkitHomeManagerNixosConfigurationFor false false false true;
+          # Layer 6 (idle): integrated NixOS + Home Manager matrix, crossed
+          # over lock, idle, the two known-conflicting Home Manager idle
+          # daemons, fingerprint, and the polkit agent. The paired NixOS
+          # capability for whichever of lock/fingerprint/polkit is exercised
+          # as "on" in a given case is always provisioned alongside it, so
+          # each case isolates the Layer-6-specific assertions under test
+          # (idle-requires-lock, hypridle conflict, swayidle conflict)
+          # rather than re-tripping the already-proven Layer 3/4/5 pairing
+          # assertions.
+          integratedIdleHomeManagerNixosConfigurationFor = lockEnabled: idleEnabled: hypridleEnabled: swayidleEnabled: fingerprintEnabled: polkitAgentEnabled: nixpkgs.lib.nixosSystem {
+            inherit system;
+            modules = [
+              self.nixosModules.default
+              bootableStub
+              home-manager.nixosModules.home-manager
+              {
+                nixpkgs.hostPlatform = system;
+                system.stateVersion = "26.11";
+                programs.omanixy.security.pam.password.enable = lockEnabled;
+                programs.omanixy.security.pam.fingerprint.enable = fingerprintEnabled;
+                programs.omanixy.security.polkit.system.enable = polkitAgentEnabled;
+                users.users."omanixy-test" = {
+                  isNormalUser = true;
+                  home = "/build/omanixy-test";
+                };
+                home-manager.useGlobalPkgs = true;
+                home-manager.useUserPackages = true;
+                home-manager.users."omanixy-test" = {
+                  imports = [ self.homeManagerModules.default ];
+                  home.username = "omanixy-test";
+                  home.homeDirectory = "/build/omanixy-test";
+                  home.stateVersion = "25.11";
+                  programs.omanixy.enable = true;
+                  programs.omanixy.security.lock.enable = lockEnabled;
+                  programs.omanixy.security.lock.fingerprint.enable = fingerprintEnabled;
+                  programs.omanixy.security.idle.enable = idleEnabled;
+                  programs.omanixy.security.polkit.agent.enable = polkitAgentEnabled;
+                  services.hypridle.enable = hypridleEnabled;
+                  services.swayidle.enable = swayidleEnabled;
+                };
+              }
+            ];
+          };
+          # 1/10: everything off - PASS (baseline).
+          integratedIdleAllOffNixosConfiguration = integratedIdleHomeManagerNixosConfigurationFor false false false false false false;
+          # 2/10: idle on, lock off - FAIL (idle requires the native lock).
+          integratedIdleOnLockOffNixosConfiguration = integratedIdleHomeManagerNixosConfigurationFor false true false false false false;
+          # 3/10: idle on, lock on, no conflicting daemons - PASS (minimal valid idle).
+          integratedIdleOnLockOnNixosConfiguration = integratedIdleHomeManagerNixosConfigurationFor true true false false false false;
+          # 4/10: idle+lock on, hypridle also on - FAIL (known-conflict assertion).
+          integratedIdleOnHypridleConflictNixosConfiguration = integratedIdleHomeManagerNixosConfigurationFor true true true false false false;
+          # 5/10: idle+lock on, swayidle also on - FAIL (known-conflict assertion).
+          integratedIdleOnSwayidleConflictNixosConfiguration = integratedIdleHomeManagerNixosConfigurationFor true true false true false false;
+          # 6/10: idle+lock on, both hypridle and swayidle on - FAIL (both conflicts at once).
+          integratedIdleOnBothConflictNixosConfiguration = integratedIdleHomeManagerNixosConfigurationFor true true true true false false;
+          # 7/10: idle off, hypridle and swayidle both on - PASS (the conflict
+          # assertions are vacuous while Layer 6's idle owner itself is off).
+          integratedIdleOffBothDaemonsOnNixosConfiguration = integratedIdleHomeManagerNixosConfigurationFor false false true true false false;
+          # 8/10: idle+lock on, fingerprint also on - PASS (idle is
+          # independent of fingerprint; enabling it changes nothing about
+          # whether idle may be enabled).
+          integratedIdleOnFingerprintOnNixosConfiguration = integratedIdleHomeManagerNixosConfigurationFor true true false false true false;
+          # 9/10: idle+lock on, polkit agent also on - PASS (idle is
+          # independent of polkit for the same reason).
+          integratedIdleOnPolkitOnNixosConfiguration = integratedIdleHomeManagerNixosConfigurationFor true true false false false true;
+          # 10/10: lock on, idle off - PASS (lock remains valid on its own
+          # without idle ever being involved).
+          integratedIdleOffLockOnNixosConfiguration = integratedIdleHomeManagerNixosConfigurationFor true false false false false false;
           # Layer 5 (polkit) x Layer 4 (fingerprint) independence: fingerprint
           # and polkit system capability both enabled - proves enabling
           # polkit changes nothing about the fingerprint PAM service already
@@ -779,6 +863,12 @@
           # proof above.
           polkitEnabledActivationScript = pkgs.writeShellScript "omanixy-shell-polkit-state-activation"
             integratedPolkitOnOnNixosConfiguration.config.home-manager.users."omanixy-test".home.activation.omanixyShellState.data;
+          # Extracted from the integrated lock-on/idle-on configuration -
+          # proves enabling the idle capability never changes shell.json
+          # handling either, exactly mirroring the lock and polkit proofs
+          # above.
+          idleEnabledActivationScript = pkgs.writeShellScript "omanixy-shell-idle-state-activation"
+            integratedIdleOnLockOnNixosConfiguration.config.home-manager.users."omanixy-test".home.activation.omanixyShellState.data;
           serviceUnit = pkgs.writeText "omanixy-shell.service" ''
             [Unit]
             Description=${service.Unit.Description}
@@ -1428,6 +1518,148 @@
             } ''
             PYTHON=${pkgs.python3}/bin/python3 ${pkgs.bash}/bin/bash ${./test/security-polkit-qml-behavior.sh} \
               ${polkitRuntime.passthru.omarchyCompatibilityRoot} ${polkitRuntime}/bin/quickshell
+            touch "$out"
+          '';
+          security-idle-hm = pkgs.runCommand "omanixy-security-idle-hm"
+            {
+              allOffOk = if toplevelForced integratedIdleAllOffNixosConfiguration then "true" else "false";
+              idleOnLockOffOk = if toplevelForced integratedIdleOnLockOffNixosConfiguration then "true" else "false";
+              idleOnLockOnOk = if toplevelForced integratedIdleOnLockOnNixosConfiguration then "true" else "false";
+              hypridleConflictOk = if toplevelForced integratedIdleOnHypridleConflictNixosConfiguration then "true" else "false";
+              swayidleConflictOk = if toplevelForced integratedIdleOnSwayidleConflictNixosConfiguration then "true" else "false";
+              bothConflictOk = if toplevelForced integratedIdleOnBothConflictNixosConfiguration then "true" else "false";
+              idleOffBothDaemonsOnOk = if toplevelForced integratedIdleOffBothDaemonsOnNixosConfiguration then "true" else "false";
+              idleOnFingerprintOnOk = if toplevelForced integratedIdleOnFingerprintOnNixosConfiguration then "true" else "false";
+              idleOnPolkitOnOk = if toplevelForced integratedIdleOnPolkitOnNixosConfiguration then "true" else "false";
+              idleOffLockOnOk = if toplevelForced integratedIdleOffLockOnNixosConfiguration then "true" else "false";
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-idle-hm.sh} \
+              "$allOffOk" "$idleOnLockOffOk" "$idleOnLockOnOk" \
+              "$hypridleConflictOk" "$swayidleConflictOk" "$bothConflictOk" \
+              "$idleOffBothDaemonsOnOk" "$idleOnFingerprintOnOk" "$idleOnPolkitOnOk" \
+              "$idleOffLockOnOk"
+            touch "$out"
+          '';
+          security-idle-shell-json = pkgs.runCommand "omanixy-security-idle-shell-json"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.diffutils pkgs.jq ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-idle-shell-json.sh} \
+              ${activationScript} ${idleEnabledActivationScript} ${storeConfig}
+            touch "$out"
+          '';
+          security-idle-managed-plugin = pkgs.runCommand "omanixy-security-idle-managed-plugin"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.findutils ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-idle-managed-plugin.sh} \
+              ${idleRuntime.passthru.omarchyCompatibilityRoot} ${idleRuntime}/bin/quickshell \
+              ${compatibilityRoot} ${runtime}/bin/quickshell
+            touch "$out"
+          '';
+          security-idle-model = pkgs.runCommand "omanixy-security-idle-model"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.nodejs ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-idle-model.sh} \
+              ${idleRuntime.passthru.omarchyCompatibilityRoot}/shell/plugins/services/idle/IdleModel.js
+            touch "$out"
+          '';
+          security-idle-policy = pkgs.runCommand "omanixy-security-idle-policy"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.nodejs ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-idle-policy.sh} \
+              ${idleRuntime.passthru.omarchyCompatibilityRoot}/shell/plugins/services/idle/IdlePolicy.js
+            touch "$out"
+          '';
+          security-idle-state = pkgs.runCommand "omanixy-security-idle-state"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-idle-state.sh} \
+              ${./packages/omanixy-shell/adapters/idle.bash}
+            touch "$out"
+          '';
+          security-idle-executable-surface = pkgs.runCommand "omanixy-security-idle-executable-surface"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.python3 ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-idle-executable-surface.sh} \
+              ${./scripts/scan-idle-executable-surface} \
+              ${idleRuntime.passthru.omarchyCompatibilityRoot}/shell/plugins/services/idle/Service.qml \
+              ${pkgs.python3}/bin/python3 ${./scripts}
+            touch "$out"
+          '';
+          security-idle-closure = pkgs.runCommand "omanixy-security-idle-closure"
+            {
+              lockClosurePaths = "${coreLockRuntimeClosureInfo}/store-paths";
+              lockIdleClosurePaths = "${coreLockIdleRuntimeClosureInfo}/store-paths";
+              lockDeclaredRuntimeInputs = pkgs.writeText "omanixy-lock-only-declared-runtime-inputs.json" coreLockRuntime.passthru.declaredRuntimeInputs;
+              lockIdleDeclaredRuntimeInputs = pkgs.writeText "omanixy-lock-idle-declared-runtime-inputs.json" coreLockIdleRuntime.passthru.declaredRuntimeInputs;
+              # The exact, named set of Omanixy-owned derivations expected to
+              # change store path when the compatibility root's contents
+              # change (here: the idle plugin becoming reachable) - not a
+              # package-name pattern, mirroring corePolkitExpectedChanged
+              # above.
+              lockExpectedChanged = pkgs.writeText "omanixy-lock-only-expected-changed" (nixpkgs.lib.concatMapStringsSep "\n" toString [
+                coreLockRuntime
+                coreLockRuntime.passthru.omarchyCompatibilityRoot
+                coreLockRuntime.passthru.compatibilityBin
+                coreLockRuntime.passthru.ipc
+                coreLockRuntime.passthru.compatAdapter
+                coreLockRuntime.passthru.runtime
+              ]);
+              lockIdleExpectedChanged = pkgs.writeText "omanixy-lock-idle-expected-changed" (nixpkgs.lib.concatMapStringsSep "\n" toString [
+                coreLockIdleRuntime
+                coreLockIdleRuntime.passthru.omarchyCompatibilityRoot
+                coreLockIdleRuntime.passthru.compatibilityBin
+                coreLockIdleRuntime.passthru.ipc
+                coreLockIdleRuntime.passthru.compatAdapter
+                coreLockIdleRuntime.passthru.runtime
+              ]);
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.findutils pkgs.diffutils pkgs.jq ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-idle-closure.sh} \
+              ${coreLockIdleRuntime.passthru.compatibilityBin} ${coreLockRuntime.passthru.compatibilityBin} \
+              "$lockClosurePaths" "$lockIdleClosurePaths" \
+              "$lockDeclaredRuntimeInputs" "$lockIdleDeclaredRuntimeInputs" \
+              "$lockExpectedChanged" "$lockIdleExpectedChanged"
+            touch "$out"
+          '';
+          security-idle-no-dpms-widening = pkgs.runCommand "omanixy-security-idle-no-dpms-widening"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.diffutils ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-idle-no-dpms-widening.sh} \
+              ${coreLockRuntime.passthru.omarchyCompatibilityRoot}/shell/plugins/lock/Service.qml \
+              ${coreLockIdleRuntime.passthru.omarchyCompatibilityRoot}/shell/plugins/lock/Service.qml
+            touch "$out"
+          '';
+          security-idle-package-invariant = pkgs.runCommand "omanixy-security-idle-package-invariant"
+            {
+              idleWithoutLockOk = if packageIdleWithoutLockEval.success then "true" else "false";
+              idleWithLockOk = if packageIdleWithLockEval.success then "true" else "false";
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-idle-package-invariant.sh} \
+              "$idleWithoutLockOk" "$idleWithLockOk"
+            touch "$out"
+          '';
+          security-idle-quickshell-contract = pkgs.runCommand "omanixy-security-idle-quickshell-contract"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.gawk ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-idle-quickshell-contract.sh} ${quickshell}
+            touch "$out"
+          '';
+          security-idle-qml-behavior = pkgs.runCommand "omanixy-security-idle-qml-behavior"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.python3 ];
+            } ''
+            PYTHON=${pkgs.python3}/bin/python3 ${pkgs.bash}/bin/bash ${./test/security-idle-qml-behavior.sh} \
+              ${idleRuntime.passthru.omarchyCompatibilityRoot} ${idleRuntime}/bin/quickshell
             touch "$out"
           '';
           quattro-contract-audit = pkgs.runCommand "omanixy-quattro-contract-audit"

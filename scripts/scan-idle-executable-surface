@@ -1,0 +1,219 @@
+#!/usr/bin/env python3
+"""Fail-closed scan of the patched Service.qml's process-execution surface
+for the Quattro idle owner.
+
+Unlike security.polkit's scanner (which proves an executable surface of
+zero, because the adapted polkit agent needs none at all), the adapted idle
+service legitimately owns three Process objects with real command
+bindings: the Layer-3 lock IPC call, and the omanixy-idle-state probe/set
+calls. This scanner therefore keeps security.lock's allowlist model - a
+bounded set of literal, audited direct-argv commands - rather than
+requiring zero Process objects, but incorporates the Layer-5 lesson that a
+command-binding inventory alone is not sufficient: the pinned Quickshell
+Process type also exposes Q_INVOKABLE exec(...), so this scanner
+additionally rejects any exec/execDetached/run call outright, anywhere in
+the file, regardless of arguments - the adapted idle service's own code
+never calls any of them, only ever sets `command:`/`.command =` and
+`running = true` declaratively/procedurally.
+
+Unlike security.lock's per-first-token allowlist (which allows a literal
+executable name in position 0 with otherwise-checked trailing arguments),
+this scanner allowlists exact, complete argv arrays: "omanixy-shell" and
+"omanixy-idle-state" are only ever invoked with one of a small, fixed set
+of full argument lists (see ALLOWED_EXACT_ARGVS), so nothing narrower than
+exact-array identity proves the intended contract.
+
+Discovery reuses the shared QML source-discovery lexical primitives
+(scripts/source_discovery.py) for comment/string masking and the shared
+ARRAY_COMMAND_RE/DYNAMIC_*_RE regexes for locating command bindings, the
+same way scan-lock-executable-surface does; the exec/run-rejection and
+exact-argv-allowlist policy are local to this script and do not modify
+scripts/source_discovery.py.
+"""
+
+from __future__ import annotations
+
+import re
+import sys
+from pathlib import Path
+
+import source_discovery
+
+STRING_RE = re.compile(r'"(?:\\.|[^"\\])*"')
+
+ALLOWED_EXACT_ARGVS = {
+    ("omanixy-shell", "lock", "lock"),
+    ("omanixy-idle-state", "probe"),
+    ("omanixy-idle-state", "set", "awake"),
+    ("omanixy-idle-state", "set", "idle"),
+}
+
+# Zero tolerance, regardless of arguments: the adapted idle service's own
+# code never calls exec/execDetached/run/startDetached on anything, only
+# ever declares command:/.command= and toggles running. A bare Process
+# object with no command property at all could otherwise still execute
+# arbitrary commands via one of these (see security.polkit's Layer-5
+# remediation). Process.startDetached() launches the process's already-set
+# `command` completely untracked - Quickshell never sees it exit, `running`
+# never becomes true, and it survives Quickshell dying - so even an
+# otherwise-allowlisted argv reaching it would be a real bypass: a tracked,
+# bounded lock/probe/writer invocation would silently become an untracked
+# one. It is a bare, parameterless call, so it never carries a command
+# array of its own to inspect.
+EXEC_CALL_RE = re.compile(r"\b(?:[A-Za-z_][A-Za-z0-9_]*\.)?exec(?:Detached)?\s*\(")
+RUN_CALL_RE = re.compile(r"\b(?:[A-Za-z_][A-Za-z0-9_]*\.)?run\s*\(")
+START_DETACHED_CALL_RE = re.compile(r"\b(?:[A-Za-z_][A-Za-z0-9_]*\.)?startDetached\s*\(")
+
+DYNAMIC_PATTERNS = (
+    ("dynamic command: binding", source_discovery.DYNAMIC_COMMAND_RE),
+    ("dynamic procedural .command = assignment", source_discovery.DYNAMIC_ASSIGNMENT_RE),
+)
+
+
+def fail(message: str) -> None:
+    print(f"idle executable surface: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def line_of(text: str, offset: int) -> int:
+    return text.count("\n", 0, offset) + 1
+
+
+def unescape(literal: str) -> str:
+    return literal[1:-1].replace('\\"', '"').replace("\\\\", "\\")
+
+
+def tokenize(array_body: str) -> list[tuple[str, bool]]:
+    """Split a command array body into ordered (value, is_literal) tokens,
+    mirroring scan-lock-executable-surface's own tokenizer (kept local and
+    duplicated rather than shared, matching this repository's convention of
+    one bespoke policy - including its own lexing helpers where needed -
+    per audited security surface)."""
+
+    tokens: list[tuple[str, bool]] = []
+    pos = 0
+    length = len(array_body)
+    while pos < length:
+        while pos < length and array_body[pos] in " \t\r\n,":
+            pos += 1
+        if pos >= length:
+            break
+        match = STRING_RE.match(array_body, pos)
+        if match:
+            tokens.append((unescape(match.group(0)), True))
+            pos = match.end()
+            continue
+        end = pos
+        depth = 0
+        quote = ""
+        while end < length:
+            char = array_body[end]
+            if quote:
+                if char == "\\" and end + 1 < length:
+                    end += 2
+                    continue
+                if char == quote:
+                    quote = ""
+                end += 1
+                continue
+            if char == "," and depth == 0:
+                break
+            if char in "\"'":
+                quote = char
+            elif char in "([":
+                depth += 1
+            elif char in ")]":
+                depth -= 1
+            end += 1
+        tokens.append((array_body[pos:end].strip(), False))
+        pos = end
+    return tokens
+
+
+def check_command(tokens: list[tuple[str, bool]], context: str) -> None:
+    if not tokens:
+        fail(f"{context}: empty command array")
+
+    if not all(literal for _value, literal in tokens):
+        values = [value for value, _literal in tokens]
+        fail(f"{context}: dynamic executable shape ({values!r})")
+
+    values = tuple(value for value, _literal in tokens)
+    if values in ALLOWED_EXACT_ARGVS:
+        return
+
+    if "bash" in values or "sh" in values:
+        fail(f"{context}: shell interpreter reachable ({list(values)!r})")
+
+    fail(f"{context}: command array is not one of the allowed exact argv forms ({list(values)!r})")
+
+
+def scan(text: str) -> int:
+    try:
+        stripped = source_discovery.strip_comments(text, shell=False)
+        masked = source_discovery.mask_string_literals(stripped)
+    except source_discovery.UnsafeSource as exc:
+        fail(f"unsafe source, cannot prove executable surface is closed: {exc}")
+        raise  # unreachable, fail() always raises SystemExit
+
+    if "`" in masked:
+        fail("template literals are unsupported in security.idle executable source")
+
+    matches: list[tuple[int, str, re.Match[str]]] = []
+    for match in source_discovery.ARRAY_COMMAND_RE.finditer(masked):
+        matches.append((match.start(), "array", match))
+    for label, pattern in DYNAMIC_PATTERNS:
+        for match in pattern.finditer(masked):
+            matches.append((match.start(), label, match))
+    for match in EXEC_CALL_RE.finditer(masked):
+        matches.append((match.start(), "exec/execDetached call", match))
+    for match in RUN_CALL_RE.finditer(masked):
+        matches.append((match.start(), "run call", match))
+    for match in START_DETACHED_CALL_RE.finditer(masked):
+        matches.append((match.start(), "startDetached call", match))
+    # A Quickshell.exec(...)/execDetached(...) call with a literal array
+    # argument also matches ARRAY_COMMAND_RE (that shape is what security.
+    # lock's own allowlist model inspects). Sorting the exec/run/
+    # startDetached-call kinds first at a tied start position means such a
+    # call is always reported as such - even when an array it names would
+    # otherwise be an allowed direct binding - rather than being masked by
+    # the array check either accepting or independently rejecting the same
+    # span for an unrelated reason.
+    exec_kinds = ("exec/execDetached call", "run call", "startDetached call")
+    matches.sort(key=lambda item: (item[0], item[1] not in exec_kinds))
+
+    if not matches:
+        fail("no command bindings of any shape found - the audited invariant is unverifiable")
+
+    allowed_count = 0
+    for start, kind, match in matches:
+        context = f"line {line_of(stripped, start)}"
+        if kind in exec_kinds:
+            found = stripped[match.start():match.end()].strip()
+            fail(f"{context}: {kind} found ({found!r}) - the idle service must never call exec/execDetached/run/startDetached")
+        if kind != "array":
+            found = stripped[match.start():match.end()].strip()
+            fail(f"{context}: {kind} ({found!r})")
+        real_body = stripped[match.start(1):match.end(1)]
+        check_command(tokenize(real_body), context)
+        allowed_count += 1
+
+    print(
+        f"idle executable surface: {allowed_count} command binding(s) passed, "
+        "0 exec/execDetached/run/startDetached calls found (expected)",
+        file=sys.stderr,
+    )
+    return 0
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) != 1:
+        print(f"usage: {sys.argv[0]} SERVICE_QML", file=sys.stderr)
+        return 2
+
+    path = Path(argv[0])
+    return scan(path.read_text())
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

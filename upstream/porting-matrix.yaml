@@ -1266,11 +1266,12 @@ items:
       - No idle manager or notification daemon is enabled by this layer.
 
   - id: security.idle
-    classification: blocked
-    support: blocked
+    classification: adapted
+    support: experimental
     maturity: audited
     owner: atqamz/omanixy#4
     planned_stack_layer: 6/8
+    promoted_at_layer: 6/8
     audit_layer: 1/8
     target:
       classification: adapted
@@ -1280,53 +1281,104 @@ items:
       revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
       paths:
         - path: shell/plugins/services/idle/
-          role: idle detection, screensaver lifecycle, lock dependency, and DPMS
+          role: idle detection service (Service.qml/IdleModel.js) - only idle detection, inhibitor-aware idle state, and bounded lock-on-idle orchestration are ported; the terminal screensaver path, pre-suspend locking, and DPMS/wake ownership are all deliberately not ported (see notes)
           consumption: audited-reference
         - path: bin/omarchy-launch-screensaver
-          role: screensaver launch contract
+          role: screensaver launch contract, deliberately not ported - Layer 6 has no screensaver process/timer/tracking of any kind
           consumption: audited-reference
         - path: bin/omarchy-system-lock
-          role: lock action contract
+          role: lock action contract, deliberately not ported - the adapted service calls the Layer-3 native lock IPC (`omanixy-shell lock lock`) directly instead
           consumption: audited-reference
         - path: bin/omarchy-system-wake
-          role: wake action contract
+          role: wake/DPMS action contract, deliberately not ported - Layer 6 never blanks the display, so it has nothing of its own to wake
+          consumption: audited-reference
+        - path: bin/omarchy-system-sleep-monitor
+          role: pre-sleep inhibitor/lock contract, deliberately not ported in this layer - deferred to Layer 8's suspend/resume gate
+          consumption: audited-reference
+        - path: bin/omarchy-system-sleep-lock
+          role: pre-sleep lock contract, deliberately not ported in this layer - deferred to Layer 8's suspend/resume gate
           consumption: audited-reference
     native_quickshell:
       project: quickshell-mirror/quickshell
       revision: 28771c7c74b42e20afca0b1b63980cb46515537c
       modules:
-        - Quickshell.Services.IdleMonitor
-        - Quickshell.Hyprland
-        - Quickshell.Wayland
-    requirement: Provide idle detection only with an explicit owner and a valid lock provider for lock-on-idle.
+        - Quickshell.Wayland (IdleMonitor, backed by ext-idle-notify-v1)
+    requirement: Provide bounded user-session idle detection with an explicit owner, respecting Wayland inhibitors, that only ever requests the native lock and never owns suspend, DPMS, or the terminal screensaver.
     ownership:
       presentation: omarchy
       adapter: "issue #4"
-      system: consumer host power and display policy
-      session: consumer or explicitly selected Quattro idle manager
+      system: consumer host suspend, DPMS/display-blanking, and power policy - Layer 6 owns none of it
+      session: "Quickshell IdleMonitor detects idle -> the Layer-6 service decides when to request a lock -> Layer 3's native lock owns WlSessionLock+DPMS -> consumer/NixOS owns suspend/power policy -> Layer 8 owns suspend/resume/recovery"
     helpers:
-      - omarchy-launch-screensaver
-      - omarchy-system-lock
-      - omarchy-system-wake
+      - omanixy-idle-state
     filesystem:
       - ~/.local/state/omarchy/indicators/stay-awake
-    services:
-      - Hyprland raw event socket
     failure_sensitive:
-      - inhibitors must be respected
-      - lock-on-idle must fail closed without a valid provider
-      - screensaver launch and early close must not create a lock loop
-      - suspend and resume must not rely on an unbounded wall-clock assumption
+      - respectInhibitors must default to true and never be disabled
+      - lock-on-idle must fail closed (no lock request) without security.lock.enable
+      - an unsupported ext-idle-notify-v1 protocol must warn and leave isIdle false, never invent a fallback timer
+      - lock retries are bounded to 3 actual Process starts per idle cycle and never repeat indefinitely
+      - a terminal lock-unavailable result (missing-pam/failed) must never be retried or reinterpreted as success
+      - activity or stay-awake must cancel an in-flight lock-on-idle cycle immediately, with no attempt resuming on its own
+      - persisted stay-awake state is revocable: an indeterminate probe result (exit 2, or any Process that fails to start) must disable automatic lock-on-idle immediately and never be inferred as "marker absent"
+      - a lock/probe/writer Process that fails to start (no exited() ever fired) must be detected without polling and handled exactly like its corresponding exit-based failure, never silently dropped and never double-counted against a later real exit
+      - Process.startDetached() must be unreachable from the final audited source, even against an otherwise-allowlisted argv - it would launch a tracked, bounded invocation completely untracked
+      - the configured lock timeout must never exceed the pinned Quickshell backend's own signed 32-bit millisecond-conversion range
     evidence:
       available:
-        - exact IdleMonitor and Hyprland event audit
-        - pinned helper and state-path inventory
+        - declarative programs.omanixy.security.idle.enable Home Manager option, disabled by default, structurally independent of programs.omanixy.security.lock.fingerprint and programs.omanixy.security.polkit.agent, with a resolved-state assertion requiring programs.omanixy.security.lock.enable=true and known-conflict assertions against services.hypridle.enable/services.swayidle.enable
+        - pure decision-logic module (packages/omanixy-shell/IdlePolicy.js) for the bounded lock-retry policy, driven directly (not reimplemented) by both the real generated Service.qml and a 100-iteration Node.js stress test covering exhaustion, terminal failures, activity/stay-awake cancellation, and new-cycle budget resets
+        - exact-source, fail-on-drift patcher (scripts/patch-idle-service) removing the pinned screensaver/Hyprland/system-lock/system-wake code and hardening the lock-timeout parser (floor-then-positive-check, so a sub-one-second fractional value can never floor to an immediate lock), proven against adversarial drift fixtures
+        - fail-closed, bounded-allowlist executable-surface scan (scripts/scan-idle-executable-surface) accepting only the four exact argv forms this service may ever run, and unconditionally rejecting every exec/execDetached/run call regardless of its argument shape - not merely a first-token allowlist
+        - hermetic offscreen Quickshell behavior proof (test/security-idle-qml-behavior.sh) driving the real generated Service.qml through startup/probe-absent/probe-present, one-attempt idle-triggered locking, accepted/terminal/transient-failure classification, bounded 3-attempt exhaustion, activity- and stay-awake-cancelled cycles, new-cycle budget reset, the write-serialization coalescing invariant, and IPC enable/disable/toggle/status/debug
+        - static ABI contract evidence against the pinned Quickshell IdleMonitor source (respectInhibitors defaults to true, an unsupported protocol warns and leaves isIdle false with no fallback timer, the timeout is converted to milliseconds once, respectInhibitors selects get_idle_notification vs get_input_idle_notification with a protocol-version fallback, a missing seat yields nullptr, and idled/resumed map directly onto isIdle)
+        - hermetic omanixy-idle-state adapter test (probe absent/present/indeterminate-on-unsearchable-parent, idempotent set awake/idle, invalid verb/arg/HOME all fail closed to the 0/1/2 ABI only)
+        - shell.json and managed-plugin ownership proofs mirroring the Layer-3/5 lock/polkit model exactly, including the reserved omarchy.idle namespace never being revivable via a hand-edited shell.json
+        - core+lock-vs-core+lock+idle closure proof at raw store-path granularity: declaredRuntimeInputs is exact-equal (idle adds no package of its own), the compat-bin entry set gains exactly one helper (omanixy-idle-state), and after excluding the exact, named set of Omanixy-owned derivations expected to change identity, every remaining external dependency store path is byte-identical; a separate byte-for-byte comparison proves the Layer-3 lock plugin's own Service.qml is unchanged before/after idle is enabled
+        - a markStayAwakeStateUnknown revocation path, proven against the real generated Service.qml, that an indeterminate probe result (exit 2) or a failed-to-start probe/writer Process disables automatic lock-on-idle immediately, cancels any in-flight cycle and armed retry, never infers stayAwake either way, and recovers cleanly once a later probe actually resolves 0 or 1 - including the case where the idle monitor was genuinely idle at the moment trust was lost, which never auto-resumes a stale cycle or reuses an exhausted budget
+        - static ABI contract evidence against the pinned Quickshell Process source (src/io/process.{hpp,cpp}) that a normal finish clears the process handle and emits exited() before runningChanged(), that a failed-to-start process emits ONLY runningChanged() and never exited() at all, and that Process exposes a real, parameterless, untracked startDetached()
+        - a lock-side FailedToStart path, detected via runningChanged() plus explicit per-operation awaiting-result state and a single Qt.callLater reconciliation (no polling, no invented onError signal), that treats a failed-to-start attempt exactly like IdlePolicy's TRANSIENT_ERROR - bounded to the same 3-attempt budget, never refunded, and proven via a 100-iteration synthetic stress sequence that still caps at exactly 3 actual starts
+        - probe- and writer-side FailedToStart paths that revoke trust exactly like an indeterminate exit code, including that a writer failure while persisting either "idle enable" or "idle disable" never leaves automatic lock-on-idle optimistically active from an unconfirmed write, and that exactly one coalesced pending desired-state request (never more, never zero) is attempted after a failed write
+        - a fail-closed, bounded-allowlist executable-surface scan (scripts/scan-idle-executable-surface) that additionally, and unconditionally, rejects every Process.startDetached() call regardless of argument shape, including against an already-allowlisted argv, with the same permanent adversarial matrix discipline (comment/string false positives, a real call following fake text) the exec/execDetached/run rejection already has
+        - a pinned-backend-derived upper bound (2147483 seconds, the largest whole-second value that survives the pinned Quickshell timeout*1000 signed-32-bit-int conversion) on the configured lock timeout, proven against the real generated IdleModel.js at and past the exact boundary
+        - a direct package-level evaluation proof (bypassing programs.omanixy.security.idle and the Home Manager assertion matrix entirely) that packages/omanixy-shell's own idleRequiresLockValid assertion fires for a hand-constructed idle=true/lock=false security attrset, and passes for idle=true/lock=true
       required_before_promotion:
-        - known declarative idle-owner conflict test
-        - inhibitor and activity cancellation tests
-        - nested compositor idle, lock, wake, and resume tests
+        - a real nested Wayland session idle transition against a live ext-idle-notify-v1 compositor - the pinned ABI proof (test/security-idle-quickshell-contract.sh) and the offscreen fake-monitor behavior proof (test/security-idle-qml-behavior.sh) are both hermetic and cover the declarative and bounded-retry invariants already, but neither exercises a real compositor
+        - a real Wayland idle inhibitor actually suppressing the idle transition
+        - real activity ending a live idle cycle and cancelling an in-flight lock-on-idle request against a live session
+        - monitor hotplug/seat change while idle detection is active
+        - suspend and resume while an idle cycle or a lock-on-idle request is in flight (deferred to Layer 8, which owns suspend/resume/recovery)
+        - Quickshell crash/restart during an active idle cycle
+        - the real ext-idle-notify-v1-unsupported fail-safe path against an actual compositor that lacks the protocol
+        - a real declarative conflict scenario (hypridle or swayidle actually running alongside the Quattro idle owner), beyond the already-proven Home Manager assertion matrix
     tests:
       - test/quattro-contract-audit.sh
+      - test/security-contracts.sh
+      - test/security-idle-hm.sh
+      - test/security-idle-shell-json.sh
+      - test/security-idle-managed-plugin.sh
+      - test/security-idle-model.sh
+      - test/security-idle-policy.sh
+      - test/security-idle-state.sh
+      - test/security-idle-executable-surface.sh
+      - test/security-idle-qml-behavior.sh
+      - test/security-idle-quickshell-contract.sh
+      - test/security-idle-closure.sh
+      - test/security-idle-no-dpms-widening.sh
+      - test/security-idle-package-invariant.sh
+    notes:
+      - Layer 6 owns exactly user-session idle detection, inhibitor-aware idle state, bounded lock-on-idle orchestration, user-controlled stay-awake state, and explicit conflict detection with known Home Manager idle managers - it owns none of suspend-on-idle, pre-suspend locking, logind inhibitors, system sleep policy, terminal screensaver presentation, display blanking, DPMS wake policy, keyboard backlight, clamshell policy, or arbitrary external lock providers.
+      - programs.omanixy.security.idle.enable is reachable only when programs.omanixy.security.lock.enable is also true; it remains off by default and structurally outside programs.omanixy.features.
+      - The pinned Omarchy idle service drives a terminal screensaver (omarchy-launch-screensaver/omarchy-screensaver, ttfx, socat, Hyprland raw-event window tracking) before ever locking; Layer 6 deliberately omits the entire screensaver choreography as an intentional boundary decision, not a TODO - the final adapted service has no screensaver process, timer, tracking, or Hyprland connection of any kind.
+      - omarchy-system-lock and omarchy-system-wake are not ported wholesale (keyboard layout reset, 1Password locking, pkill, brightness/clamshell monitor calls); the adapted service's only lock action is the direct argv `omanixy-shell lock lock`, and it never calls any wake/brightness/clamshell helper, since it never blanks the display in the first place.
+      - No pre-suspend/sleep-monitor service is added in this layer (omarchy-system-sleep-monitor, omarchy-system-sleep-lock, systemd-inhibit); that entire concern, including any claim of suspend safety, is deferred to Layer 8.
+      - security.idle is independent of security.lock.fingerprint and security.polkit.agent: enabling either changes nothing about whether idle may be enabled, proven directly by the Home Manager assertion matrix.
+      - No suspend-on-idle, notification-daemon, or recovery ownership is added by this layer.
+      - Persisted stay-awake trust is revocable, not merely fail-safe at startup: an indeterminate probe (exit 2) or a probe/writer Process that fails to start disables automatic lock-on-idle immediately via the same stayAwakeStateLoaded=false path startup itself uses, and never infers stayAwake either way - "unknown" is a distinct state from "marker absent", proven at both the exit-code and the FailedToStart-transition level.
+      - Cancelling an idle cycle (activity, stay-awake, or a trust revocation) never kills an already-running lock Process; the pinned Layer-3 lock IPC is allowed to complete on its own, and its eventual result is processed normally against whatever state exists by then (a stale ACCEPTED/TERMINAL_UNAVAILABLE is simply a no-op once the cycle has already ended, and a stale retry request is denied by the same cycleActive guard every other retry decision uses) - Layer 6 never sends a signal to, or otherwise interrupts, an in-flight lock request.
+      - A lock, probe, or writer Process that fails to start (the pinned Quickshell ABI's onErrorOccurred(QProcess::FailedToStart), which never emits exited()) is detected without polling or an invented QML onError signal: an explicit per-operation awaiting-result flag plus the real runningChanged() signal, reconciled through exactly one Qt.callLater deferral, so a fake or real caller's signal ordering can never cause a normal exit to be double-processed as a start failure.
+      - Process.startDetached() is unreachable from the final audited source, even wrapping an otherwise-allowlisted argv (`omanixy-shell lock lock`, or either omanixy-idle-state form) - scan-idle-executable-surface rejects it unconditionally, the same zero-tolerance treatment already given to exec/execDetached/run.
+      - The configured lock timeout is bounded above by 2147483 seconds, the largest whole-second value that survives the pinned Quickshell backend's own signed-32-bit-millisecond conversion (`static_cast<int>(timeout * 1000)` in src/wayland/idle_notify/monitor.cpp) - this ceiling is derived from that pinned arithmetic range, not an Omanixy policy preference, and any value past it falls back to the pinned 300-second default exactly like any other invalid input.
 
   - id: security.notification-daemon
     classification: blocked

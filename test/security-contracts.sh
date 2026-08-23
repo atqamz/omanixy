@@ -54,6 +54,7 @@ assert promoted_ids == {
     "security.lock",
     "security.pam-fingerprint",
     "security.polkit-agent",
+    "security.idle",
 }
 
 lock = next(item for item in security if item["id"] == "security.lock")
@@ -73,6 +74,12 @@ assert polkit_agent["classification"] == "adapted"
 assert polkit_agent["support"] == "experimental"
 assert polkit_agent["target"] == {"classification": "adapted", "support": "experimental"}
 assert polkit_agent["promoted_at_layer"] == "5/8"
+
+idle = next(item for item in security if item["id"] == "security.idle")
+assert idle["classification"] == "adapted"
+assert idle["support"] == "experimental"
+assert idle["target"] == {"classification": "adapted", "support": "experimental"}
+assert idle["promoted_at_layer"] == "6/8"
 
 notification_client = next(item for item in items if item["id"] == "notification.client")
 notification_daemon = next(item for item in security if item["id"] == "security.notification-daemon")
@@ -168,6 +175,51 @@ fi
 if rg -n 'programs\.omanixy\.features.*(lock|polkit|idle|notifications)|features.*omarchy\.(lock|polkit|idle|notifications)' \
   "$repo/modules"; then
   printf '%s\n' 'security ownership was added to the presentation feature model' >&2
+  exit 1
+fi
+
+# Layer 6 (idle) must never imperatively mutate a known-conflicting Home
+# Manager idle daemon - it may only assert against one being enabled
+# alongside Layer 6's own idle owner, never set, stop, or kill it.
+if rg -n 'services\.(hypridle|swayidle)\.enable\s*=\s*(false|true)' \
+  "$repo/modules/home"; then
+  printf '%s\n' 'Omanixy must not imperatively set a competing idle daemon service' >&2
+  exit 1
+fi
+if rg -n 'systemctl.*(hypridle|swayidle)|kill.*(hypridle|swayidle)|pkill.*(hypridle|swayidle)' \
+  "$repo/modules" "$repo/packages" "$repo/scripts"; then
+  printf '%s\n' 'Omanixy must not stop or kill a competing idle daemon' >&2
+  exit 1
+fi
+
+# Layer 6 deliberately omits the terminal screensaver path (Section 8) -
+# none of its vocabulary may appear as live wiring in the Home Manager
+# module (the pinned patcher's own removed-code commentary, and the
+# generic upstream contract-audit script's full helper inventory, both
+# legitimately reference these names without wiring them up - those are
+# proven not to reach the final artifact by
+# test/security-idle-executable-surface.sh and
+# test/security-idle-no-dpms-widening.sh instead of a repo-wide string ban).
+if rg -n 'omarchy-launch-screensaver|omarchy-screensaver|\bttfx\b|\bsocat\b' \
+  "$repo/modules/home"; then
+  printf '%s\n' 'screensaver vocabulary leaked into the Home Manager module - Layer 6 deliberately omits it' >&2
+  exit 1
+fi
+
+# Pre-suspend locking and sleep-monitor services are explicitly deferred to
+# Layer 8 (Section 11) - none of that vocabulary may appear as live wiring
+# in the Home Manager module yet.
+if rg -n 'omarchy-system-sleep-monitor|omarchy-sleep-lock\.service|systemd-inhibit|omarchy-system-lock\b' \
+  "$repo/modules/home"; then
+  printf '%s\n' 'sleep/suspend-monitor vocabulary leaked into the Home Manager module - deferred to Layer 8' >&2
+  exit 1
+fi
+
+# Notification daemon ownership remains out of scope until its own stack
+# layer - Home Manager must never reference the notification server ABI.
+if rg -n 'NotificationServer|org\.freedesktop\.Notifications' \
+  "$repo/modules/home"; then
+  printf '%s\n' 'notification daemon ownership is out of scope for the layer-6 security module' >&2
   exit 1
 fi
 
