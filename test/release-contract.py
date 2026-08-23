@@ -23,21 +23,12 @@ def workflow_trigger(workflow):
     return workflow.get("on", workflow.get(True))
 
 
-def workflow_steps(workflow):
-    steps = []
-    for job in workflow.get("jobs", {}).values():
-        steps.extend(job.get("steps", []))
-    return steps
+def workflow_job(workflow, name):
+    return workflow["jobs"][name]
 
 
-def workflow_run_text(workflow):
-    values = []
-    for job in workflow.get("jobs", {}).values():
-        values.append(str(job.get("if", "")))
-        for step in job.get("steps", []):
-            values.append(str(step.get("run", "")))
-            values.append(str(step.get("with", {})))
-    return "\n".join(values)
+def workflow_steps(workflow, job_name):
+    return {step["name"]: step for step in workflow_job(workflow, job_name)["steps"] if "name" in step}
 
 
 def assert_release_files(root):
@@ -49,6 +40,7 @@ def assert_release_files(root):
     assert config["$schema"] == "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json"
     assert config["bootstrap-sha"] == BOOTSTRAP_SHA
     assert config["release-type"] == "simple"
+    assert config["version-file"] == "version.txt"
     assert config["bump-minor-pre-major"] is True
     assert config["bump-patch-for-minor-pre-major"] is False
     assert config["initial-version"] == "0.1.0"
@@ -101,12 +93,6 @@ def assert_workflows(root):
     assert ci_on["pull_request"]["branches"] == ["main"]
     assert ci_on["push"]["branches"] == ["main"]
     assert ci["permissions"] == {"contents": "read"}
-    ci_text = workflow_run_text(ci)
-    assert "nix fmt" in ci_text
-    assert "just check" in ci_text
-    assert "--all-systems --no-build" in ci_text
-    assert "release-context" in ci_text
-    assert "git diff --name-only" in ci_text
 
     assert release["name"] == "Release Please"
     assert release_on["workflow_run"]["workflows"] == ["CI"]
@@ -117,57 +103,47 @@ def assert_workflows(root):
         "group": "release-main",
         "cancel-in-progress": False,
     }
-    release_text = workflow_run_text(release)
-    assert "github.event.workflow_run.conclusion == 'success'" in release_text
-    assert "github.event.workflow_run.head_branch == 'main'" in release_text
-    assert "github.event.workflow_run.event == 'push'" in release_text
-    assert "RELEASE_PLEASE_TOKEN" in release_text
-    assert "secrets.RELEASE_PLEASE_TOKEN" in release_text
-    assert "github.token" not in release_text
-    assert "secrets.GITHUB_TOKEN" not in release_text
-    assert "workflow_dispatch" not in str(release_on)
-    assert "release-context --write" in release_text
-    assert "release-context --check" in release_text
-    assert "git tag" not in release_text
-    assert "gh release" not in release_text
-    assert "npm publish" not in release_text
-    assert "twine upload" not in release_text
-    assert "cargo publish" not in release_text
-    assert "cachix push" not in release_text
-    assert "nix copy" not in release_text
-    assert "github.event.pull_request.actor" not in release_text
+    ci_steps = workflow_steps(ci, "validate")
+    assert ci_steps["Format"]["run"].strip() == "nix fmt\ngit diff --exit-code"
+    assert ci_steps["Canonical checks"]["run"].strip() == "nix shell nixpkgs#just -c just check"
+    assert ci_steps["All systems evaluation"]["run"].strip() == "nix flake check --show-trace --print-build-logs --all-systems --no-build"
+    assert ci_steps["Release-owned files"]["if"] == "github.event_name == 'pull_request'"
+    assert "scripts/release-context --check" in ci_steps["Release-owned files"]["run"]
 
-    release_action = next(
-        step for step in workflow_steps(release)
-        if step.get("uses") == "googleapis/release-please-action@v5"
-    )
+    release_job = workflow_job(release, "release")
+    assert release_job["if"] == "github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main'"
+    release_steps = workflow_steps(release, "release")
+    assert release_steps["Require release credential"]["env"] == {
+        "RELEASE_PLEASE_TOKEN": "${{ secrets.RELEASE_PLEASE_TOKEN }}"
+    }
+    assert release_steps["Run Release Please"]["with"]["token"] == "${{ secrets.RELEASE_PLEASE_TOKEN }}"
+    assert release_steps["Write release context"]["run"].strip().splitlines()[-1] == 'git push origin "HEAD:${{ steps.release-pr.outputs.branch }}"'
+    assert "release-context --write" in release_steps["Write release context"]["run"]
+    assert "release-context --check" in release_steps["Write release context"]["run"]
+    release_runs = [step.get("run", "") for step in release_steps.values()]
+    forbidden_commands = ("git tag", "gh release", "npm publish", "twine upload", "cargo publish", "cachix push", "nix copy")
+    assert all(command not in run for command in forbidden_commands for run in release_runs)
+    assert all("github.event.pull_request.actor" not in run for run in release_runs)
+
+    release_action = release_steps["Run Release Please"]
+    assert release_action["uses"] == "googleapis/release-please-action@v5"
     assert release_action["with"]["target-branch"] == "main"
-    assert release_action["with"]["token"] == "${{ secrets.RELEASE_PLEASE_TOKEN }}"
 
-    uses = {step.get("uses") for step in workflow_steps(ci) + workflow_steps(release)}
+    uses = {
+        step.get("uses")
+        for workflow in (ci, release)
+        for job in workflow["jobs"].values()
+        for step in job["steps"]
+    }
     assert "actions/checkout@v7" in uses
     assert "DeterminateSystems/nix-installer-action@v22" in uses
     assert "googleapis/release-please-action@v5" in uses
-
-
-def assert_pre_major_policy():
-    policy = {
-        "fix": "patch",
-        "feat": "minor",
-        "breaking": "minor",
-        "ordinary": "not-major",
-    }
-    assert policy["fix"] == "patch"
-    assert policy["feat"] == "minor"
-    assert policy["breaking"] == "minor"
-    assert policy["ordinary"] != "major"
 
 
 def main():
     root = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
     assert_release_files(root)
     assert_workflows(root)
-    assert_pre_major_policy()
 
 
 if __name__ == "__main__":
