@@ -1,0 +1,238 @@
+#!/usr/bin/env python3
+"""Fail-closed scan of the patched Service.qml's Process.command executable surface.
+
+Discovery reuses the shared QML source-discovery primitives
+(scripts/source_discovery.py) that the layer-1 contract audit already relies
+on for finding command bindings, so multiline arrays, non-array dynamic
+bindings, and procedural `.command =` mutations are found the same way
+everywhere in this repo instead of via a second, inconsistent parser.
+Comments are lexically masked out first, then quoted-string and template-
+literal content is lexically masked a second time to locate genuine
+command bindings - a comment marker or command-looking text sitting inside
+a string or template literal cannot satisfy or spoof the audit. The real
+literal values used for the allowlist check are still read back out of the
+comment-only-masked text, by the position each binding was found at, so a
+legitimate command array's actual executable name is never itself
+blanked.
+
+security.lock's executable source additionally rejects any live backtick
+template literal outright, before command discovery even runs. QML/JS
+template literals admit full ECMAScript grammar - regex literals in
+particular make "}" -> interpolation-depth counting unprovable without a
+real parser (division vs. regexp-literal ambiguity, character classes,
+escaped slashes, flags) - and no amount of extra lexing in the shared
+source-discovery module can close that gap for a security guard. Since the
+real, reviewed lock Service.qml contains zero template literals, this
+scanner treats any that appear as unverifiable rather than trying to prove
+their content safe. A backtick that survives comment-stripping and
+string-masking is, by construction, a live template delimiter rather than
+one sitting inertly inside an ordinary quoted string or comment, so this
+check cannot be spoofed by a harmless backtick character in normal text.
+
+Every array binding discovered this way is then tokenized and validated
+here against an explicit allowlist: the executable position must be a
+literal string naming an allowed executable, a bash -c shape is always
+rejected regardless of position, and a timeout wrapper's own flags,
+duration, and wrapped executable must all be literal and the wrapped
+executable checked against a separate allowlist, so the wrapper cannot be
+used to smuggle in an arbitrary command. Trailing argument positions (e.g. a
+dynamic path passed to readlink) may remain dynamic - only the identity of
+what gets executed is in scope for this audit, not the data handed to it.
+Any binding this cannot prove is a literal, allowed executable is
+rejected - ambiguity fails closed.
+"""
+
+from __future__ import annotations
+
+import re
+import sys
+from pathlib import Path
+
+import source_discovery
+
+STRING_RE = re.compile(r'"(?:\\.|[^"\\])*"')
+DURATION_RE = re.compile(r"^[0-9]+(?:\.[0-9]+)?[smhd]?$")
+
+WRAPPER = "timeout"
+ALLOWED_DIRECT = {"readlink", "omarchy-hyprland-session-locked"}
+ALLOWED_WRAPPED = {"hyprctl"}
+
+DYNAMIC_PATTERNS = (
+    ("dynamic command: binding", source_discovery.DYNAMIC_COMMAND_RE),
+    ("dynamic procedural .command = assignment", source_discovery.DYNAMIC_ASSIGNMENT_RE),
+    ("dynamic exec(...) call", source_discovery.DYNAMIC_CALL_RE),
+    ("dynamic .run(...) call", source_discovery.DYNAMIC_RUN_RE),
+)
+
+
+class Tally:
+    def __init__(self) -> None:
+        self.allowed_direct = 0
+        self.allowed_wrapped = 0
+        self.entries: list[str] = []
+
+
+def fail(message: str) -> None:
+    print(f"lock executable surface: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def line_of(text: str, offset: int) -> int:
+    return text.count("\n", 0, offset) + 1
+
+
+def unescape(literal: str) -> str:
+    return literal[1:-1].replace('\\"', '"').replace("\\\\", "\\")
+
+
+def tokenize(array_body: str) -> list[tuple[str, bool]]:
+    """Split a command array body into ordered (value, is_literal) tokens.
+
+    Non-literal slots (property references, expressions, nested calls) are
+    kept as their raw, unparsed text so a positional check (e.g. the bash -c
+    detector) can still match literal keywords that happen to sit next to
+    dynamic content, without ever treating the dynamic slot itself as a
+    known-safe literal.
+    """
+
+    tokens: list[tuple[str, bool]] = []
+    pos = 0
+    length = len(array_body)
+    while pos < length:
+        while pos < length and array_body[pos] in " \t\r\n,":
+            pos += 1
+        if pos >= length:
+            break
+        match = STRING_RE.match(array_body, pos)
+        if match:
+            tokens.append((unescape(match.group(0)), True))
+            pos = match.end()
+            continue
+        end = pos
+        depth = 0
+        quote = ""
+        while end < length:
+            char = array_body[end]
+            if quote:
+                if char == "\\" and end + 1 < length:
+                    end += 2
+                    continue
+                if char == quote:
+                    quote = ""
+                end += 1
+                continue
+            if char == "," and depth == 0:
+                break
+            if char in "\"'":
+                quote = char
+            elif char in "([":
+                depth += 1
+            elif char in ")]":
+                depth -= 1
+            end += 1
+        tokens.append((array_body[pos:end].strip(), False))
+        pos = end
+    return tokens
+
+
+def check_command(tokens: list[tuple[str, bool]], context: str, tally: Tally) -> None:
+    if not tokens:
+        fail(f"{context}: empty command array")
+
+    values = [value for value, _literal in tokens]
+    if "bash" in values and "-c" in values:
+        fail(f"{context}: bash -c shape is reachable ({values!r})")
+
+    exe_value, exe_literal = tokens[0]
+    if not exe_literal:
+        fail(f"{context}: dynamic executable shape ({exe_value!r} is not a literal)")
+
+    if exe_value == WRAPPER:
+        index = 1
+        while index < len(tokens) and tokens[index][1] and tokens[index][0].startswith("-"):
+            index += 1
+        if index >= len(tokens) or not tokens[index][1] or not DURATION_RE.match(tokens[index][0]):
+            fail(f"{context}: dynamic or missing {WRAPPER} duration shape ({values!r})")
+        index += 1
+        if index >= len(tokens):
+            fail(f"{context}: {WRAPPER} wrapper has no wrapped executable ({values!r})")
+        wrapped_value, wrapped_literal = tokens[index]
+        if not wrapped_literal:
+            fail(f"{context}: dynamic executable shape wrapped by {WRAPPER} ({wrapped_value!r})")
+        if wrapped_value not in ALLOWED_WRAPPED:
+            if wrapped_value.startswith("omarchy-"):
+                fail(f"{context}: unknown omarchy-* helper wrapped by {WRAPPER}: {wrapped_value!r}")
+            fail(f"{context}: unknown executable wrapped by {WRAPPER}: {wrapped_value!r}")
+        tally.allowed_wrapped += 1
+        tally.entries.append(f"{context}: {WRAPPER} -> {wrapped_value} (allowed-wrapped) {values!r}")
+        return
+
+    if exe_value in ALLOWED_DIRECT:
+        tally.allowed_direct += 1
+        tally.entries.append(f"{context}: {exe_value} (allowed-direct) {values!r}")
+        return
+
+    if exe_value.startswith("omarchy-"):
+        fail(f"{context}: unknown omarchy-* helper: {exe_value!r}")
+    fail(f"{context}: unknown executable: {exe_value!r}")
+
+
+def scan(text: str) -> Tally:
+    try:
+        stripped = source_discovery.strip_comments(text, shell=False)
+        masked = source_discovery.mask_string_literals(stripped)
+    except source_discovery.UnsafeSource as exc:
+        fail(f"unsafe source, cannot prove executable surface is closed: {exc}")
+        raise  # unreachable, fail() always raises SystemExit
+
+    # A backtick surviving comment-stripping and string-masking is a live
+    # template delimiter, not one sitting inertly inside an ordinary quoted
+    # string or comment (both of those are already stripped/blanked above).
+    # security.lock rejects that outright rather than trying to prove its
+    # content safe - see the module docstring.
+    if "`" in masked:
+        fail("template literals are unsupported in security.lock executable source")
+
+    tally = Tally()
+
+    matches: list[tuple[int, str, "re.Match[str]"]] = []
+    for match in source_discovery.ARRAY_COMMAND_RE.finditer(masked):
+        matches.append((match.start(), "array", match))
+    for label, pattern in DYNAMIC_PATTERNS:
+        for match in pattern.finditer(masked):
+            matches.append((match.start(), label, match))
+    matches.sort(key=lambda item: item[0])
+
+    if not matches:
+        fail("no command bindings of any shape found - the audited invariant is unverifiable")
+
+    for start, kind, match in matches:
+        context = f"line {line_of(stripped, start)}"
+        if kind != "array":
+            fail(f"{context}: {kind} ({stripped[match.start():match.end()].strip()!r})")
+        real_body = stripped[match.start(1) : match.end(1)]
+        check_command(tokenize(real_body), context, tally)
+
+    return tally
+
+
+def main() -> int:
+    if len(sys.argv) != 2:
+        print(f"usage: {sys.argv[0]} SERVICE_QML", file=sys.stderr)
+        return 2
+    path = Path(sys.argv[1])
+    tally = scan(path.read_text())
+    total = tally.allowed_direct + tally.allowed_wrapped
+    for entry in tally.entries:
+        print(f"lock executable surface: {entry}", file=sys.stderr)
+    print(
+        f"lock executable surface: {total} command bindings passed "
+        f"({tally.allowed_direct} direct, {tally.allowed_wrapped} wrapped); "
+        "0 unknown executables, 0 unknown helpers, 0 dynamic bindings, 0 unparsed bindings",
+        file=sys.stderr,
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

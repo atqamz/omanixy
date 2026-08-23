@@ -280,6 +280,313 @@ def shell_executables(value: str) -> list[str]:
     return list(dict.fromkeys(commands))
 
 
+class UnsafeSource(ValueError):
+    """A QML/JS backtick template literal (or a `${...}` interpolation
+    inside one) is not closed before the source ends.
+
+    This lexical masker treats a backtick literal as the only construct
+    that can legitimately span multiple lines, so an actually-unterminated
+    one could otherwise silently absorb the rest of the file as inert
+    string content - hiding whatever real code follows rather than merely
+    misreading the malformed literal itself. Callers that need a hermetic,
+    fail-closed guarantee (the lock executable-surface scanner) must treat
+    this as unverifiable input and reject the file outright.
+    """
+
+
+def _find_string_end(text: str, start: int, quote: str) -> int:
+    """`start` is just past an opening '"'/"'" at `quote`. Return the index
+    just past the matching unescaped closing quote, or -1 if the string is
+    not closed before a literal newline or the end of text - a "..."/'...'
+    string cannot legally contain an unescaped newline, so this masker
+    never treats one as spanning lines."""
+
+    index = start
+    length = len(text)
+    while index < length:
+        char = text[index]
+        if char == "\\" and index + 1 < length:
+            index += 2
+            continue
+        if char == quote:
+            return index + 1
+        if char == "\n":
+            return -1
+        index += 1
+    return -1
+
+
+def _blank(body: str) -> str:
+    """Replace every non-newline character with a space, preserving length
+    and every newline position so offsets into the result still line up
+    1:1 with offsets into `body`."""
+
+    return "".join("\n" if char == "\n" else " " for char in body)
+
+
+def _consume_interpolation(text: str, start: int, mask: bool) -> tuple[int, str]:
+    """`start` is the index of the "$" opening a "${" inside a backtick
+    literal. Returns the index just past the matching unescaped "}" and the
+    interpolation's text (delimiters included).
+
+    `${...}` is treated as a live JS-like lexical region: identifiers,
+    operators, calls, assignments, array/object syntax, and nested
+    `${...}` expressions stay live so a command built through interpolation
+    remains visible to discovery. Everything else is inert and cannot
+    perturb that liveness:
+
+    - "//" and "/* */" comments are recognized and blanked to whitespace
+      (never deleted, unlike top-level `strip_comments` - the interpolation
+      walker relies on 1:1 index correspondence with `text` to track brace
+      depth, so shrinking the output here would desync the match) before
+      depth-counting sees them, so a "}" inside a comment can never
+      terminate the interpolation early and comment-only text can never
+      satisfy command discovery.
+    - Quoted string bodies are masked exactly like `mask_string_literals`
+      does at top level: verbatim when `mask` is False (Stage 1 preserves
+      string content), blanked when `mask` is True (Stage 2 hides
+      string-only content from discovery), with the delimiting quotes kept
+      either way so downstream span matching still sees a well-formed
+      string shape.
+    - Nested backtick literals recurse through `_consume_backtick`, so
+      their static text stays inert while any further nested `${...}`
+      inside them stays live.
+
+    Braces inside any of the above are consumed as part of that region and
+    never reach the depth counter, so they cannot desync the match."""
+
+    length = len(text)
+    index = start + 2
+    depth = 1
+    pieces = ["${"]
+    while index < length:
+        char = text[index]
+        if text.startswith("//", index):
+            end = text.find("\n", index)
+            end = length if end < 0 else end
+            pieces.append(_blank(text[index:end]))
+            index = end
+            continue
+        if text.startswith("/*", index):
+            end = text.find("*/", index + 2)
+            end = length if end < 0 else end + 2
+            pieces.append(_blank(text[index:end]))
+            index = end
+            continue
+        if char in "\"'":
+            end = _find_string_end(text, index + 1, char)
+            if end < 0:
+                raise UnsafeSource("unterminated string literal inside template interpolation")
+            body = text[index + 1 : end - 1]
+            pieces.append(char)
+            pieces.append(_blank(body) if mask else body)
+            pieces.append(char)
+            index = end
+            continue
+        if char == "`":
+            end, content = _consume_backtick(text, index + 1, mask)
+            pieces.append(f"`{content}`")
+            index = end
+            continue
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                pieces.append("}")
+                return index + 1, "".join(pieces)
+        pieces.append(char)
+        index += 1
+    raise UnsafeSource("unterminated ${...} template interpolation")
+
+
+def _consume_backtick(text: str, start: int, mask: bool) -> tuple[int, str]:
+    """`start` is just past an opening backtick. Returns the index just past
+    the matching unescaped closing backtick and the literal's content
+    (excluding delimiters) - verbatim when `mask` is False, with static text
+    blanked when `mask` is True. `${...}` interpolation is always recursed
+    into as live code (see `_consume_interpolation`) rather than being
+    blanked as static text, regardless of `mask`."""
+
+    length = len(text)
+    index = start
+    out: list[str] = []
+    while index < length:
+        char = text[index]
+        if char == "\\" and index + 1 < length:
+            pair = text[index : index + 2]
+            out.append(_blank(pair) if mask else pair)
+            index += 2
+            continue
+        if char == "`":
+            return index + 1, "".join(out)
+        if char == "$" and index + 1 < length and text[index + 1] == "{":
+            end, live = _consume_interpolation(text, index, mask)
+            out.append(live)
+            index = end
+            continue
+        out.append((" " if char != "\n" else "\n") if mask else char)
+        index += 1
+    raise UnsafeSource("unterminated template literal (backtick string)")
+
+
+def strip_comments(text: str, shell: bool = False) -> str:
+    """Lexically mask comments for line-oriented scanning.
+
+    This is a lexical masker, not a parser: it recognizes comments, quoted
+    strings, and (QML/JS only) backtick template literals with `${...}`
+    interpolation well enough that a comment marker sitting inside a
+    properly quoted string or template literal cannot hide the real code
+    that follows it, without attempting to understand QML/JS grammar
+    beyond that.
+
+    Shell has no block-comment or template-literal syntax, so treating "/*"
+    as a QML/JS block comment opener would eat glob patterns like
+    "image/*)" in a case arm, and a backtick is just a command-substitution
+    delimiter, not a multiline string. Shell scripts strip only unquoted
+    "#" to end of line and never span a comment or quote across lines.
+
+    String and template-literal CONTENT is preserved (only comments are
+    removed) so contract discovery that reads literal values out of quoted
+    text (e.g. `Quickshell.env("HOME")`) keeps working unchanged. Use
+    `mask_string_literals` on the result when literal-looking text inside a
+    string must not itself satisfy command discovery.
+
+    A `${...}` interpolation is live code, not a string: comments inside
+    one are still removed, but - unlike top-level comments, which are
+    deleted and collapse to a bare newline - they are blanked to
+    whitespace in place. `_consume_interpolation` tracks brace depth by
+    walking `text` index-for-index, so shrinking its output here would
+    desync that walk; blanking keeps every offset aligned.
+
+    Raises UnsafeSource (QML/JS only) if a backtick template literal or a
+    `${...}` interpolation inside one is not closed before the source ends.
+    """
+
+    if shell:
+        return _strip_shell_comments(text)
+    return _strip_qml_comments(text)
+
+
+def _strip_shell_comments(text: str) -> str:
+    result: list[str] = []
+    for line in text.splitlines(keepends=True):
+        out: list[str] = []
+        quote = ""
+        index = 0
+        length = len(line)
+        while index < length:
+            char = line[index]
+            if quote:
+                if char == "\\" and index + 1 < length:
+                    out.append(line[index : index + 2])
+                    index += 2
+                    continue
+                if char == quote:
+                    quote = ""
+                out.append(char)
+                index += 1
+                continue
+            if char == "#":
+                out.append("\n" if line.endswith("\n") else "")
+                break
+            if char in "\"'`":
+                quote = char
+            out.append(char)
+            index += 1
+        result.append("".join(out))
+    return "".join(result)
+
+
+def _strip_qml_comments(text: str) -> str:
+    out: list[str] = []
+    index = 0
+    length = len(text)
+    while index < length:
+        if text.startswith("//", index):
+            end = text.find("\n", index)
+            if end < 0:
+                break
+            out.append("\n")
+            index = end + 1
+            continue
+        if text.startswith("/*", index):
+            end = text.find("*/", index + 2)
+            span = text[index:] if end < 0 else text[index : end + 2]
+            out.append("\n" * span.count("\n"))
+            index = length if end < 0 else end + 2
+            continue
+        char = text[index]
+        if char in "\"'":
+            end = _find_string_end(text, index + 1, char)
+            if end < 0:
+                newline = text.find("\n", index + 1)
+                end = newline if newline >= 0 else length
+                out.append(text[index:end])
+                index = end
+                continue
+            out.append(text[index:end])
+            index = end
+            continue
+        if char == "`":
+            end, content = _consume_backtick(text, index + 1, mask=False)
+            out.append(f"`{content}`")
+            index = end
+            continue
+        out.append(char)
+        index += 1
+    return "".join(out)
+
+
+def mask_string_literals(text: str) -> str:
+    """Blank the CONTENT of quoted strings and backtick template literals in
+    already comment-stripped QML/JS-like text (see `strip_comments`),
+    preserving length and every newline position so a regex match found in
+    the result has the identical span in `text` - callers use this to
+    locate genuine command bindings (a "command:" keyword inside a masked
+    string can no longer match) and then re-read the real string content
+    for the matched span directly out of `text`, rather than out of this
+    masked copy.
+
+    `${...}` interpolation inside a template literal is walked as live
+    code (see `_consume_interpolation`) rather than blanked as static
+    text, so a command built through interpolation stays visible to
+    further discovery instead of silently disappearing into blanked
+    template text. Quoted strings and comments inside the interpolation
+    are still inert and get blanked/masked the same as everywhere else.
+
+    Raises UnsafeSource under the same conditions as `strip_comments`.
+    """
+
+    out: list[str] = []
+    index = 0
+    length = len(text)
+    while index < length:
+        char = text[index]
+        if char in "\"'":
+            end = _find_string_end(text, index + 1, char)
+            if end < 0:
+                newline = text.find("\n", index + 1)
+                end = newline if newline >= 0 else length
+                out.append(char)
+                out.append(_blank(text[index + 1 : end]))
+                index = end
+                continue
+            out.append(char)
+            out.append(_blank(text[index + 1 : end - 1]))
+            out.append(char)
+            index = end
+            continue
+        if char == "`":
+            end, content = _consume_backtick(text, index + 1, mask=True)
+            out.append(f"`{content}`")
+            index = end
+            continue
+        out.append(char)
+        index += 1
+    return "".join(out)
+
+
 def _strip_shell_comment(value: str) -> str:
     quote: str | None = None
     escaped = False

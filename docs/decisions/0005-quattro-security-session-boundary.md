@@ -416,3 +416,252 @@ already-declared target of `adapted`/`experimental`, and no other
 `experimental`, not `supported`, because only the generated artifact is
 hermetically proven; no live PAM conversation, prompt, cancel, or lockout
 test has been run.
+
+## Layer 3 implementation note
+
+`4-03-security-lock` implements the `security.lock` ledger entry only, as
+`programs.omanixy.security.lock.enable` in the Home Manager module
+(`modules/home/default.nix`). Disabled by default, and kept structurally
+separate from `programs.omanixy.features`: it is a dedicated `security.lock`
+option, never a member of `selectedFeatures`/`selectedCapabilities`, matching
+the independent-dimension model this ADR already records.
+
+### `osConfig` PAM handshake
+
+Home Manager's `osConfig` special argument (`osConfig ? null`, populated only
+when Home Manager is composed via `home-manager.nixosModules.home-manager`
+inside a NixOS system, per the layer 2 design note above) is now read, not
+just anticipated. Two `assertions` entries enforce the promised handshake:
+
+- `!cfg.security.lock.enable || osConfig != null` - a standalone Home Manager
+  evaluation with the lock enabled fails closed, since there is no NixOS
+  system to provision the PAM service the lock authenticates against.
+- `!cfg.security.lock.enable || osConfig == null || (osConfig.programs.omanixy.security.pam.password.enable or false) == true` -
+  an integrated evaluation with the lock enabled but the layer 2 PAM
+  capability disabled also fails closed.
+
+The resulting matrix - standalone/lock-off, standalone/lock-on,
+integrated/pam-off/lock-off, integrated/pam-on/lock-off,
+integrated/pam-off/lock-on, integrated/pam-on/lock-on - passes everywhere
+except the two lock-on cases lacking a working PAM service. Only
+integrated/pam-on/lock-on passes with the lock enabled. `security-lock`
+proves this with real `nixosSystem`/`homeManagerConfiguration` evaluations
+forced to `config.system.build.toplevel`/`activationPackage.drvPath`, not a
+description of intended behavior.
+
+### No shell.json ownership change
+
+The lock capability does not add, remove, or reorder any `shell.json` key,
+and does not gain a new mutation path. `home.activation.omanixyShellState`
+is unchanged by `cfg.security.lock.enable`; the capability only selects which
+runtime derivation is built (`omanixyRuntimeFor cfg.features (if
+cfg.security.lock.enable then { lock = true; } else null)`), which affects
+package contents, not the user's config file. `security-lock-shell-json`
+proves this directly: it extracts the same `omanixyShellState.data` fragment
+from a lock-disabled and a lock-enabled (integrated, PAM-on) configuration
+and asserts byte-identical `shell.json` output across five starting states -
+absent, the canonical seed, the seed with `omarchy.lock` manually removed
+from `disabledPlugins`, a historical store-linked v1 config, and a broken
+store symlink. `disabledPlugins` continues to list `omarchy.lock` by default,
+unrelated to whether the Nix-side capability is enabled.
+
+Instead, enabling the capability adds a Nix-owned runtime override layer.
+`PluginRegistry.qml`'s `isEnabled`/`setEnabled` now consult an injected
+`omanixyManagedSecurityPlugins` list (empty when the capability is disabled,
+`["omarchy.lock"]` when enabled): a managed-enabled plugin reports enabled
+regardless of the user's `disabledPlugins` entry, and a `setEnabled(id,
+false)` attempt against a managed-enabled plugin is rejected - either with a
+deterministic "managed by Omanixy/Nix configuration" error, or a truthful
+idempotent no-op, never a silent write to the user's file. The user's
+`disabledPlugins` list itself is never edited by this override; the override
+lives entirely in the runtime read path.
+
+### Password-only lock, fingerprint still unreachable
+
+`scripts/patch-lock-service` patches the pinned `Service.qml` (only present
+in the compat root when the lock capability is enabled) so that
+`fingerprintConfigured` can never become `true`: the refresh path is forced
+to `false` unconditionally, and the entire `fingerprintCheckProc` `Process`
+block - the only code path that ever shelled out to `fprintd-list` - is
+removed outright. No fingerprint PAM conversation, no `fprintd` process, and
+no retry-loop activation are reachable; no fingerprint package enters the
+runtime closure. `WlSessionLock`/`WlSessionLockSurface` topology, the
+`omarchy-lock-password` PAM service name, the `PamContext` conversation, and
+the single-attempt-per-submit flow are preserved exactly, matching the
+"Lock and session-lock protocol" findings above and the layer 2 PAM
+boundary.
+
+### Stranded-lock ABI and DPMS
+
+The same patch script converts the stranded-lock recovery `Process` from a
+`bash -c "omarchy-hyprland-session-locked"` string into direct argv
+(`["omarchy-hyprland-session-locked"]`), and converts the wake/blank
+`Process` commands from the `omarchy-system-wake`/`omarchy-brightness-keyboard`/
+`omarchy-brightness-display` helper invocations into direct-argv, time-bounded
+Hyprland DPMS dispatches
+(`["timeout", "--kill-after=1s", "3s", "hyprctl", "dispatch", "hl.dsp.dpms({ action = \"...\" })"]`),
+reusing the same `timeout --kill-after=1s 3s` bound
+`packages/omanixy-shell/adapters/common.bash`'s `timed()` already validates,
+so a wedged `hyprctl` cannot stall the lock screen's wake/blank path
+indefinitely. Neither the pinned wake/blank calls nor this replacement ever
+involved clamshell logic; that concern belongs to the unrelated lid/monitor
+helpers audited elsewhere in this ADR.
+
+`omarchy-hyprland-session-locked` is a new narrow adapter
+(`packages/omanixy-shell/adapters/lock.bash`) implementing the exit-code ABI
+this ADR's "Lock and session-lock protocol" section describes: it reads
+Hyprland monitor JSON and each monitor's `solitaryBlockedBy`, exiting `0`
+when a monitor is still `LOCK`-blocked, `1` when a monitor is readable
+(unlocked), and `2` when the state is indeterminate or the backend is
+unavailable - a fail-closed default the retry loop in `Service.qml` treats
+as "not yet resolved," not as "unlocked." `security-lock` exercises this
+exit-code contract hermetically against a fake `hyprctl` for all three
+states plus a malformed-output case, and separately against the real
+packaged executable at `$lock_runtime/bin/omarchy-hyprland-session-locked`.
+It is deliberately not registered in `upstream/compatibility-contracts.json`;
+that ledger's helper set is exact-matched against
+`test/compat-adapters.sh`'s executed test cases by
+`test/compatibility-test-matrix.sh`, and this helper's fake-backend coverage
+lives in `test/security-lock.sh` instead, outside that cross-check.
+
+### Executable surface scanning and independence proofs
+
+`scripts/scan-lock-executable-surface` fail-closed scans every `command:
+[...]` array (declarative or procedural `x.command = [...]`) in the FINAL
+patched `Service.qml` against an explicit allowlist. Discovery reuses the
+shared QML source-discovery primitives (`scripts/source_discovery.py`) that
+the layer-1 contract audit already relies on, so a multiline array, a
+procedural `.command =` mutation, and any non-array dynamic binding
+(`command: <expr>`, `x.command = <expr>`, a dynamic `exec(...)`/`.run(...)`
+call) are all found the same way everywhere in this repo. This is a lexical
+masker, not a parser: comments are stripped first, then quoted-string
+content is separately, lexically masked before discovery runs, so a comment
+marker or command-looking text sitting inside a string cannot satisfy or
+spoof the scan, and cannot hide a real binding that follows it. The literal
+values used for allowlist validation are still read from the
+comment-stripped (not string-masked) text, so a legitimate command array's
+real executable name is never itself blanked.
+
+The shared source-discovery library contains conservative lexical support
+for QML/JS backtick template literals and `${...}` interpolation - other
+repository audits may legitimately encounter them - but the security.lock
+executable-surface profile intentionally rejects live template literals
+entirely rather than trying to prove their content safe. QML/JS template
+literals admit full ECMAScript grammar, and regex literals in particular
+make "}" -> interpolation-depth counting unprovable without a real parser
+(division vs. regexp-literal ambiguity, character classes, escaped
+slashes, flags); growing the shared lexer to chase that would only ever
+close one gap at a time. Instead, after the comment-stripping and
+string-masking passes above, any backtick that still appears in the
+masked text is - by construction, since an ordinary quoted string's or
+comment's content is already stripped or blanked by that point - a live
+template delimiter, and the scanner rejects the file outright the moment
+one is found, before command discovery even runs. This is acceptable
+specifically because the real, reviewed lock Service.qml requires zero
+template literals: the generated lock source stays within a smaller,
+statically auditable command subset than general QML, and that is
+intentional security policy for this profile, not a limitation needing a
+follow-up. An unterminated backtick template literal, or a `${...}`
+interpolation whose closing `}` is never found, is still separately
+caught by the shared library's own `UnsafeSource` fail-closed path (used
+by every source_discovery consumer) before the categorical rejection above
+even runs.
+
+Validation then tokenizes each discovered array positionally: the executable
+position must be a literal naming an allowed direct executable (`readlink`,
+`omarchy-hyprland-session-locked`) or the `timeout` wrapper around an
+allowed wrapped executable (`hyprctl`) with its own literal flags and
+duration, a `bash`+`-c` shape is rejected regardless of token position, and
+any non-array dynamic binding is an automatic fail - only the identity of
+what gets executed is in scope, so a trailing dynamic argument (e.g. a
+dynamic path passed to `readlink`) does not fail the scan.
+`test/security-lock-executable-surface.sh` proves this against the real
+patched file plus an adversarial matrix covering both the single-line and
+multiline shape of every case above - an unknown tool, a reintroduced
+`bash -c` shape (including reordered under `timeout` and split across
+lines), a dynamic (non-literal) executable, duration, or declarative/
+procedural binding, an unknown executable wrapped by `timeout`, and a
+same-line or block comment containing an otherwise-allowed-looking command
+sitting next to a real unknown one - are all rejected, while the real
+patched-file command shapes and their multiline/procedural-assignment
+equivalents still pass. A further string-safety matrix proves the lexical
+masker itself cannot be defeated: a command-looking fake inside a single-
+or double-quoted (including escaped-quote) string, and a comment marker
+appearing inside such a string right before a real unknown command, are
+both covered - alongside a real allowed command sitting next to unrelated
+strings/comments containing command-looking text, which still passes. A
+dedicated template-literal rejection matrix proves the categorical policy
+holds regardless of content: a plain template with no interpolation, a
+static-text-only template, a template containing only an allowed-looking
+command string, ordinary interpolation, nested interpolation, and two
+distinct regex-literal shapes that would otherwise miscount a "}" as
+closing an interpolation early (a bare `/}/ ` and a character class with an
+escaped slash) are all rejected the same way, before discovery ever runs -
+proving the regex blind spot in the shared lexer is irrelevant to this
+scanner's actual guarantee. A template literal sitting alongside a real,
+unrelated unknown `.command =` binding is rejected outright too, rather
+than being defeated by (or credited for) whatever discovery would have
+found inside it. Conversely, a literal backtick character inside an
+ordinary single- or double-quoted string, or inside a `//`/`/* */`
+comment, does not trigger the rejection, since both are already
+stripped/masked before the check runs. Malformed backtick/interpolation
+constructs - an unterminated backtick template literal, an unterminated
+`${...}` interpolation, and an unterminated `/* */` comment inside one -
+are separately proven to still fail closed via the shared library's
+pre-existing `UnsafeSource` path, independent of the categorical
+rejection.
+
+`test/security-lock-managed-plugin.sh` proves two independent things with
+real QML behavior rather than a source grep. First, defense against
+contradictory/injected registry state: it instantiates the generated
+`PluginRegistry.qml` directly with a hand-injected `installedPlugins` map
+and drives `isEnabled`/`setEnabled` against both a plain lock-enabled
+registry and one with a hostile local plugin shadowing the `omarchy.lock` id
+as a `bar`-kind entry, proving the managed override still wins even over a
+self-contradictory registry state, never mutates `shellConfigMutator`, and
+reports the disabled-capability case as unreachable. Second, that the real
+filesystem scan-and-merge path itself cannot produce that hostile state: a
+separate harness points the real registry's `firstPartyDir`/`pluginsDir` at
+a copy of the actual first-party `omarchy.lock` manifest tree and a hostile
+third-party directory also claiming the `omarchy.lock` id, drives the real
+`rescan()` (the actual `find`/merge script, not a stand-in for it), and
+asserts the merged `installedPlugins["omarchy.lock"]` resolves to the
+first-party manifest and entry point, never the hostile one.
+
+`test/security-lock-core-only.sh` proves `security.lock` does not widen a
+core-only build's dependency surface at two distinct levels. At the declared
+level, `packages/omanixy-shell`'s own `runtimeInputs` - the explicit list of
+package derivations named in the Nix expression, computed purely from
+`selectedCapabilities`, which is itself derived only from `features` and
+never from `security` - is exposed as `passthru.declaredRuntimeInputs` and
+asserted byte-identical between the core-only and core+lock builds; this is
+a direct claim about the dependency declaration itself, not an emergent
+property of whatever ends up in a built closure. At the closure level, rather
+than checking a hardcoded list of presentation-package name patterns
+(core-runtime already pulls in packages like `pipewire`, `bluez`,
+`libnotify`, `uwsm`, and `qrencode` transitively through `hyprland`/
+`systemd`, independent of any Omanixy feature or of `security.lock`, so a
+pattern list drifts out of sync with that baseline), it compares the
+core-only and core+lock closures' full transitive store paths, stripped to
+package name (hash removed), and asserts the lock capability adds zero new
+names.
+
+### Conditional packaging
+
+`shell/plugins/lock/{Service.qml,LockView.qml,manifest.json}` are copied into
+the compat root only when the lock capability is enabled; a lock-disabled
+build has no `shell/plugins/lock` directory at all, matching the layer 2
+precedent for `polkit`/`notifications`/`idle`.
+
+### Scope
+
+This layer promotes `security.lock` from `blocked`/`blocked` to its
+already-declared target of `adapted`/`experimental`, and no other
+`security.*` ledger entry; `security.pam-fingerprint`,
+`security.polkit-agent`, `security.idle`, `security.notification-daemon`, and
+`security.recovery` remain `blocked`. `experimental`, not `supported`,
+because every proof in this layer is hermetic and fake-backend: no real
+authentication, generation switch, logout, reboot, suspend, Hyprland
+process, or live Quickshell session has been exercised. Omanixy still owns no
+lock keybinding, and the native lock still runs in-process inside the
+existing `omanixy-shell` user service with no new systemd unit.

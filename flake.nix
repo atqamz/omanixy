@@ -23,7 +23,7 @@
       contractSource = builtins.fromJSON (builtins.readFile ./upstream/compatibility-contracts.json);
       nixpkgsRevision = contractSource.pins.nixpkgs;
       forEachSystem = nixpkgs.lib.genAttrs supportedSystems;
-      runtimeFor = system: features:
+      runtimeForSecurity = system: features: security:
         assert nixpkgs.lib.assertOneOf "omanixy supported system" system supportedSystems;
         import ./packages/omanixy-shell {
           inherit omarchy;
@@ -31,8 +31,9 @@
           pkgs = nixpkgs.legacyPackages.${system};
           quickshellSrc = quickshell;
           inherit nixpkgsRevision supportedSystems;
-          inherit features;
+          inherit features security;
         };
+      runtimeFor = system: features: runtimeForSecurity system features null;
       homeConfigurationFor = system: extra: home-manager.lib.homeManagerConfiguration {
         pkgs = nixpkgs.legacyPackages.${system};
         modules = [
@@ -49,7 +50,7 @@
     in
     {
       homeManagerModules.default = { pkgs, ... }: {
-        _module.args.omanixyRuntimeFor = features: runtimeFor pkgs.stdenv.hostPlatform.system features;
+        _module.args.omanixyRuntimeFor = features: security: runtimeForSecurity pkgs.stdenv.hostPlatform.system features security;
         imports = [ ./modules/home/default.nix ];
       };
       nixosModules.default = ./modules/nixos/default.nix;
@@ -81,6 +82,8 @@
           monitorRuntime = runtimeFor system [ "monitor" ];
           powerRuntime = runtimeFor system [ "power" ];
           notificationRuntime = runtimeFor system [ "notification" ];
+          lockRuntime = runtimeForSecurity system null { lock = true; };
+          coreLockRuntime = runtimeForSecurity system [ "core" ] { lock = true; };
           capabilityRuntimePaths = pkgs.writeText "omanixy-capability-runtime-paths" (builtins.toJSON {
             "audio-control" = toString audioRuntime;
             "audio-default-output" = toString audioRuntime;
@@ -113,6 +116,9 @@
             programs.omanixy.features = [ "network" ];
           };
           runtimeClosureInfo = pkgs.closureInfo { rootPaths = [ runtime ]; };
+          lockRuntimeClosureInfo = pkgs.closureInfo { rootPaths = [ lockRuntime ]; };
+          coreLockRuntimeClosureInfo = pkgs.closureInfo { rootPaths = [ coreLockRuntime ]; };
+          coreRuntimeClosureInfo = pkgs.closureInfo { rootPaths = [ coreRuntime ]; };
           compatibilityRoot = runtime.passthru.omarchyCompatibilityRoot;
           baselineConfigForTests = builtins.removeAttrs
             (builtins.fromJSON (builtins.readFile ./upstream/shell-baseline.json))
@@ -289,6 +295,59 @@
           # checked when config.system.build.toplevel is forced, never on
           # config.environment.etc directly.
           pamPasswordStrongConflictServiceFile = "${pamPasswordStrongConflictNixosConfiguration.config.environment.etc."pam.d/omarchy-lock-password".source}";
+          # Section 26 scenario 1/7: standalone Home Manager, lock disabled
+          # (the default) - must evaluate cleanly.
+          standaloneLockDisabledEval = builtins.tryEval (
+            builtins.seq (homeConfigurationFor system { }).activationPackage.drvPath true
+          );
+          # Section 26 scenario 2/7: standalone Home Manager, lock enabled -
+          # must fail evaluation, since there is no osConfig to provision the
+          # PAM service the lock authenticates against.
+          standaloneLockEnabledEval = builtins.tryEval (
+            builtins.seq
+              (homeConfigurationFor system {
+                programs.omanixy.security.lock.enable = true;
+              }).activationPackage.drvPath
+              true
+          );
+          # Scenarios 3-6/7: NixOS + Home Manager integrated via
+          # home-manager.nixosModules.home-manager, crossed with whether the
+          # NixOS PAM password service and the Home Manager lock option are
+          # each enabled. Only pam-enabled x lock-enabled must pass; the
+          # remaining lock-enabled combination (PAM off) must fail closed via
+          # the programs.omanixy.security.lock.enable assertion in
+          # modules/home/default.nix.
+          integratedHomeManagerNixosConfigurationFor = pamEnabled: lockEnabled: nixpkgs.lib.nixosSystem {
+            inherit system;
+            modules = [
+              self.nixosModules.default
+              bootableStub
+              home-manager.nixosModules.home-manager
+              {
+                nixpkgs.hostPlatform = system;
+                system.stateVersion = "26.11";
+                programs.omanixy.security.pam.password.enable = pamEnabled;
+                users.users."omanixy-test" = {
+                  isNormalUser = true;
+                  home = "/build/omanixy-test";
+                };
+                home-manager.useGlobalPkgs = true;
+                home-manager.useUserPackages = true;
+                home-manager.users."omanixy-test" = {
+                  imports = [ self.homeManagerModules.default ];
+                  home.username = "omanixy-test";
+                  home.homeDirectory = "/build/omanixy-test";
+                  home.stateVersion = "25.11";
+                  programs.omanixy.enable = true;
+                  programs.omanixy.security.lock.enable = lockEnabled;
+                };
+              }
+            ];
+          };
+          integratedPamOffLockOffNixosConfiguration = integratedHomeManagerNixosConfigurationFor false false;
+          integratedPamOnLockOffNixosConfiguration = integratedHomeManagerNixosConfigurationFor true false;
+          integratedPamOffLockOnNixosConfiguration = integratedHomeManagerNixosConfigurationFor false true;
+          integratedPamOnLockOnNixosConfiguration = integratedHomeManagerNixosConfigurationFor true true;
           service = homeConfiguration.config.systemd.user.services.omanixy-shell;
           activationScript = pkgs.writeShellScript "omanixy-shell-state-activation" homeConfiguration.config.home.activation.omanixyShellState.data;
           clipboardActivationScript = pkgs.writeShellScript "omanixy-shell-clipboard-state-activation" clipboardHomeConfiguration.config.home.activation.omanixyShellState.data;
@@ -297,6 +356,13 @@
           weatherActivationScript = pkgs.writeShellScript "omanixy-shell-weather-state-activation" weatherHomeConfiguration.config.home.activation.omanixyShellState.data;
           networkActivationScript = pkgs.writeShellScript "omanixy-shell-network-state-activation" networkHomeConfiguration.config.home.activation.omanixyShellState.data;
           customActivationScript = pkgs.writeShellScript "omanixy-shell-custom-state-activation" customHomeConfiguration.config.home.activation.omanixyShellState.data;
+          # Extracted from the integrated PAM-on/lock-on configuration, the
+          # only combination where programs.omanixy.security.lock.enable
+          # evaluates without failing its osConfig assertion - proves that
+          # enabling the lock capability never changes shell.json handling,
+          # which stays owned by the presentation feature model alone.
+          lockEnabledActivationScript = pkgs.writeShellScript "omanixy-shell-lock-state-activation"
+            integratedPamOnLockOnNixosConfiguration.config.home-manager.users."omanixy-test".home.activation.omanixyShellState.data;
           serviceUnit = pkgs.writeText "omanixy-shell.service" ''
             [Unit]
             Description=${service.Unit.Description}
@@ -547,6 +613,78 @@
               "$adversarialToplevelForced" \
               "$enableConflictServiceFile" "$enableConflictEnable" "$enableConflictToplevelForced" \
               "$strongConflictServiceFile" "$strongConflictToplevelForced"
+            touch "$out"
+          '';
+          security-lock = pkgs.runCommand "omanixy-security-lock"
+            {
+              standaloneLockDisabledOk = if standaloneLockDisabledEval.success then "true" else "false";
+              standaloneLockEnabledOk = if standaloneLockEnabledEval.success then "true" else "false";
+              integratedOffOffOk = if toplevelForced integratedPamOffLockOffNixosConfiguration then "true" else "false";
+              integratedOnOffOk = if toplevelForced integratedPamOnLockOffNixosConfiguration then "true" else "false";
+              integratedOffOnOk = if toplevelForced integratedPamOffLockOnNixosConfiguration then "true" else "false";
+              integratedOnOnOk = if toplevelForced integratedPamOnLockOnNixosConfiguration then "true" else "false";
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.jq pkgs.procps ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-lock.sh} \
+              ${lockRuntime.passthru.omarchyCompatibilityRoot} ${lockRuntime.passthru.compatibilityBin} ${lockRuntime} \
+              ${compatibilityRoot} ${runtime.passthru.compatibilityBin} \
+              "$standaloneLockDisabledOk" "$standaloneLockEnabledOk" \
+              "$integratedOffOffOk" "$integratedOnOffOk" "$integratedOffOnOk" "$integratedOnOnOk" \
+              ${./packages/omanixy-shell/adapters/common.bash} ${./packages/omanixy-shell/adapters/lock.bash}
+            touch "$out"
+          '';
+          security-lock-shell-json = pkgs.runCommand "omanixy-security-lock-shell-json"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.diffutils pkgs.jq ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-lock-shell-json.sh} \
+              ${activationScript} ${lockEnabledActivationScript} ${storeConfig}
+            touch "$out"
+          '';
+          security-lock-closure = pkgs.runCommand "omanixy-security-lock-closure"
+            {
+              lockClosurePaths = "${lockRuntimeClosureInfo}/store-paths";
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.findutils pkgs.diffutils ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-lock-closure.sh} \
+              ${lockRuntime} "$lockClosurePaths" \
+              ${lockRuntime.passthru.compatibilityBin} ${runtime.passthru.compatibilityBin}
+            touch "$out"
+          '';
+          security-lock-executable-surface = pkgs.runCommand "omanixy-security-lock-executable-surface"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.python3 ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-lock-executable-surface.sh} \
+              ${./scripts/scan-lock-executable-surface} \
+              ${lockRuntime.passthru.omarchyCompatibilityRoot}/shell/plugins/lock/Service.qml \
+              ${pkgs.python3}/bin/python3 ${./scripts}
+            touch "$out"
+          '';
+          security-lock-managed-plugin = pkgs.runCommand "omanixy-security-lock-managed-plugin"
+            {
+              # findutils: the real PluginRegistry.rescan() scan script (driven
+              # by the registry-scan harness) shells out to `find` to locate
+              # manifests under firstPartyDir/pluginsDir.
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.findutils ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-lock-managed-plugin.sh} \
+              ${lockRuntime.passthru.omarchyCompatibilityRoot} ${lockRuntime}/bin/quickshell \
+              ${compatibilityRoot} ${runtime}/bin/quickshell
+            touch "$out"
+          '';
+          security-lock-core-only = pkgs.runCommand "omanixy-security-lock-core-only"
+            {
+              coreClosurePaths = "${coreRuntimeClosureInfo}/store-paths";
+              coreLockClosurePaths = "${coreLockRuntimeClosureInfo}/store-paths";
+              coreDeclaredRuntimeInputs = pkgs.writeText "omanixy-core-declared-runtime-inputs.json" coreRuntime.passthru.declaredRuntimeInputs;
+              coreLockDeclaredRuntimeInputs = pkgs.writeText "omanixy-core-lock-declared-runtime-inputs.json" coreLockRuntime.passthru.declaredRuntimeInputs;
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.findutils pkgs.diffutils pkgs.jq ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-lock-core-only.sh} \
+              ${coreLockRuntime.passthru.compatibilityBin} ${coreRuntime.passthru.compatibilityBin} \
+              "$coreClosurePaths" "$coreLockClosurePaths" \
+              "$coreDeclaredRuntimeInputs" "$coreLockDeclaredRuntimeInputs"
             touch "$out"
           '';
           quattro-contract-audit = pkgs.runCommand "omanixy-quattro-contract-audit"
