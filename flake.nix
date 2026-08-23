@@ -176,6 +176,119 @@
               }
             ];
           };
+          # A minimal, otherwise-unrelated boot/root-filesystem stub so that
+          # forcing config.system.build.toplevel (the only path that actually
+          # runs NixOS assertion checking) does not fail on the generic
+          # "no root filesystem"/"no bootloader" assertions every minimal
+          # fixture would otherwise trip, independent of the PAM invariant
+          # under test.
+          bootableStub = {
+            fileSystems."/" = {
+              device = "/dev/null";
+              fsType = "ext4";
+            };
+            boot.loader.grub.devices = [ "/dev/null" ];
+          };
+          # Forces config.system.build.toplevel's evaluation (not build) for
+          # a nixosSystem result, without invoking a derivation builder. This
+          # is the only attribute that runs `assertions`/`warnings` checking
+          # (nixpkgs' lib.asserts.checkAssertWarn, wired in
+          # nixos/modules/system/activation/top-level.nix); evaluating any
+          # other config.* attribute does not.
+          toplevelForced = nixosConfig: (builtins.tryEval (builtins.seq nixosConfig.config.system.build.toplevel.drvPath true)).success;
+          pamPasswordNixosConfiguration = nixpkgs.lib.nixosSystem {
+            inherit system;
+            modules = [
+              self.nixosModules.default
+              bootableStub
+              {
+                nixpkgs.hostPlatform = system;
+                system.stateVersion = "26.11";
+                programs.omanixy.security.pam.password.enable = true;
+              }
+            ];
+          };
+          pamPasswordServiceFile = "${pamPasswordNixosConfiguration.config.environment.etc."pam.d/omarchy-lock-password".source}";
+          pamPasswordAdversarialNixosConfiguration = nixpkgs.lib.nixosSystem {
+            inherit system;
+            modules = [
+              self.nixosModules.default
+              bootableStub
+              {
+                nixpkgs.hostPlatform = system;
+                system.stateVersion = "26.11";
+                programs.omanixy.security.pam.password.enable = true;
+              }
+              (
+                { config, ... }:
+                {
+                  # An unrelated, ordinary normal-priority module definition
+                  # of the same PAM service - simulates a third-party module
+                  # that is unaware Omanixy owns this service. Must not
+                  # merge into the generated file.
+                  security.pam.services."omarchy-lock-password".text = ''
+                    auth sufficient ${config.security.pam.package}/lib/security/pam_permit.so
+                  '';
+                }
+              )
+            ];
+          };
+          pamPasswordAdversarialServiceFile = "${pamPasswordAdversarialNixosConfiguration.config.environment.etc."pam.d/omarchy-lock-password".source}";
+          # D. An unrelated, ordinary normal-priority module that disables
+          # the service outright. Omanixy must keep owning the enabled
+          # state: the service must still be present and byte-identical to
+          # the plain enabled build.
+          pamPasswordEnableConflictNixosConfiguration = nixpkgs.lib.nixosSystem {
+            inherit system;
+            modules = [
+              self.nixosModules.default
+              bootableStub
+              {
+                nixpkgs.hostPlatform = system;
+                system.stateVersion = "26.11";
+                programs.omanixy.security.pam.password.enable = true;
+              }
+              {
+                security.pam.services."omarchy-lock-password".enable = false;
+              }
+            ];
+          };
+          pamPasswordEnableConflictServiceFile = "${pamPasswordEnableConflictNixosConfiguration.config.environment.etc."pam.d/omarchy-lock-password".source}";
+          # E. A second module contesting the same PAM text at Omanixy's own
+          # override strength (another lib.mkForce). nixpkgs' `lines` type
+          # merges same-priority definitions by concatenation instead of
+          # raising a conflict, so this does NOT fail on its own - proven
+          # below via pamPasswordStrongConflictServiceFile, checked by
+          # security-pam-capability. The Omanixy module's own assertion is
+          # what must fail this configuration's config.system.build.toplevel
+          # closed rather than let the merge through silently.
+          pamPasswordStrongConflictNixosConfiguration = nixpkgs.lib.nixosSystem {
+            inherit system;
+            modules = [
+              self.nixosModules.default
+              bootableStub
+              {
+                nixpkgs.hostPlatform = system;
+                system.stateVersion = "26.11";
+                programs.omanixy.security.pam.password.enable = true;
+              }
+              (
+                { config, lib, ... }:
+                {
+                  security.pam.services."omarchy-lock-password".text = lib.mkForce ''
+                    auth sufficient ${config.security.pam.package}/lib/security/pam_permit.so
+                  '';
+                }
+              )
+            ];
+          };
+          # The raw generated file, ignoring assertions entirely - proves the
+          # danger the Omanixy assertion defends against is real: two
+          # equal-priority (mkForce) `text` definitions merge by
+          # concatenation instead of conflicting, since assertions are only
+          # checked when config.system.build.toplevel is forced, never on
+          # config.environment.etc directly.
+          pamPasswordStrongConflictServiceFile = "${pamPasswordStrongConflictNixosConfiguration.config.environment.etc."pam.d/omarchy-lock-password".source}";
           service = homeConfiguration.config.systemd.user.services.omanixy-shell;
           activationScript = pkgs.writeShellScript "omanixy-shell-state-activation" homeConfiguration.config.home.activation.omanixyShellState.data;
           clipboardActivationScript = pkgs.writeShellScript "omanixy-shell-clipboard-state-activation" clipboardHomeConfiguration.config.home.activation.omanixyShellState.data;
@@ -382,6 +495,58 @@
           '';
           nixos-evaluation = pkgs.runCommand "omanixy-nixos-evaluation" { } ''
             test "${nixosConfiguration.config.system.stateVersion}" = 26.11
+            touch "$out"
+          '';
+          security-pam = pkgs.runCommand "omanixy-security-pam"
+            {
+              disabledHasPasswordService = if builtins.hasAttr "pam.d/omarchy-lock-password" nixosConfiguration.config.environment.etc then "true" else "false";
+              disabledHasFingerprintService = if builtins.hasAttr "pam.d/omarchy-lock-fingerprint" nixosConfiguration.config.environment.etc then "true" else "false";
+              enabledHasFingerprintService = if builtins.hasAttr "pam.d/omarchy-lock-fingerprint" pamPasswordNixosConfiguration.config.environment.etc then "true" else "false";
+              enabledPolkitEnabled = if pamPasswordNixosConfiguration.config.security.polkit.enable then "true" else "false";
+              disabledPolkitEnabled = if nixosConfiguration.config.security.polkit.enable then "true" else "false";
+              serviceFile = pamPasswordServiceFile;
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.ripgrep ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-pam.sh} ${./.} "$serviceFile" \
+              "$disabledHasPasswordService" "$disabledHasFingerprintService" \
+              "$enabledHasFingerprintService" "$enabledPolkitEnabled" "$disabledPolkitEnabled"
+            touch "$out"
+          '';
+          security-pam-composition = pkgs.runCommand "omanixy-security-pam-composition"
+            {
+              ownedServiceFile = pamPasswordServiceFile;
+              adversarialServiceFile = pamPasswordAdversarialServiceFile;
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.diffutils pkgs.gnugrep ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-pam-composition.sh} \
+              "$ownedServiceFile" "$adversarialServiceFile"
+            touch "$out"
+          '';
+          security-pam-writer-guard = pkgs.runCommand "omanixy-security-pam-writer-guard"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.ripgrep ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-pam-writer-guard.sh} ${./test/lib/no-imperative-pam-write.sh}
+            touch "$out"
+          '';
+          security-pam-capability = pkgs.runCommand "omanixy-security-pam-capability"
+            {
+              ownedServiceFile = pamPasswordServiceFile;
+              ownedEnable = if pamPasswordNixosConfiguration.config.security.pam.services."omarchy-lock-password".enable then "true" else "false";
+              ownedToplevelForced = if toplevelForced pamPasswordNixosConfiguration then "true" else "false";
+              adversarialToplevelForced = if toplevelForced pamPasswordAdversarialNixosConfiguration then "true" else "false";
+              enableConflictServiceFile = pamPasswordEnableConflictServiceFile;
+              enableConflictEnable = if pamPasswordEnableConflictNixosConfiguration.config.security.pam.services."omarchy-lock-password".enable then "true" else "false";
+              enableConflictToplevelForced = if toplevelForced pamPasswordEnableConflictNixosConfiguration then "true" else "false";
+              strongConflictServiceFile = pamPasswordStrongConflictServiceFile;
+              strongConflictToplevelForced = if toplevelForced pamPasswordStrongConflictNixosConfiguration then "true" else "false";
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.diffutils pkgs.gnugrep ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-pam-capability.sh} \
+              "$ownedServiceFile" "$ownedEnable" "$ownedToplevelForced" \
+              "$adversarialToplevelForced" \
+              "$enableConflictServiceFile" "$enableConflictEnable" "$enableConflictToplevelForced" \
+              "$strongConflictServiceFile" "$strongConflictToplevelForced"
             touch "$out"
           '';
           quattro-contract-audit = pkgs.runCommand "omanixy-quattro-contract-audit"

@@ -975,11 +975,12 @@ items:
       - Omanixy does not enable the lock plugin, install a lock agent, or write PAM configuration in layer 1.
 
   - id: security.pam-password
-    classification: blocked
-    support: blocked
+    classification: adapted
+    support: experimental
     maturity: audited
     owner: atqamz/omanixy#4
     planned_stack_layer: 2/8
+    promoted_at_layer: 2/8
     audit_layer: 1/8
     target:
       classification: adapted
@@ -1027,6 +1028,12 @@ items:
         - nullok is not acceptable for a screen lock
         - account and session rules are not consumed by this Quickshell ABI
         - generated nixpkgs rules are experimental and ordering-sensitive
+        - pam_faillock is not adopted in this layer: a lock-screen lockout policy is a cross-cutting recovery decision owned by the layer 8 failure and recovery matrix, not an implicit side effect of the password capability
+        - pam_systemd_home is not adopted: the implemented backend is pam_unix against ordinary shadow-backed local Unix accounts; systemd-homed authentication is out of scope for this layer and not claimed to work, independent of whether systemd-homed happens to be available on a given host
+        - pam_permit.so is never used as an authentication-success path
+    account_backend:
+      implemented: pam_unix against shadow-backed local Unix accounts
+      unvalidated: systemd-homed accounts (pam_systemd_home not included; not claimed to authenticate)
     failure_sensitive:
       - PAM start failure must be distinct from authentication failure
       - prompt cancellation must abort the PAM subprocess
@@ -1036,15 +1043,29 @@ items:
         - exact Quickshell PamContext source and qmltypes
         - exact nixpkgs security.pam module audit
         - pinned Arch policy inventory without its /etc writes
+        - declarative programs.omanixy.security.pam.password.enable NixOS option, disabled by default
+        - generated /etc/pam.d/omarchy-lock-password hermetically built and content-checked for a single auth-only pam_unix.so line
+        - hermetic proof of no nullok, no pam_permit.so, no account/session/password phase, no fingerprint service, and no polkit side effect
+        - static proof of no imperative /etc/pam.d writer outside security.pam.services
+        - static proof Home Manager declares no PAM service and the NixOS module reaches into no Home Manager or desktop-session option
+        - hermetic build proof that an unrelated normal-priority security.pam.services."omarchy-lock-password".text definition does not concatenate into the Omanixy-owned service text (mkForce ownership), via test/security-pam-composition.sh
+        - hermetic build proof that Omanixy owns both the service's enable state and its text atomically (mkForce on both fields): an unrelated normal-priority enable = false does not suppress the service, and an assertion fails config.system.build.toplevel's evaluation closed if a second, equal-priority override (for example another lib.mkForce on text) contests ownership, rather than letting nixpkgs' lines-type concatenation silently compose an altered auth stack, via test/security-pam-capability.sh
       required_before_promotion:
-        - explicit NixOS service text review
-        - empty-password rejection
-        - PAM start, prompt, cancel, failure, and lockout tests
-        - no imperative activation or /etc mutation proof
+        - live PAM start, prompt, cancel, authentication success, and authentication failure tests against a real pam_unix.so conversation
+        - a decision and, if adopted, an explicit lockout policy with real lockout tests, before any faillock module is added
+        - native lock or other real PAM_authenticate consumer wiring to this service, still owned by a later stack layer
+        - a decision and implementation, if ever adopted, for authenticating systemd-homed accounts; unvalidated and out of scope until then
     tests:
       - test/quattro-contract-audit.sh
+      - test/security-pam.sh
+      - test/security-pam-composition.sh
+      - test/security-pam-capability.sh
     notes:
-      - Later implementation uses security.pam.services.<name>.text with a complete explicit auth stack; this layer enables nothing.
+      - This layer implements security.pam.services."omarchy-lock-password".text as a single explicit auth-only pam_unix.so line, and owns both that text and the service's enable state atomically via lib.mkForce; no faillock or nullok policy is included.
+      - lib.mkForce alone does not defend against an equal-priority competing definition of text, since nixpkgs' lines merge type concatenates same-priority definitions instead of raising a conflict; this layer adds an assertion verifying the final resolved service still matches the exact Omanixy-owned contract whenever the capability is enabled, so such a conflict fails the build closed instead of silently composing. A consumer who needs different policy for this service must disable programs.omanixy.security.pam.password first; this layer provides no extraConfig or other free-form PAM extension option.
+      - The implemented password backend is pam_unix against ordinary shadow-backed local Unix accounts. systemd-homed authentication is not implemented by this layer and is not claimed to work; pam_systemd_home is deliberately absent. A host may have systemd-homed available while a given account is still shadow-backed - this is a support-scope omission, not a host-specific claim.
+      - support is experimental, not supported, because no live authentication conversation has been exercised; only the generated declarative artifact is hermetically proven.
+      - No PAM consumer, native lock, fingerprint capability, polkit agent, idle manager, or notification daemon is enabled by this layer.
 
   - id: security.pam-fingerprint
     classification: blocked

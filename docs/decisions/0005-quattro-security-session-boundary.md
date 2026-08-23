@@ -317,3 +317,102 @@ notification daemon, or start an idle manager.
 
 Only the final layer may promote the complete issue #4 architecture or close
 the issue.
+
+## Layer 2 implementation note
+
+`4-02-security-pam` implements the `security.pam-password` ledger entry only,
+as `programs.omanixy.security.pam.password.enable` in the NixOS module.
+Disabled by default, it declares exactly one
+`security.pam.services."omarchy-lock-password".text`: a single explicit
+`auth required ${config.security.pam.package}/lib/security/pam_unix.so` line,
+using the public `security.pam.package` option rather than the
+`internal = true` `pam_unixModulePath` option, matching how nixpkgs itself
+resolves the module's absolute store path since NixOS has no FHS
+`/lib/security/`.
+
+The pinned Quickshell `PamContext` (`shell/plugins/lock/Service.qml`) calls
+only `pam_start_confdir`/`pam_start`, then `pam_authenticate` once, then
+`pam_end`; it never calls `pam_acct_mgmt`, `pam_open_session`,
+`pam_close_session`, `pam_chauthtok`, or `pam_setcred`.
+The generated service therefore carries only the `auth` phase; `account`,
+`session`, and `password` rules are dead weight this ABI never consumes.
+
+Two of the pinned Arch stack's modules are deliberately not carried over:
+
+- `pam_faillock` is not adopted here. Lockout policy is a cross-cutting
+  failure and recovery decision - it changes what "locked out" means for the
+  whole session, not just this one service - and belongs to the layer 8
+  failure and recovery matrix with its own explicit tests, not as an implicit
+  side effect of declaring the password capability.
+- `pam_systemd_home` is not adopted. The implemented password backend is
+  `pam_unix` against ordinary shadow-backed local Unix accounts; systemd-homed
+  authentication is not implemented by this layer. This is a support-scope
+  omission, not a host-specific claim: a NixOS machine can have `systemd-homed`
+  available while a given account is still an ordinary shadow-backed user, so
+  this module makes no claim that the password capability, once enabled, can
+  authenticate every account backend present on the machine. Extending the
+  supported backend set is a consumer gate for whichever layer wires up the
+  native lock, not a decision made here.
+
+`nullok` and `pam_permit.so` remain rejected outright: neither is an
+acceptable authentication-success path for a screen lock.
+
+`security.pam.services.<name>` has an independently configurable `enable`
+(default `true`, filtered out of `/etc/pam.d` generation entirely when
+`false`) alongside a `text` typed `nullOr lines`, and `lines` merges ordinary
+same-priority definitions by newline concatenation. An unrelated normal
+module could otherwise disable the service outright, or extend its
+authentication stack, while the Omanixy capability still reported `true`.
+This layer's `config` sets both `enable` and `text` via `lib.mkForce`, so
+while the option is enabled Omanixy owns the service's enabled state and its
+entire text atomically, and a competing normal-priority definition of either
+field is discarded rather than merged or honored.
+
+`lib.mkForce` alone is not sufficient against an equally strong competing
+definition: nixpkgs' `lines` merge type combines multiple definitions at the
+same priority by concatenation rather than raising a conflict, so a second
+`lib.mkForce` on `text` from another module would silently extend the
+authentication stack even though Omanixy's own `mkForce` is present. This
+layer adds an `assertions` entry that checks the *final resolved*
+`security.pam.services."omarchy-lock-password"` matches the exact
+Omanixy-owned contract (`enable == true` and `text` equal to the one auth
+line) whenever the option is enabled, so an equal-or-stronger override fails
+the build closed instead of silently composing. NixOS only runs assertion
+checking when `config.system.build.toplevel` is evaluated, so every fixture
+this layer uses to test this invariant forces that specific attribute rather
+than reading `environment.etc` directly.
+
+`pam_unix.so` shells out to a setuid `unix_chkpwd` helper to read the shadow
+database; nixpkgs's own `security/pam.nix` unconditionally registers
+`security.wrappers.unix_chkpwd` (setuid root, sourced from the same pinned
+`linux-pam` package) independent of which PAM services are enabled, so this
+layer neither vendors nor duplicates that privileged helper.
+
+Build fixtures in `flake.nix`, checked by `security-pam-composition` and
+`security-pam-capability`, prove: the generated file is byte-identical
+whether or not an unrelated normal-priority `text` definition is present; the
+generated file is byte-identical and the service stays enabled when an
+unrelated normal-priority `enable = false` is present; and a second,
+equal-priority `lib.mkForce` on `text` fails `config.system.build.toplevel`'s
+evaluation closed rather than silently composing. A consumer who wants a
+different policy for this service must disable this option rather than add
+to it; this layer adds no `extraConfig` escape hatch, no imperative conflict
+resolution, and does not delete or mutate any other file.
+
+The Home Manager module and the NixOS module stay structurally independent:
+Home Manager declares no PAM service, and the NixOS module declares no Home
+Manager or desktop-session option, so a standalone `homeManagerConfiguration`
+evaluation is unaffected by this option's existence.
+A future layer that needs the NixOS module to communicate a capability (for
+example, "password PAM is available") to Home Manager should use Home
+Manager's `osConfig` (populated only when Home Manager is composed via
+`home-manager.nixosModules.home-manager` inside a NixOS system, and absent
+otherwise) rather than a new capability file or a hidden global; this is a
+design note for a later layer, not code added here.
+
+This layer promotes `security.pam-password` from `blocked`/`blocked` to its
+already-declared target of `adapted`/`experimental`, and no other
+`security.*` ledger entry.
+`experimental`, not `supported`, because only the generated artifact is
+hermetically proven; no live PAM conversation, prompt, cancel, or lockout
+test has been run.
