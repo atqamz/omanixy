@@ -48,6 +48,7 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
           target-branch: main
+          skip-github-release: true
       - name: Find draft Release PR
         id: release-pr
         env:

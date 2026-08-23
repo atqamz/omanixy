@@ -85,8 +85,8 @@ creates no dedicated maintainer role.
 invocation, and `nix flake check` runs it as part of `just check`.
 The checker's own source and its selftest are held to the same zero-comment
 bar they enforce, self-documenting through function and variable names only.
-The repository has no separate CI workflow; `nix flake check` is the
-enforcement surface.
+The local enforcement surface is `nix flake check`; CI invokes that same
+check as part of its validation workflow.
 A change that reintroduces narrative prose fails the check and blocks
 review like any other `just check` failure.
 
