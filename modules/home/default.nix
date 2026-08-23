@@ -8,7 +8,19 @@
 
 let
   cfg = config.programs.omanixy;
-  runtime = omanixyRuntimeFor cfg.features (if cfg.security.lock.enable then { lock = true; } else null);
+  fingerprintPackage =
+    if cfg.security.lock.enable && cfg.security.lock.fingerprint.enable && osConfig != null
+    then osConfig.services.fprintd.package
+    else null;
+  runtime = omanixyRuntimeFor cfg.features (
+    if cfg.security.lock.enable
+    then {
+      lock = true;
+      fingerprint = cfg.security.lock.fingerprint.enable;
+      fingerprintPackage = fingerprintPackage;
+    }
+    else null
+  );
   coreutils = "${pkgs.coreutils}/bin";
   baselineSource = builtins.fromJSON (builtins.readFile ../../upstream/shell-baseline.json);
   featureSelection = import ../../lib/feature-selection.nix { inherit lib; baseline = baselineSource; };
@@ -105,12 +117,13 @@ in
         lock (shell/plugins/lock). This is not the stable default: Omanixy
         does not own screen locking unless this is explicitly turned on.
 
-        Only password authentication via PAM is supported by this option;
-        fingerprint authentication can never be configured or activated
-        through it. Omanixy binds no keybinding to trigger the lock and
-        provides no fallback lock mechanism, so the consumer must wire their
-        own trigger (for example a Hyprland keybind invoking the shell's
-        `lock` IPC target).
+        Password authentication via PAM is always available through this
+        option; `programs.omanixy.security.lock.fingerprint.enable` adds an
+        optional, disabled-by-default fingerprint unlock path alongside it.
+        Omanixy binds no keybinding to trigger the lock and provides no
+        fallback lock mechanism, so the consumer must wire their own trigger
+        (for example a Hyprland keybind invoking the shell's `lock` IPC
+        target).
 
         Enabling this option on a standalone Home Manager installation
         (without a paired NixOS configuration) always fails evaluation,
@@ -119,6 +132,37 @@ in
         installation, this option additionally requires
         `programs.omanixy.security.pam.password.enable` to be `true` in the
         NixOS configuration.
+      '';
+    };
+
+    security.lock.fingerprint.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Enable fingerprint authentication as a secondary unlock path for the
+        native Quickshell session lock, alongside (never instead of)
+        password authentication. Password authentication remains mandatory
+        and always functional regardless of this option.
+
+        This option is only meaningful while
+        `programs.omanixy.security.lock.enable` is also `true`; enabling it
+        without the lock itself enabled fails evaluation. Like the lock
+        itself, it requires an integrated NixOS + Home Manager installation:
+        enabling it on a standalone Home Manager installation (no `osConfig`)
+        always fails evaluation, because there is no way to provision the
+        `omarchy-lock-fingerprint` PAM service or the fprintd daemon backing
+        it. On an integrated installation, it additionally requires both
+        `programs.omanixy.security.pam.password.enable` and
+        `programs.omanixy.security.pam.fingerprint.enable` to be `true` in
+        the paired NixOS configuration - the former because fingerprint is
+        only ever a secondary path to the mandatory password fallback, the
+        latter because it provisions the fingerprint PAM service and daemon
+        this option authenticates against.
+
+        This is a Nix-declared capability, not a runtime readiness claim: a
+        machine with this enabled but no fingerprint reader (or no enrolled
+        finger) still builds and boots successfully, and unlock silently
+        falls back to password-only.
       '';
     };
   };
@@ -164,6 +208,65 @@ in
           configuration that imports this Home Manager configuration, or
           leave programs.omanixy.security.lock.enable at its default
           (false).
+        '';
+      }
+      {
+        assertion = !cfg.security.lock.fingerprint.enable || cfg.security.lock.enable;
+        message = ''
+          programs.omanixy.security.lock.fingerprint.enable is true, but
+          programs.omanixy.security.lock.enable is not. Fingerprint is only
+          ever a secondary unlock path for the native lock; enable
+          programs.omanixy.security.lock first, or leave
+          programs.omanixy.security.lock.fingerprint.enable at its default
+          (false).
+        '';
+      }
+      {
+        assertion = !cfg.security.lock.fingerprint.enable || osConfig != null;
+        message = ''
+          programs.omanixy.security.lock.fingerprint.enable is true, but
+          this Home Manager configuration is standalone (no NixOS osConfig
+          is available). Fingerprint authenticates via a NixOS-provisioned
+          PAM service and fprintd daemon
+          (programs.omanixy.security.pam.fingerprint.enable), which a
+          standalone Home Manager installation has no way to provision.
+          Import this Home Manager configuration through the standard
+          NixOS Home Manager integration module, inside a NixOS
+          configuration that also enables
+          programs.omanixy.security.pam.fingerprint, or leave
+          programs.omanixy.security.lock.fingerprint.enable at its default
+          (false).
+        '';
+      }
+      {
+        assertion = !cfg.security.lock.fingerprint.enable || osConfig == null
+          || (osConfig.programs.omanixy.security.pam.password.enable or false) == true;
+        message = ''
+          programs.omanixy.security.lock.fingerprint.enable is true, but the
+          paired NixOS configuration does not enable
+          programs.omanixy.security.pam.password.enable. Fingerprint is only
+          ever a secondary path to the mandatory password fallback, never a
+          replacement for it; enable
+          programs.omanixy.security.pam.password.enable in the NixOS
+          configuration that imports this Home Manager configuration, or
+          leave programs.omanixy.security.lock.fingerprint.enable at its
+          default (false).
+        '';
+      }
+      {
+        assertion = !cfg.security.lock.fingerprint.enable || osConfig == null
+          || (osConfig.programs.omanixy.security.pam.fingerprint.enable or false) == true;
+        message = ''
+          programs.omanixy.security.lock.fingerprint.enable is true, but the
+          paired NixOS configuration does not enable
+          programs.omanixy.security.pam.fingerprint.enable. Fingerprint
+          authenticates against the omarchy-lock-fingerprint PAM service and
+          fprintd daemon that only that NixOS option provisions; without it,
+          every fingerprint unlock attempt would be unavailable. Enable
+          programs.omanixy.security.pam.fingerprint.enable in the NixOS
+          configuration that imports this Home Manager configuration, or
+          leave programs.omanixy.security.lock.fingerprint.enable at its
+          default (false).
         '';
       }
     ];

@@ -37,6 +37,15 @@ let
     "weather-network" = [ curl ];
   };
   lockEnabled = security != null && (security.lock or false);
+  fingerprintEnabled = lockEnabled && security != null && (security.fingerprint or false);
+  # The NixOS module registers fingerprint PAM/daemon capability against
+  # config.services.fprintd.package; this must be the exact same package
+  # identity the runtime's fprintd-list client resolves, or PAM and the
+  # readiness adapter can silently disagree about which fprintd is real.
+  fingerprintPackage = if fingerprintEnabled then (security.fingerprintPackage or null) else null;
+  fingerprintPackageValid = lib.assertMsg
+    (!fingerprintEnabled || fingerprintPackage != null)
+    "omanixy fingerprint security requires security.fingerprintPackage to be the NixOS-selected services.fprintd.package";
   managedEnabledSecurityPlugins = lib.optionals lockEnabled [ "omarchy.lock" ];
   managedSecurityPluginIds = builtins.toJSON managedEnabledSecurityPlugins;
   externalExecutableCapabilities = contractSource.externalExecutableCapabilities or { };
@@ -164,7 +173,11 @@ let
             install -Dm644 ${omarchySource}/shell/plugins/lock/LockView.qml "$out/shell/plugins/lock/LockView.qml"
             install -Dm644 ${omarchySource}/shell/plugins/lock/Service.qml "$out/shell/plugins/lock/Service.qml"
             chmod u+w "$out/shell/plugins/lock/Service.qml"
+            ${lib.optionalString fingerprintEnabled ''
+            install -Dm644 ${./FingerprintPolicy.js} "$out/shell/plugins/lock/FingerprintPolicy.js"
+            ''}
             ${pkgs.python3}/bin/python3 ${../../scripts/patch-lock-service} \
+              --fingerprint ${if fingerprintEnabled then "enabled" else "disabled"} \
               "$out/shell/plugins/lock/Service.qml"
             ''}
 
@@ -294,17 +307,25 @@ let
             done
     '';
     passthru = {
-      inherit omarchySource safeMenu safeShellConfig selectedFeatures compatibilityHelpers runtimeBlockedPlugins lockEnabled managedEnabledSecurityPlugins;
+      inherit omarchySource safeMenu safeShellConfig selectedFeatures compatibilityHelpers runtimeBlockedPlugins lockEnabled fingerprintEnabled managedEnabledSecurityPlugins;
     };
   };
 
-  runtimeInputs = assert featureNamesValid; lib.unique (lib.concatMap (capability: capabilityRuntimeInputs.${capability}) selectedCapabilities);
+  runtimeInputs = assert featureNamesValid; assert fingerprintPackageValid; lib.unique (
+    (lib.concatMap (capability: capabilityRuntimeInputs.${capability}) selectedCapabilities)
+    ++ lib.optional fingerprintEnabled fingerprintPackage
+  );
 
   # The declared runtime package inputs themselves (store paths of the exact
   # derivations named in runtimeInputs above), as opposed to the full
   # transitive closure: selectedCapabilities - and therefore runtimeInputs -
-  # is derived purely from `features`, never from `security`, so this list
-  # is provably identical for a given feature set regardless of security.
+  # is derived purely from `features`, never from `security`, with one
+  # narrow, deliberate exception: fingerprintPackage (the NixOS-selected
+  # services.fprintd.package, never an independently-chosen pkgs.fprintd) is
+  # added only when fingerprintEnabled, so this list is provably identical
+  # for a given feature set across every security state except that one. The
+  # Layer 4 closure test proves the widening happens exactly when
+  # fingerprintEnabled flips, and only then.
   declaredRuntimeInputs = builtins.toJSON (builtins.sort (a: b: a < b) (map (p: "${p}") runtimeInputs));
 
   allCompatibilityHelpers = [
@@ -473,6 +494,9 @@ let
       ${lib.optionalString lockEnabled ''
       ln -s ${compatAdapter}/bin/omanixy-compat-adapter "$out/bin/omarchy-hyprland-session-locked"
       ''}
+      ${lib.optionalString fingerprintEnabled ''
+      ln -s ${compatAdapter}/bin/omanixy-compat-adapter "$out/bin/omarchy-lock-fingerprint-ready"
+      ''}
       ${pkgs.python3}/bin/python3 ${../../scripts/generate-postpatch-runtime-surface} \
         ${omarchyCompatibilityRoot} "$out" "$probes" ${quickshell}/bin/quickshell ${fontconfigFile} ${pkgs.bash}/bin/bash ${lib.escapeShellArg (builtins.toJSON helperConsumers)} ${lib.escapeShellArg featureSurface}
     '';
@@ -516,10 +540,13 @@ pkgs.symlinkJoin {
     ${lib.optionalString lockEnabled ''
     ln -s ${compatibilityBin}/bin/omarchy-hyprland-session-locked "$out/bin/omarchy-hyprland-session-locked"
     ''}
+    ${lib.optionalString fingerprintEnabled ''
+    ln -s ${compatibilityBin}/bin/omarchy-lock-fingerprint-ready "$out/bin/omarchy-lock-fingerprint-ready"
+    ''}
     ln -s ${theme} "$out/share/omarchy-theme"
   '';
   passthru = {
-    inherit omarchyRevision quickshellRevision nixpkgsRevision omarchySource omarchyCompatibilityRoot compatibilityBin compatibilityProbes quickshell theme supportedSystems safeMenu safeShellConfig selectedFeatures selectedCapabilities compatibilityHelpers runtimeBlockedPlugins adapterSources adapterSourceHash featureSurface lockEnabled managedEnabledSecurityPlugins declaredRuntimeInputs;
+    inherit omarchyRevision quickshellRevision nixpkgsRevision omarchySource omarchyCompatibilityRoot compatibilityBin compatibilityProbes quickshell theme supportedSystems safeMenu safeShellConfig selectedFeatures selectedCapabilities compatibilityHelpers runtimeBlockedPlugins adapterSources adapterSourceHash featureSurface lockEnabled fingerprintEnabled managedEnabledSecurityPlugins declaredRuntimeInputs;
     buildProvenance = {
       inherit omarchyRevision quickshellRevision nixpkgsRevision;
     };

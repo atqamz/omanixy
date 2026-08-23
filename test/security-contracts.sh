@@ -49,13 +49,19 @@ for item in security:
         assert "promoted_at_layer" not in item
 
 promoted_ids = {item["id"] for item in security if "promoted_at_layer" in item}
-assert promoted_ids == {"security.pam-password", "security.lock"}
+assert promoted_ids == {"security.pam-password", "security.lock", "security.pam-fingerprint"}
 
 lock = next(item for item in security if item["id"] == "security.lock")
 assert lock["classification"] == "adapted"
 assert lock["support"] == "experimental"
 assert lock["target"] == {"classification": "adapted", "support": "experimental"}
 assert lock["promoted_at_layer"] == "3/8"
+
+pam_fingerprint = next(item for item in security if item["id"] == "security.pam-fingerprint")
+assert pam_fingerprint["classification"] == "adapted"
+assert pam_fingerprint["support"] == "experimental"
+assert pam_fingerprint["target"] == {"classification": "adapted", "support": "experimental"}
+assert pam_fingerprint["promoted_at_layer"] == "4/8"
 
 notification_client = next(item for item in items if item["id"] == "notification.client")
 notification_daemon = next(item for item in security if item["id"] == "security.notification-daemon")
@@ -109,18 +115,20 @@ for plugin in lock polkit notifications; do
 done
 test ! -e "$compatibility_root/shell/plugins/services/idle"
 
-# Layer 2 owns exactly one declarative PAM capability, in exactly one place:
+# Layers 2 and 4 own every declarative PAM capability, in exactly one place:
 # the NixOS security module. Home Manager and the runtime package must never
-# declare a PAM service, and fingerprint/polkit/idle/notification ownership
-# remain out of scope until their own stack layers.
-if rg -n 'security\.pam\.services|/etc/pam\.d/omarchy-lock|omarchy-lock-(password|fingerprint)' \
+# declare a PAM service themselves - only reference the fingerprint readiness
+# adapter's helper name, which is not a PAM declaration - and polkit/idle/
+# notification ownership remains out of scope until their own stack layers.
+if rg -n 'security\.pam\.services|/etc/pam\.d/omarchy-lock-(password|fingerprint)\b|pam_fprintd|pam_unix' \
   "$repo/modules/home" "$repo/packages"; then
-  printf '%s\n' 'PAM declaration found outside the layer-2 NixOS security module' >&2
+  printf '%s\n' 'PAM declaration found outside the layer-2/4 NixOS security module' >&2
   exit 1
 fi
 
-if rg -n 'omarchy-lock-fingerprint|pam_fprintd' "$repo/modules"; then
-  printf '%s\n' 'fingerprint PAM capability is out of scope before layer 4' >&2
+if rg -n 'security\.pam\.services|/etc/pam\.d/omarchy-lock-(password|fingerprint)\b|pam_fprintd|pam_unix' \
+  "$repo/modules/nixos" | rg -v 'modules/nixos/default\.nix'; then
+  printf '%s\n' 'PAM declaration found outside the layer-2/4 NixOS security module file' >&2
   exit 1
 fi
 
