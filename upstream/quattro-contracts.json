@@ -308,6 +308,12 @@
       "path": "default/omarchy/omarchy-menu.jsonc"
     },
     {
+      "invocation": "shell-eval",
+      "line": 411,
+      "name": "omarchy-brightness-display",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
       "invocation": "source",
       "line": 411,
       "name": "omarchy-brightness-display",
@@ -330,6 +336,12 @@
       "line": 247,
       "name": "omarchy-brightness-display",
       "path": "shell/plugins/panels/monitor/Panel.qml"
+    },
+    {
+      "invocation": "shell-eval",
+      "line": 411,
+      "name": "omarchy-brightness-keyboard",
+      "path": "shell/plugins/lock/Service.qml"
     },
     {
       "invocation": "source",
@@ -400,6 +412,34 @@
       "path": "default/omarchy/omarchy-menu.jsonc"
     },
     {
+      "id": "update.channel.dev",
+      "invocation": "menu.checked",
+      "line": 0,
+      "name": "omarchy-channel-current",
+      "path": "default/omarchy/omarchy-menu.jsonc"
+    },
+    {
+      "id": "update.channel.edge",
+      "invocation": "menu.checked",
+      "line": 0,
+      "name": "omarchy-channel-current",
+      "path": "default/omarchy/omarchy-menu.jsonc"
+    },
+    {
+      "id": "update.channel.rc",
+      "invocation": "menu.checked",
+      "line": 0,
+      "name": "omarchy-channel-current",
+      "path": "default/omarchy/omarchy-menu.jsonc"
+    },
+    {
+      "id": "update.channel.stable",
+      "invocation": "menu.checked",
+      "line": 0,
+      "name": "omarchy-channel-current",
+      "path": "default/omarchy/omarchy-menu.jsonc"
+    },
+    {
       "form": "OMARCHY_PATH/bin",
       "line": 238,
       "name": "omarchy-clipboard-open",
@@ -464,13 +504,6 @@
       "line": 422,
       "name": "omarchy-cmd-missing",
       "path": "shell/plugins/menu/MenuModel.js"
-    },
-    {
-      "id": "install.ai.ollama",
-      "invocation": "menu.action",
-      "line": 0,
-      "name": "omarchy-cmd-present",
-      "path": "default/omarchy/omarchy-menu.jsonc"
     },
     {
       "id": "install.ai.ollama",
@@ -710,6 +743,69 @@
       "path": "default/omarchy/omarchy-menu.jsonc"
     },
     {
+      "id": "setup.default.agent.claude",
+      "invocation": "menu.checked",
+      "line": 0,
+      "name": "omarchy-default-agent",
+      "path": "default/omarchy/omarchy-menu.jsonc"
+    },
+    {
+      "id": "setup.default.agent.codex",
+      "invocation": "menu.checked",
+      "line": 0,
+      "name": "omarchy-default-agent",
+      "path": "default/omarchy/omarchy-menu.jsonc"
+    },
+    {
+      "id": "setup.default.agent.copilot",
+      "invocation": "menu.checked",
+      "line": 0,
+      "name": "omarchy-default-agent",
+      "path": "default/omarchy/omarchy-menu.jsonc"
+    },
+    {
+      "id": "setup.default.agent.crush",
+      "invocation": "menu.checked",
+      "line": 0,
+      "name": "omarchy-default-agent",
+      "path": "default/omarchy/omarchy-menu.jsonc"
+    },
+    {
+      "id": "setup.default.agent.gemini",
+      "invocation": "menu.checked",
+      "line": 0,
+      "name": "omarchy-default-agent",
+      "path": "default/omarchy/omarchy-menu.jsonc"
+    },
+    {
+      "id": "setup.default.agent.grok",
+      "invocation": "menu.checked",
+      "line": 0,
+      "name": "omarchy-default-agent",
+      "path": "default/omarchy/omarchy-menu.jsonc"
+    },
+    {
+      "id": "setup.default.agent.omp",
+      "invocation": "menu.checked",
+      "line": 0,
+      "name": "omarchy-default-agent",
+      "path": "default/omarchy/omarchy-menu.jsonc"
+    },
+    {
+      "id": "setup.default.agent.opencode",
+      "invocation": "menu.checked",
+      "line": 0,
+      "name": "omarchy-default-agent",
+      "path": "default/omarchy/omarchy-menu.jsonc"
+    },
+    {
+      "id": "setup.default.agent.pi",
+      "invocation": "menu.checked",
+      "line": 0,
+      "name": "omarchy-default-agent",
+      "path": "default/omarchy/omarchy-menu.jsonc"
+    },
+    {
       "id": "setup.default.browser.brave",
       "invocation": "menu.action",
       "line": 0,
@@ -754,6 +850,55 @@
     {
       "id": "setup.default.browser.zen",
       "invocation": "menu.action",
+      "line": 0,
+      "name": "omarchy-default-browser",
+      "path": "default/omarchy/omarchy-menu.jsonc"
+    },
+    {
+      "id": "setup.default.browser.brave",
+      "invocation": "menu.checked",
+      "line": 0,
+      "name": "omarchy-default-browser",
+      "path": "default/omarchy/omarchy-menu.jsonc"
+    },
+    {
+      "id": "setup.default.browser.brave-origin",
+      "invocation": "menu.checked",
+      "line": 0,
+      "name": "omarchy-default-browser",
+      "path": "default/omarchy/omarchy-menu.jsonc"
+    },
+    {
+      "id": "setup.default.browser.chrome",
+      "invocation": "menu.checked",
+      "line": 0,
+      "name": "omarchy-default-browser",
+      "path": "default/omarchy/omarchy-menu.jsonc"
+    },
+    {
+      "id": "setup.default.browser.chromium",
+      "invocation": "menu.checked",
+      "line": 0,
+      "name": "omarchy-default-browser",
+      "path": "default/omarchy/omarchy-menu.jsonc"
+    },
+    {
+      "id": "setup.default.browser.edge",
+      "invocation": "menu.checked",
+      "line": 0,
+      "name": "omarchy-default-browser",
+      "path": "default/omarchy/omarchy-menu.jsonc"
+    },
+    {
+      "id": "setup.default.browser.firefox",
+      "invocation": "menu.checked",
+      "line": 0,
+      "name": "omarchy-default-browser",
+      "path": "default/omarchy/omarchy-menu.jsonc"
+    },
+    {
+      "id": "setup.default.browser.zen",
+      "invocation": "menu.checked",
       "line": 0,
       "name": "omarchy-default-browser",
       "path": "default/omarchy/omarchy-menu.jsonc"
@@ -815,6 +960,62 @@
       "path": "default/omarchy/omarchy-menu.jsonc"
     },
     {
+      "id": "setup.default.editor.cursor",
+      "invocation": "menu.checked",
+      "line": 0,
+      "name": "omarchy-default-editor",
+      "path": "default/omarchy/omarchy-menu.jsonc"
+    },
+    {
+      "id": "setup.default.editor.emacs",
+      "invocation": "menu.checked",
+      "line": 0,
+      "name": "omarchy-default-editor",
+      "path": "default/omarchy/omarchy-menu.jsonc"
+    },
+    {
+      "id": "setup.default.editor.helix",
+      "invocation": "menu.checked",
+      "line": 0,
+      "name": "omarchy-default-editor",
+      "path": "default/omarchy/omarchy-menu.jsonc"
+    },
+    {
+      "id": "setup.default.editor.neovim",
+      "invocation": "menu.checked",
+      "line": 0,
+      "name": "omarchy-default-editor",
+      "path": "default/omarchy/omarchy-menu.jsonc"
+    },
+    {
+      "id": "setup.default.editor.sublime",
+      "invocation": "menu.checked",
+      "line": 0,
+      "name": "omarchy-default-editor",
+      "path": "default/omarchy/omarchy-menu.jsonc"
+    },
+    {
+      "id": "setup.default.editor.vim",
+      "invocation": "menu.checked",
+      "line": 0,
+      "name": "omarchy-default-editor",
+      "path": "default/omarchy/omarchy-menu.jsonc"
+    },
+    {
+      "id": "setup.default.editor.vscode",
+      "invocation": "menu.checked",
+      "line": 0,
+      "name": "omarchy-default-editor",
+      "path": "default/omarchy/omarchy-menu.jsonc"
+    },
+    {
+      "id": "setup.default.editor.zed",
+      "invocation": "menu.checked",
+      "line": 0,
+      "name": "omarchy-default-editor",
+      "path": "default/omarchy/omarchy-menu.jsonc"
+    },
+    {
       "id": "setup.default.terminal.alacritty",
       "invocation": "menu.action",
       "line": 0,
@@ -838,6 +1039,34 @@
     {
       "id": "setup.default.terminal.kitty",
       "invocation": "menu.action",
+      "line": 0,
+      "name": "omarchy-default-terminal",
+      "path": "default/omarchy/omarchy-menu.jsonc"
+    },
+    {
+      "id": "setup.default.terminal.alacritty",
+      "invocation": "menu.checked",
+      "line": 0,
+      "name": "omarchy-default-terminal",
+      "path": "default/omarchy/omarchy-menu.jsonc"
+    },
+    {
+      "id": "setup.default.terminal.foot",
+      "invocation": "menu.checked",
+      "line": 0,
+      "name": "omarchy-default-terminal",
+      "path": "default/omarchy/omarchy-menu.jsonc"
+    },
+    {
+      "id": "setup.default.terminal.ghostty",
+      "invocation": "menu.checked",
+      "line": 0,
+      "name": "omarchy-default-terminal",
+      "path": "default/omarchy/omarchy-menu.jsonc"
+    },
+    {
+      "id": "setup.default.terminal.kitty",
+      "invocation": "menu.checked",
       "line": 0,
       "name": "omarchy-default-terminal",
       "path": "default/omarchy/omarchy-menu.jsonc"
@@ -895,6 +1124,34 @@
     {
       "id": "setup.network.dns.google",
       "invocation": "menu.action",
+      "line": 0,
+      "name": "omarchy-dns",
+      "path": "default/omarchy/omarchy-menu.jsonc"
+    },
+    {
+      "id": "setup.network.dns.cloudflare",
+      "invocation": "menu.checked",
+      "line": 0,
+      "name": "omarchy-dns",
+      "path": "default/omarchy/omarchy-menu.jsonc"
+    },
+    {
+      "id": "setup.network.dns.custom",
+      "invocation": "menu.checked",
+      "line": 0,
+      "name": "omarchy-dns",
+      "path": "default/omarchy/omarchy-menu.jsonc"
+    },
+    {
+      "id": "setup.network.dns.dhcp",
+      "invocation": "menu.checked",
+      "line": 0,
+      "name": "omarchy-dns",
+      "path": "default/omarchy/omarchy-menu.jsonc"
+    },
+    {
+      "id": "setup.network.dns.google",
+      "invocation": "menu.checked",
       "line": 0,
       "name": "omarchy-dns",
       "path": "default/omarchy/omarchy-menu.jsonc"
@@ -976,6 +1233,12 @@
       "path": "default/omarchy/omarchy-menu.jsonc"
     },
     {
+      "invocation": "shell-eval",
+      "line": 171,
+      "name": "omarchy-hw-laptop-closed",
+      "path": "shell/plugins/polkit/PolkitAgent.qml"
+    },
+    {
       "invocation": "source",
       "line": 171,
       "name": "omarchy-hw-laptop-closed",
@@ -1033,6 +1296,12 @@
       "line": 308,
       "name": "omarchy-hyprland-monitor-scaling",
       "path": "shell/plugins/panels/monitor/Panel.qml"
+    },
+    {
+      "invocation": "shell-eval",
+      "line": 391,
+      "name": "omarchy-hyprland-session-locked",
+      "path": "shell/plugins/lock/Service.qml"
     },
     {
       "invocation": "source",
@@ -1983,13 +2252,6 @@
       "path": "default/omarchy/omarchy-menu.jsonc"
     },
     {
-      "id": "style.unlock",
-      "invocation": "menu.action",
-      "line": 0,
-      "name": "omarchy-launch-floating-terminal-with-presentation",
-      "path": "default/omarchy/omarchy-menu.jsonc"
-    },
-    {
       "id": "trigger.hardware.hybrid-gpu",
       "invocation": "menu.action",
       "line": 0,
@@ -2147,6 +2409,12 @@
       "line": 0,
       "name": "omarchy-launch-screensaver",
       "path": "default/omarchy/omarchy-menu.jsonc"
+    },
+    {
+      "invocation": "source",
+      "line": 68,
+      "name": "omarchy-launch-screensaver",
+      "path": "shell/plugins/services/idle/Service.qml"
     },
     {
       "id": "learn.arch",
@@ -2434,6 +2702,13 @@
       "line": 102,
       "name": "omarchy-network-speedtest",
       "path": "shell/plugins/panels/speedtest/Panel.qml"
+    },
+    {
+      "id": "setup.network.qr",
+      "invocation": "menu.when",
+      "line": 0,
+      "name": "omarchy-network-status",
+      "path": "default/omarchy/omarchy-menu.jsonc"
     },
     {
       "invocation": "command-array",
@@ -2888,6 +3163,13 @@
       "path": "default/omarchy/omarchy-menu.jsonc"
     },
     {
+      "id": "style.unlock",
+      "invocation": "menu.action",
+      "line": 0,
+      "name": "omarchy-plymouth-switcher",
+      "path": "default/omarchy/omarchy-menu.jsonc"
+    },
+    {
       "invocation": "command-array",
       "line": 216,
       "name": "omarchy-powerprofiles-list",
@@ -3127,6 +3409,12 @@
       "path": "shell/plugins/menu/BarWidget.qml"
     },
     {
+      "invocation": "source",
+      "line": 68,
+      "name": "omarchy-shell",
+      "path": "shell/plugins/services/idle/Service.qml"
+    },
+    {
       "invocation": "command-array",
       "line": 174,
       "name": "omarchy-shell",
@@ -3170,6 +3458,12 @@
       "path": "default/omarchy/omarchy-menu.jsonc"
     },
     {
+      "invocation": "source",
+      "line": 79,
+      "name": "omarchy-system-lock",
+      "path": "shell/plugins/services/idle/Service.qml"
+    },
+    {
       "id": "system.logout",
       "invocation": "menu.action",
       "line": 0,
@@ -3209,10 +3503,22 @@
       "path": "shell/plugins/panels/power/Panel.qml"
     },
     {
+      "invocation": "shell-eval",
+      "line": 406,
+      "name": "omarchy-system-wake",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
       "invocation": "source",
       "line": 406,
       "name": "omarchy-system-wake",
       "path": "shell/plugins/lock/Service.qml"
+    },
+    {
+      "invocation": "source",
+      "line": 106,
+      "name": "omarchy-system-wake",
+      "path": "shell/plugins/services/idle/Service.qml"
     },
     {
       "invocation": "command-array",
@@ -3247,9 +3553,28 @@
       "path": "default/omarchy/omarchy-menu.jsonc"
     },
     {
+      "invocation": "shell-eval",
+      "line": 113,
+      "name": "omarchy-theme-bg-set",
+      "path": "shell/plugins/background/Background.qml"
+    },
+    {
       "invocation": "source",
       "line": 113,
       "name": "omarchy-theme-bg-set",
+      "path": "shell/plugins/background/Background.qml"
+    },
+    {
+      "id": "style.background",
+      "invocation": "menu.action",
+      "line": 0,
+      "name": "omarchy-theme-bg-switcher",
+      "path": "default/omarchy/omarchy-menu.jsonc"
+    },
+    {
+      "invocation": "shell-eval",
+      "line": 113,
+      "name": "omarchy-theme-bg-switcher",
       "path": "shell/plugins/background/Background.qml"
     },
     {
@@ -3273,9 +3598,28 @@
       "path": "default/omarchy/omarchy-menu.jsonc"
     },
     {
+      "invocation": "shell-eval",
+      "line": 119,
+      "name": "omarchy-theme-set",
+      "path": "shell/plugins/background/Background.qml"
+    },
+    {
       "invocation": "source",
       "line": 119,
       "name": "omarchy-theme-set",
+      "path": "shell/plugins/background/Background.qml"
+    },
+    {
+      "id": "style.theme",
+      "invocation": "menu.action",
+      "line": 0,
+      "name": "omarchy-theme-switcher",
+      "path": "default/omarchy/omarchy-menu.jsonc"
+    },
+    {
+      "invocation": "shell-eval",
+      "line": 119,
+      "name": "omarchy-theme-switcher",
       "path": "shell/plugins/background/Background.qml"
     },
     {
@@ -3398,6 +3742,12 @@
       "path": "shell/plugins/bar/indicators/Dictation.qml"
     },
     {
+      "invocation": "shell-eval",
+      "line": 27,
+      "name": "omarchy-voxtype-status",
+      "path": "shell/plugins/bar/indicators/Dictation.qml"
+    },
+    {
       "invocation": "source",
       "line": 27,
       "name": "omarchy-voxtype-status",
@@ -3458,17 +3808,16 @@
       "path": "shell/plugins/panels/weather/Panel.qml"
     },
     {
-      "invocation": "source",
+      "invocation": "shell-string",
       "line": 78,
       "name": "omarchy-weather-status",
       "path": "shell/plugins/panels/weather/BarWidget.qml"
     },
     {
-      "id": "remove.webapp",
-      "invocation": "menu.when",
-      "line": 0,
-      "name": "omarchy-webapp-handler",
-      "path": "default/omarchy/omarchy-menu.jsonc"
+      "invocation": "source",
+      "line": 78,
+      "name": "omarchy-weather-status",
+      "path": "shell/plugins/panels/weather/BarWidget.qml"
     },
     {
       "id": "remove.webapp",
@@ -3540,9 +3889,33 @@
       "path": "shell/plugins/background/Background.qml"
     },
     {
+      "invocation": "shell-eval",
+      "line": 113,
+      "name": "omarchy-theme-bg-set",
+      "path": "shell/plugins/background/Background.qml"
+    },
+    {
+      "invocation": "shell-eval",
+      "line": 113,
+      "name": "omarchy-theme-bg-switcher",
+      "path": "shell/plugins/background/Background.qml"
+    },
+    {
       "invocation": "literal",
       "line": 119,
       "name": "bash",
+      "path": "shell/plugins/background/Background.qml"
+    },
+    {
+      "invocation": "shell-eval",
+      "line": 119,
+      "name": "omarchy-theme-set",
+      "path": "shell/plugins/background/Background.qml"
+    },
+    {
+      "invocation": "shell-eval",
+      "line": 119,
+      "name": "omarchy-theme-switcher",
       "path": "shell/plugins/background/Background.qml"
     },
     {
@@ -3573,6 +3946,12 @@
       "invocation": "literal",
       "line": 27,
       "name": "bash",
+      "path": "shell/plugins/bar/indicators/Dictation.qml"
+    },
+    {
+      "invocation": "shell-eval",
+      "line": 27,
+      "name": "omarchy-voxtype-status",
       "path": "shell/plugins/bar/indicators/Dictation.qml"
     },
     {
@@ -3690,9 +4069,21 @@
       "path": "shell/plugins/lock/Service.qml"
     },
     {
+      "invocation": "shell-eval",
+      "line": 380,
+      "name": "fprintd-list",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
       "invocation": "literal",
       "line": 391,
       "name": "bash",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
+      "invocation": "shell-eval",
+      "line": 391,
+      "name": "omarchy-hyprland-session-locked",
       "path": "shell/plugins/lock/Service.qml"
     },
     {
@@ -3702,9 +4093,27 @@
       "path": "shell/plugins/lock/Service.qml"
     },
     {
+      "invocation": "shell-eval",
+      "line": 406,
+      "name": "omarchy-system-wake",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
       "invocation": "literal",
       "line": 411,
       "name": "bash",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
+      "invocation": "shell-eval",
+      "line": 411,
+      "name": "omarchy-brightness-display",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
+      "invocation": "shell-eval",
+      "line": 411,
+      "name": "omarchy-brightness-keyboard",
       "path": "shell/plugins/lock/Service.qml"
     },
     {
@@ -4026,6 +4435,12 @@
       "path": "shell/plugins/panels/weather/BarWidget.qml"
     },
     {
+      "invocation": "shell-string",
+      "line": 78,
+      "name": "omarchy-weather-status",
+      "path": "shell/plugins/panels/weather/BarWidget.qml"
+    },
+    {
       "invocation": "literal",
       "line": 184,
       "name": "curl",
@@ -4080,6 +4495,12 @@
       "path": "shell/plugins/polkit/PolkitAgent.qml"
     },
     {
+      "invocation": "shell-eval",
+      "line": 171,
+      "name": "omarchy-hw-laptop-closed",
+      "path": "shell/plugins/polkit/PolkitAgent.qml"
+    },
+    {
       "invocation": "literal",
       "line": 38,
       "name": "omarchy-battery-low",
@@ -4107,6 +4528,12 @@
       "invocation": "literal",
       "line": 303,
       "name": "bash",
+      "path": "shell/plugins/services/idle/Service.qml"
+    },
+    {
+      "invocation": "shell-eval",
+      "line": 303,
+      "name": "mkdir",
       "path": "shell/plugins/services/idle/Service.qml"
     },
     {
@@ -4172,336 +4599,350 @@
   ],
   "dynamic_commands": [
     {
+      "category": "ambiguous-shell-shape",
+      "invocation": "helper-shell",
+      "line": 17,
+      "name": "\"$@\"",
+      "path": "bin/omarchy-apply-lock"
+    },
+    {
+      "category": "ambiguous-shell-shape",
+      "invocation": "helper-shell",
+      "line": 77,
+      "name": "$1 == \"VCP\" && toupper($2) == \"10\" && $3 == \"C\" && $4 ~ /^[0-9]+$/ && $5 ~ /^[0-9]+$/ && $5 > 0 {",
+      "path": "bin/omarchy-brightness-display-ddc"
+    },
+    {
+      "category": "variable-command-head",
+      "invocation": "helper-shell",
+      "line": 125,
+      "name": "if [[ $bus =~ ^[0-9]+$ && $maximum =~ ^[0-9]+$ && $range_cached_at =~ ^[0-9]+$ ]] && (( maximum > 0 )); then",
+      "path": "bin/omarchy-brightness-display-ddc"
+    },
+    {
+      "category": "ambiguous-shell-shape",
+      "invocation": "helper-shell",
+      "line": 18,
+      "name": "timeout --kill-after=1s 3s 1password --lock >/dev/null 2>&1 || true",
+      "path": "bin/omarchy-system-lock"
+    },
+    {
+      "category": "ambiguous-shell-shape",
       "invocation": "dynamic",
       "line": 193,
       "name": "cmd",
       "path": "shell/Ui/MultiSelect.qml"
     },
     {
+      "category": "ambiguous-shell-shape",
       "invocation": "dynamic",
       "line": 167,
       "name": "updateCommand(kind, agentIds)",
       "path": "shell/plugins/agents/Main.qml"
     },
     {
+      "category": "dynamic-shell-payload",
       "invocation": "shell-eval",
       "line": 423,
       "name": "syncScanProcess.command = [\"bash\", \"-c\", script, root.syncEffectiveDir]",
       "path": "shell/plugins/agents/Main.qml"
     },
     {
-      "invocation": "shell-eval",
-      "line": 113,
-      "name": "command: [\"bash\", \"-c\", \"background=$(omarchy-theme-bg-switcher); [[ -n $background ]] && omarchy-theme-bg-set \\\"$background\\\"\"]",
-      "path": "shell/plugins/background/Background.qml"
-    },
-    {
-      "invocation": "shell-eval",
-      "line": 119,
-      "name": "command: [\"bash\", \"-c\", \"theme=$(omarchy-theme-switcher); [[ -n $theme ]] && omarchy-theme-set \\\"$theme\\\" >/dev/null 2>&1 &\"]",
-      "path": "shell/plugins/background/Background.qml"
-    },
-    {
+      "category": "ambiguous-shell-shape",
       "invocation": "dynamic",
       "line": 614,
       "name": "Util.execDetached(command)",
       "path": "shell/plugins/bar/Bar.qml"
     },
     {
-      "invocation": "shell-eval",
-      "line": 941,
-      "name": "command: [\"bash\", \"-c\", \"[[ -f $HOME/.local/state/omarchy/toggles/bar-off ]] && echo yes || echo no\"]",
-      "path": "shell/plugins/bar/Bar.qml"
-    },
-    {
+      "category": "ambiguous-shell-shape",
       "invocation": "dynamic",
       "line": 1795,
       "name": "\"\"",
       "path": "shell/plugins/bar/Bar.qml"
     },
     {
+      "category": "ambiguous-shell-shape",
       "invocation": "dynamic",
       "line": 1797,
       "name": "String(setting(\"onRightClick\", \"\"))",
       "path": "shell/plugins/bar/Bar.qml"
     },
     {
+      "category": "ambiguous-shell-shape",
       "invocation": "dynamic",
       "line": 1799,
       "name": "String(setting(\"onMiddleClick\", \"\"))",
       "path": "shell/plugins/bar/Bar.qml"
     },
     {
+      "category": "ambiguous-shell-shape",
       "invocation": "dynamic",
       "line": 1801,
       "name": "String(setting(\"onClick\", \"\"))",
       "path": "shell/plugins/bar/Bar.qml"
     },
     {
+      "category": "dynamic-shell-payload",
       "invocation": "shell-eval",
       "line": 1808,
       "name": "command: [\"bash\", \"-lc\", String(customRoot.setting(\"exec\", \"\"))]",
       "path": "shell/plugins/bar/Bar.qml"
     },
     {
-      "invocation": "shell-eval",
-      "line": 27,
-      "name": "command: [\"bash\", \"-c\", \"omarchy-voxtype-status\"]",
-      "path": "shell/plugins/bar/indicators/Dictation.qml"
-    },
-    {
+      "category": "dynamic-shell-payload",
       "invocation": "shell-eval",
       "line": 142,
       "name": "releaseProc.command = [\"bash\", \"-c\", \": > \" + Util.shellQuote(path)]",
       "path": "shell/plugins/image-picker/ImagePicker.qml"
     },
     {
+      "category": "dynamic-shell-payload",
       "invocation": "shell-eval",
       "line": 166,
       "name": "applyProc.command = [\"bash\", \"-c\", \"printf '%s\\\\n' \" + Util.shellQuote(path) + \" > \" + Util.shellQuote(activeSelectionFile) + \"; : > \" + Util.shellQuote(activeDoneFile)]",
       "path": "shell/plugins/image-picker/ImagePicker.qml"
     },
     {
-      "invocation": "shell-eval",
-      "line": 380,
-      "name": "command: [\"bash\", \"-c\", \"if [[ -f /etc/pam.d/omarchy-lock-fingerprint ]] && command -v fprintd-list >/dev/null 2>&1 && fprintd-list \\\"$USER\\\" 2>/dev/null | grep -qi finger; then echo yes; else echo no; fi\"]",
-      "path": "shell/plugins/lock/Service.qml"
-    },
-    {
-      "invocation": "shell-eval",
-      "line": 391,
-      "name": "command: [\"bash\", \"-c\", \"omarchy-hyprland-session-locked\"]",
-      "path": "shell/plugins/lock/Service.qml"
-    },
-    {
-      "invocation": "shell-eval",
-      "line": 406,
-      "name": "command: [\"bash\", \"-c\", \"omarchy-system-wake\"]",
-      "path": "shell/plugins/lock/Service.qml"
-    },
-    {
-      "invocation": "shell-eval",
-      "line": 411,
-      "name": "command: [\"bash\", \"-c\", \"omarchy-brightness-keyboard off; omarchy-brightness-display off\"]",
-      "path": "shell/plugins/lock/Service.qml"
-    },
-    {
+      "category": "dynamic-shell-payload",
       "invocation": "shell-eval",
       "line": 130,
       "name": "resultProc.command = [\"bash\", \"-c\", \": > \" + Util.shellQuote(activeDoneFile)]",
       "path": "shell/plugins/menu/Menu.qml"
     },
     {
+      "category": "dynamic-shell-payload",
       "invocation": "shell-eval",
       "line": 132,
       "name": "resultProc.command = [\"bash\", \"-c\", \"printf '%s\\\\n' \" + Util.shellQuote(selection) + \" > \" + Util.shellQuote(activeSelectionFile) + \"; : > \" + Util.shellQuote(activeDoneFile)]",
       "path": "shell/plugins/menu/Menu.qml"
     },
     {
+      "category": "ambiguous-shell-shape",
       "invocation": "dynamic",
       "line": 138,
       "name": "String(action || \"\")",
       "path": "shell/plugins/menu/Menu.qml"
     },
     {
+      "category": "ambiguous-shell-shape",
       "invocation": "dynamic",
       "line": 141,
       "name": "Util.execDetached(command)",
       "path": "shell/plugins/menu/Menu.qml"
     },
     {
+      "category": "dynamic-shell-payload",
       "invocation": "shell-eval",
       "line": 346,
       "name": "providerProc.command = [\"bash\", \"-lc\", spec.script]",
       "path": "shell/plugins/menu/Menu.qml"
     },
     {
+      "category": "dynamic-shell-payload",
       "invocation": "shell-eval",
       "line": 972,
       "name": "guardProc.command = [\"bash\", \"-lc\", script]",
       "path": "shell/plugins/menu/Menu.qml"
     },
     {
+      "category": "ambiguous-shell-shape",
       "invocation": "dynamic",
       "line": 363,
       "name": "entry ? String(entry.exec || \"\") : \"\"",
       "path": "shell/plugins/notifications/Service.qml"
     },
     {
+      "category": "ambiguous-shell-shape",
       "invocation": "dynamic",
       "line": 367,
       "name": "Util.execDetached(command)",
       "path": "shell/plugins/notifications/Service.qml"
     },
     {
+      "category": "ambiguous-shell-shape",
       "invocation": "dynamic",
       "line": 443,
       "name": "command, done: done || null }])",
       "path": "shell/plugins/notifications/Service.qml"
     },
     {
+      "category": "ambiguous-shell-shape",
       "invocation": "dynamic",
       "line": 464,
       "name": "job.command",
       "path": "shell/plugins/notifications/Service.qml"
     },
     {
+      "category": "dynamic-shell-payload",
       "invocation": "shell-eval",
       "line": 503,
       "name": "var command = [\"bash\", \"-c\",",
       "path": "shell/plugins/notifications/Service.qml"
     },
     {
+      "category": "dynamic-shell-payload",
       "invocation": "shell-eval",
       "line": 570,
       "name": "var command = [\"bash\", \"-c\",",
       "path": "shell/plugins/notifications/Service.qml"
     },
     {
+      "category": "dynamic-shell-payload",
       "invocation": "shell-eval",
       "line": 644,
       "name": "readHistoryProc.command = [\"bash\", \"-c\",",
       "path": "shell/plugins/notifications/Service.qml"
     },
     {
+      "category": "dynamic-shell-payload",
       "invocation": "shell-eval",
       "line": 845,
       "name": "restorePopupsProc.command = [\"bash\", \"-c\",",
       "path": "shell/plugins/notifications/Service.qml"
     },
     {
+      "category": "ambiguous-shell-shape",
       "invocation": "dynamic",
       "line": 273,
       "name": "Quickshell.execDetached(deviceCommand(action, device.address))",
       "path": "shell/plugins/panels/bluetooth/Panel.qml"
     },
     {
+      "category": "ambiguous-shell-shape",
       "invocation": "dynamic",
       "line": 287,
       "name": "Quickshell.execDetached(deviceCommand(\"disconnect\", device.address))",
       "path": "shell/plugins/panels/bluetooth/Panel.qml"
     },
     {
+      "category": "ambiguous-shell-shape",
       "invocation": "dynamic",
       "line": 125,
       "name": "command",
       "path": "shell/plugins/panels/dropbox/Service.qml"
     },
     {
+      "category": "dynamic-shell-payload",
       "invocation": "shell-eval",
       "line": 308,
       "name": "actionProc.command = [\"bash\", \"-c\", \"omarchy-hyprland-monitor-scaling \" + scale]",
       "path": "shell/plugins/panels/monitor/Panel.qml"
     },
     {
+      "category": "dynamic-shell-payload",
       "invocation": "shell-eval",
       "line": 475,
       "name": "dnsProc.command = [\"bash\", \"-c\", root.dnsCommand(\"\")]",
       "path": "shell/plugins/panels/network/Panel.qml"
     },
     {
+      "category": "ambiguous-shell-shape",
       "invocation": "dynamic",
       "line": 662,
       "name": "\"omarchy-dns\"",
       "path": "shell/plugins/panels/network/Panel.qml"
     },
     {
+      "category": "dynamic-shell-payload",
       "invocation": "shell-eval",
       "line": 678,
       "name": "actionProc.command = [\"bash\", \"-c\", root.dnsCommand(provider)]",
       "path": "shell/plugins/panels/network/Panel.qml"
     },
     {
+      "category": "dynamic-shell-payload",
       "invocation": "shell-eval",
       "line": 770,
       "name": "enterpriseConnect.command = [\"bash\", \"-c\", Model.enterpriseConnectScript, \"nmcli-eap\", ssid, identity]",
       "path": "shell/plugins/panels/network/Panel.qml"
     },
     {
+      "category": "ambiguous-shell-shape",
       "invocation": "dynamic",
       "line": 312,
       "name": "plan.command",
       "path": "shell/plugins/panels/tailscale/Service.qml"
     },
     {
+      "category": "ambiguous-shell-shape",
       "invocation": "dynamic",
       "line": 362,
       "name": "command",
       "path": "shell/plugins/panels/tailscale/Service.qml"
     },
     {
+      "category": "ambiguous-shell-shape",
       "invocation": "dynamic",
       "line": 127,
       "name": "requestedIface",
       "path": "shell/plugins/panels/wifiqr/Panel.qml"
     },
     {
-      "invocation": "shell-eval",
-      "line": 171,
-      "name": "command: [\"bash\", \"-c\", \"omarchy-hw-laptop-closed && echo closed || echo open\"]",
-      "path": "shell/plugins/polkit/PolkitAgent.qml"
-    },
-    {
+      "category": "ambiguous-shell-shape",
       "invocation": "dynamic",
       "line": 91,
       "name": "Quickshell.execDetached(args)",
       "path": "shell/plugins/reminders/ReminderFlow.qml"
     },
     {
+      "category": "dynamic-shell-payload",
       "invocation": "shell-eval",
       "line": 60,
       "name": "process.command = [\"bash\", \"-lc\", command]",
       "path": "shell/plugins/services/idle/Service.qml"
     },
     {
+      "category": "ambiguous-shell-shape",
       "invocation": "dynamic",
       "line": 210,
       "name": "value",
       "path": "shell/plugins/services/idle/Service.qml"
     },
     {
+      "category": "dynamic-shell-payload",
       "invocation": "shell-eval",
       "line": 220,
       "name": "stayAwakeStateWriter.command = [\"bash\", \"-lc\", command]",
       "path": "shell/plugins/services/idle/Service.qml"
     },
     {
-      "invocation": "shell-eval",
-      "line": 303,
-      "name": "command: [\"bash\", \"-c\", \"mkdir -p \\\"$HOME/.local/state/omarchy/indicators\\\"; if [[ -f $HOME/.local/state/omarchy/indicators/stay-awake ]]; then echo yes; else echo no; fi\"]",
-      "path": "shell/plugins/services/idle/Service.qml"
-    },
-    {
+      "category": "dynamic-shell-payload",
       "invocation": "shell-eval",
       "line": 49,
       "name": "applyProcess.command = [\"bash\", \"-lc\",",
       "path": "shell/plugins/services/nightlight/Service.qml"
     },
     {
+      "category": "ambiguous-shell-shape",
       "invocation": "dynamic",
       "line": 91,
       "name": "Util.execDetached(Util.shellQuote(root.omarchyPath + \"/bin/omarchy-remove-launcher-entry\") + \" \" + Util.shellQuote(id) + \" \" + Util.shellQuote(String(name || id)))",
       "path": "shell/services/AppLibrary.qml"
     },
     {
+      "category": "dynamic-shell-payload",
       "invocation": "shell-eval",
       "line": 196,
       "name": "command: [\"bash\", \"-c\", root.hiddenEntryScanCommand()]",
       "path": "shell/services/AppLibrary.qml"
     },
     {
+      "category": "dynamic-shell-payload",
       "invocation": "shell-eval",
       "line": 204,
       "name": "command: [\"bash\", \"-c\", root.iconIndexScanCommand()]",
       "path": "shell/services/AppLibrary.qml"
     },
     {
+      "category": "dynamic-shell-payload",
       "invocation": "shell-eval",
       "line": 692,
       "name": "scanProcess.command = [\"bash\", \"-c\", script, registry.firstPartyDir, registry.pluginsDir]",
       "path": "shell/services/PluginRegistry.qml"
     },
     {
+      "category": "dynamic-shell-payload",
       "invocation": "shell-eval",
       "line": 697,
       "name": "initProcess.command = [\"bash\", \"-c\", \"mkdir -p \\\"$0\\\"\", registry.pluginsDir]",
@@ -4509,67 +4950,73 @@
     }
   ],
   "environment_variables": [
+    "ACTION",
     "BASH_REMATCH",
+    "CLAMSHELL_FLAG",
     "CLIPBOARD_STATE",
     "DESKTOP_SESSION",
+    "DISABLE_TOGGLE",
+    "EXTERNAL",
+    "FLAG_FILE",
+    "FLAG_NAME",
+    "FLAG_SOURCE",
     "HOME",
     "HOST",
     "HOSTNAME",
+    "HYPRLAND_INSTANCE_SIGNATURE",
     "IMAGE_DIR",
+    "INTERNAL",
     "LOGNAME",
+    "MANUAL_DISABLE_FLAG",
+    "MIRROR_TOGGLE",
+    "MONITOR_LUA",
+    "NF",
     "OMARCHY_BACKGROUND_SELECTION_FILE",
+    "OMARCHY_BACKLIGHT_PATH",
     "OMARCHY_DEBUG_BAR_ICONS",
+    "OMARCHY_DRM_PATH",
     "OMARCHY_IMAGE_SELECTOR_DIR",
     "OMARCHY_IMAGE_SELECTOR_DIRS",
     "OMARCHY_IMAGE_SELECTOR_SELECTED",
     "OMARCHY_IMAGE_SELECTOR_SELECTION_FILE",
+    "OMARCHY_INSTALL_USER",
     "OMARCHY_MENU_FONT",
     "OMARCHY_PATH",
     "OMARCHY_STOCK_BACKGROUNDS_DIR",
+    "PKEXEC_UID",
+    "SCALE_STATE",
+    "SOCKET",
     "STATE_DIR",
+    "SUDO_USER",
+    "TOGGLE",
+    "TOGGLES_DIR",
+    "TOGGLE_FLAG",
     "USER",
     "XDG_CACHE_HOME",
     "XDG_CURRENT_DESKTOP",
     "XDG_DATA_DIRS",
+    "XDG_RUNTIME_DIR",
     "XDG_SESSION_DESKTOP",
     "XDG_STATE_HOME"
   ],
   "external_executables": [
     {
-      "invocation": "menu.checked",
-      "line": 0,
-      "name": "Cloudflare",
-      "path": "default/omarchy/omarchy-menu.jsonc"
+      "invocation": "shell-script",
+      "line": 33,
+      "name": "awk",
+      "path": "shell/plugins/clipboard/capture.sh"
     },
     {
-      "invocation": "menu.checked",
-      "line": 0,
-      "name": "Custom",
-      "path": "default/omarchy/omarchy-menu.jsonc"
+      "invocation": "shell-script",
+      "line": 14,
+      "name": "awk",
+      "path": "shell/plugins/image-picker/list.sh"
     },
     {
-      "invocation": "menu.checked",
-      "line": 0,
-      "name": "DHCP",
-      "path": "default/omarchy/omarchy-menu.jsonc"
-    },
-    {
-      "invocation": "menu.checked",
-      "line": 0,
-      "name": "Google",
-      "path": "default/omarchy/omarchy-menu.jsonc"
-    },
-    {
-      "invocation": "menu.checked",
-      "line": 0,
-      "name": "alacritty",
-      "path": "default/omarchy/omarchy-menu.jsonc"
-    },
-    {
-      "invocation": "source",
-      "line": 54,
-      "name": "bash",
-      "path": "shell/Commons/Util.qml"
+      "invocation": "shell-script",
+      "line": 14,
+      "name": "awk",
+      "path": "shell/plugins/image-picker/list.sh"
     },
     {
       "invocation": "literal",
@@ -4578,32 +5025,14 @@
       "path": "shell/Commons/Util.qml"
     },
     {
-      "invocation": "source",
-      "line": 423,
-      "name": "bash",
-      "path": "shell/plugins/agents/Main.qml"
-    },
-    {
       "invocation": "literal",
       "line": 423,
       "name": "bash",
       "path": "shell/plugins/agents/Main.qml"
     },
     {
-      "invocation": "source",
-      "line": 113,
-      "name": "bash",
-      "path": "shell/plugins/background/Background.qml"
-    },
-    {
       "invocation": "literal",
       "line": 113,
-      "name": "bash",
-      "path": "shell/plugins/background/Background.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 119,
       "name": "bash",
       "path": "shell/plugins/background/Background.qml"
     },
@@ -4614,20 +5043,8 @@
       "path": "shell/plugins/background/Background.qml"
     },
     {
-      "invocation": "source",
-      "line": 941,
-      "name": "bash",
-      "path": "shell/plugins/bar/Bar.qml"
-    },
-    {
       "invocation": "literal",
       "line": 941,
-      "name": "bash",
-      "path": "shell/plugins/bar/Bar.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 1808,
       "name": "bash",
       "path": "shell/plugins/bar/Bar.qml"
     },
@@ -4638,32 +5055,14 @@
       "path": "shell/plugins/bar/Bar.qml"
     },
     {
-      "invocation": "source",
-      "line": 27,
-      "name": "bash",
-      "path": "shell/plugins/bar/indicators/Dictation.qml"
-    },
-    {
       "invocation": "literal",
       "line": 27,
       "name": "bash",
       "path": "shell/plugins/bar/indicators/Dictation.qml"
     },
     {
-      "invocation": "source",
-      "line": 142,
-      "name": "bash",
-      "path": "shell/plugins/image-picker/ImagePicker.qml"
-    },
-    {
       "invocation": "literal",
       "line": 142,
-      "name": "bash",
-      "path": "shell/plugins/image-picker/ImagePicker.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 166,
       "name": "bash",
       "path": "shell/plugins/image-picker/ImagePicker.qml"
     },
@@ -4674,20 +5073,8 @@
       "path": "shell/plugins/image-picker/ImagePicker.qml"
     },
     {
-      "invocation": "source",
-      "line": 380,
-      "name": "bash",
-      "path": "shell/plugins/lock/Service.qml"
-    },
-    {
       "invocation": "literal",
       "line": 380,
-      "name": "bash",
-      "path": "shell/plugins/lock/Service.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 391,
       "name": "bash",
       "path": "shell/plugins/lock/Service.qml"
     },
@@ -4698,20 +5085,8 @@
       "path": "shell/plugins/lock/Service.qml"
     },
     {
-      "invocation": "source",
-      "line": 406,
-      "name": "bash",
-      "path": "shell/plugins/lock/Service.qml"
-    },
-    {
       "invocation": "literal",
       "line": 406,
-      "name": "bash",
-      "path": "shell/plugins/lock/Service.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 411,
       "name": "bash",
       "path": "shell/plugins/lock/Service.qml"
     },
@@ -4722,20 +5097,8 @@
       "path": "shell/plugins/lock/Service.qml"
     },
     {
-      "invocation": "source",
-      "line": 130,
-      "name": "bash",
-      "path": "shell/plugins/menu/Menu.qml"
-    },
-    {
       "invocation": "literal",
       "line": 130,
-      "name": "bash",
-      "path": "shell/plugins/menu/Menu.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 132,
       "name": "bash",
       "path": "shell/plugins/menu/Menu.qml"
     },
@@ -4746,20 +5109,8 @@
       "path": "shell/plugins/menu/Menu.qml"
     },
     {
-      "invocation": "source",
-      "line": 346,
-      "name": "bash",
-      "path": "shell/plugins/menu/Menu.qml"
-    },
-    {
       "invocation": "literal",
       "line": 346,
-      "name": "bash",
-      "path": "shell/plugins/menu/Menu.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 972,
       "name": "bash",
       "path": "shell/plugins/menu/Menu.qml"
     },
@@ -4770,32 +5121,8 @@
       "path": "shell/plugins/menu/Menu.qml"
     },
     {
-      "invocation": "source",
-      "line": 503,
-      "name": "bash",
-      "path": "shell/plugins/notifications/Service.qml"
-    },
-    {
       "invocation": "literal",
       "line": 503,
-      "name": "bash",
-      "path": "shell/plugins/notifications/Service.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 522,
-      "name": "bash",
-      "path": "shell/plugins/notifications/Service.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 542,
-      "name": "bash",
-      "path": "shell/plugins/notifications/Service.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 570,
       "name": "bash",
       "path": "shell/plugins/notifications/Service.qml"
     },
@@ -4806,32 +5133,8 @@
       "path": "shell/plugins/notifications/Service.qml"
     },
     {
-      "invocation": "source",
-      "line": 588,
-      "name": "bash",
-      "path": "shell/plugins/notifications/Service.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 600,
-      "name": "bash",
-      "path": "shell/plugins/notifications/Service.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 644,
-      "name": "bash",
-      "path": "shell/plugins/notifications/Service.qml"
-    },
-    {
       "invocation": "literal",
       "line": 644,
-      "name": "bash",
-      "path": "shell/plugins/notifications/Service.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 845,
       "name": "bash",
       "path": "shell/plugins/notifications/Service.qml"
     },
@@ -4842,32 +5145,14 @@
       "path": "shell/plugins/notifications/Service.qml"
     },
     {
-      "invocation": "source",
-      "line": 308,
-      "name": "bash",
-      "path": "shell/plugins/panels/monitor/Panel.qml"
-    },
-    {
       "invocation": "literal",
       "line": 308,
       "name": "bash",
       "path": "shell/plugins/panels/monitor/Panel.qml"
     },
     {
-      "invocation": "source",
-      "line": 450,
-      "name": "bash",
-      "path": "shell/plugins/panels/network/Panel.qml"
-    },
-    {
       "invocation": "literal",
       "line": 450,
-      "name": "bash",
-      "path": "shell/plugins/panels/network/Panel.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 475,
       "name": "bash",
       "path": "shell/plugins/panels/network/Panel.qml"
     },
@@ -4878,20 +5163,8 @@
       "path": "shell/plugins/panels/network/Panel.qml"
     },
     {
-      "invocation": "source",
-      "line": 678,
-      "name": "bash",
-      "path": "shell/plugins/panels/network/Panel.qml"
-    },
-    {
       "invocation": "literal",
       "line": 678,
-      "name": "bash",
-      "path": "shell/plugins/panels/network/Panel.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 770,
       "name": "bash",
       "path": "shell/plugins/panels/network/Panel.qml"
     },
@@ -4902,22 +5175,10 @@
       "path": "shell/plugins/panels/network/Panel.qml"
     },
     {
-      "invocation": "source",
-      "line": 109,
-      "name": "bash",
-      "path": "shell/plugins/panels/tailscale/Service.qml"
-    },
-    {
       "invocation": "literal",
       "line": 109,
       "name": "bash",
       "path": "shell/plugins/panels/tailscale/Service.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 171,
-      "name": "bash",
-      "path": "shell/plugins/polkit/PolkitAgent.qml"
     },
     {
       "invocation": "literal",
@@ -4926,20 +5187,8 @@
       "path": "shell/plugins/polkit/PolkitAgent.qml"
     },
     {
-      "invocation": "source",
-      "line": 60,
-      "name": "bash",
-      "path": "shell/plugins/services/idle/Service.qml"
-    },
-    {
       "invocation": "literal",
       "line": 60,
-      "name": "bash",
-      "path": "shell/plugins/services/idle/Service.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 220,
       "name": "bash",
       "path": "shell/plugins/services/idle/Service.qml"
     },
@@ -4950,22 +5199,10 @@
       "path": "shell/plugins/services/idle/Service.qml"
     },
     {
-      "invocation": "source",
-      "line": 303,
-      "name": "bash",
-      "path": "shell/plugins/services/idle/Service.qml"
-    },
-    {
       "invocation": "literal",
       "line": 303,
       "name": "bash",
       "path": "shell/plugins/services/idle/Service.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 49,
-      "name": "bash",
-      "path": "shell/plugins/services/nightlight/Service.qml"
     },
     {
       "invocation": "literal",
@@ -4974,20 +5211,8 @@
       "path": "shell/plugins/services/nightlight/Service.qml"
     },
     {
-      "invocation": "source",
-      "line": 196,
-      "name": "bash",
-      "path": "shell/services/AppLibrary.qml"
-    },
-    {
       "invocation": "literal",
       "line": 196,
-      "name": "bash",
-      "path": "shell/services/AppLibrary.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 204,
       "name": "bash",
       "path": "shell/services/AppLibrary.qml"
     },
@@ -4998,20 +5223,8 @@
       "path": "shell/services/AppLibrary.qml"
     },
     {
-      "invocation": "source",
-      "line": 692,
-      "name": "bash",
-      "path": "shell/services/PluginRegistry.qml"
-    },
-    {
       "invocation": "literal",
       "line": 692,
-      "name": "bash",
-      "path": "shell/services/PluginRegistry.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 697,
       "name": "bash",
       "path": "shell/services/PluginRegistry.qml"
     },
@@ -5022,46 +5235,10 @@
       "path": "shell/services/PluginRegistry.qml"
     },
     {
-      "invocation": "menu.checked",
-      "line": 0,
-      "name": "brave",
-      "path": "default/omarchy/omarchy-menu.jsonc"
-    },
-    {
-      "invocation": "menu.checked",
-      "line": 0,
-      "name": "brave-origin",
-      "path": "default/omarchy/omarchy-menu.jsonc"
-    },
-    {
-      "invocation": "menu.checked",
-      "line": 0,
-      "name": "chrome",
-      "path": "default/omarchy/omarchy-menu.jsonc"
-    },
-    {
-      "invocation": "menu.checked",
-      "line": 0,
-      "name": "chromium",
-      "path": "default/omarchy/omarchy-menu.jsonc"
-    },
-    {
-      "invocation": "menu.checked",
-      "line": 0,
-      "name": "claude",
-      "path": "default/omarchy/omarchy-menu.jsonc"
-    },
-    {
-      "invocation": "menu.checked",
-      "line": 0,
-      "name": "code",
-      "path": "default/omarchy/omarchy-menu.jsonc"
-    },
-    {
-      "invocation": "menu.checked",
-      "line": 0,
-      "name": "codex",
-      "path": "default/omarchy/omarchy-menu.jsonc"
+      "invocation": "shell-script",
+      "line": 27,
+      "name": "cat",
+      "path": "shell/plugins/clipboard/capture.sh"
     },
     {
       "invocation": "menu.when",
@@ -5076,32 +5253,8 @@
       "path": "default/omarchy/omarchy-menu.jsonc"
     },
     {
-      "invocation": "menu.checked",
-      "line": 0,
-      "name": "copilot",
-      "path": "default/omarchy/omarchy-menu.jsonc"
-    },
-    {
-      "invocation": "menu.checked",
-      "line": 0,
-      "name": "crush",
-      "path": "default/omarchy/omarchy-menu.jsonc"
-    },
-    {
-      "invocation": "source",
-      "line": 184,
-      "name": "curl",
-      "path": "shell/plugins/panels/weather/Panel.qml"
-    },
-    {
       "invocation": "literal",
       "line": 184,
-      "name": "curl",
-      "path": "shell/plugins/panels/weather/Panel.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 275,
       "name": "curl",
       "path": "shell/plugins/panels/weather/Panel.qml"
     },
@@ -5113,12 +5266,6 @@
     },
     {
       "invocation": "dynamic",
-      "line": 333,
-      "name": "curl",
-      "path": "shell/plugins/panels/weather/Panel.qml"
-    },
-    {
-      "invocation": "source",
       "line": 333,
       "name": "curl",
       "path": "shell/plugins/panels/weather/Panel.qml"
@@ -5136,40 +5283,28 @@
       "path": "shell/plugins/panels/weather/Panel.qml"
     },
     {
-      "invocation": "source",
-      "line": 456,
-      "name": "curl",
-      "path": "shell/plugins/panels/weather/Panel.qml"
-    },
-    {
       "invocation": "literal",
       "line": 456,
       "name": "curl",
       "path": "shell/plugins/panels/weather/Panel.qml"
     },
     {
-      "invocation": "menu.checked",
-      "line": 0,
-      "name": "cursor",
-      "path": "default/omarchy/omarchy-menu.jsonc"
+      "invocation": "shell-script",
+      "line": 17,
+      "name": "cut",
+      "path": "shell/plugins/image-picker/list.sh"
     },
     {
-      "invocation": "menu.action",
-      "line": 0,
-      "name": "default",
-      "path": "default/omarchy/omarchy-menu.jsonc"
+      "invocation": "shell-script",
+      "line": 25,
+      "name": "cut",
+      "path": "shell/plugins/image-picker/list.sh"
     },
     {
-      "invocation": "menu.action",
-      "line": 0,
-      "name": "dell-xps-touchpad-haptics",
-      "path": "default/omarchy/omarchy-menu.jsonc"
-    },
-    {
-      "invocation": "menu.action",
-      "line": 0,
-      "name": "dell-xps-touchpad-haptics",
-      "path": "default/omarchy/omarchy-menu.jsonc"
+      "invocation": "shell-script",
+      "line": 41,
+      "name": "date",
+      "path": "shell/plugins/clipboard/capture.sh"
     },
     {
       "invocation": "menu.action",
@@ -5180,7 +5315,31 @@
     {
       "invocation": "menu.checked",
       "line": 0,
-      "name": "dev",
+      "name": "dell-xps-touchpad-haptics",
+      "path": "default/omarchy/omarchy-menu.jsonc"
+    },
+    {
+      "invocation": "menu.action",
+      "line": 0,
+      "name": "dell-xps-touchpad-haptics",
+      "path": "default/omarchy/omarchy-menu.jsonc"
+    },
+    {
+      "invocation": "menu.checked",
+      "line": 0,
+      "name": "dell-xps-touchpad-haptics",
+      "path": "default/omarchy/omarchy-menu.jsonc"
+    },
+    {
+      "invocation": "menu.action",
+      "line": 0,
+      "name": "dell-xps-touchpad-haptics",
+      "path": "default/omarchy/omarchy-menu.jsonc"
+    },
+    {
+      "invocation": "menu.checked",
+      "line": 0,
+      "name": "dell-xps-touchpad-haptics",
       "path": "default/omarchy/omarchy-menu.jsonc"
     },
     {
@@ -5190,40 +5349,28 @@
       "path": "shell/plugins/panels/dropbox/Service.qml"
     },
     {
-      "invocation": "menu.checked",
-      "line": 0,
-      "name": "edge",
-      "path": "default/omarchy/omarchy-menu.jsonc"
-    },
-    {
-      "invocation": "menu.checked",
-      "line": 0,
-      "name": "edge",
-      "path": "default/omarchy/omarchy-menu.jsonc"
-    },
-    {
-      "invocation": "menu.checked",
-      "line": 0,
-      "name": "emacs",
-      "path": "default/omarchy/omarchy-menu.jsonc"
-    },
-    {
       "invocation": "literal",
       "line": 469,
       "name": "fc-match",
       "path": "shell/Commons/Style.qml"
     },
     {
-      "invocation": "source",
+      "invocation": "literal",
       "line": 27,
       "name": "find",
       "path": "shell/plugins/agents/Main.qml"
     },
     {
-      "invocation": "literal",
-      "line": 27,
+      "invocation": "shell-script",
+      "line": 38,
       "name": "find",
-      "path": "shell/plugins/agents/Main.qml"
+      "path": "shell/plugins/image-picker/list.sh"
+    },
+    {
+      "invocation": "shell-script",
+      "line": 92,
+      "name": "find",
+      "path": "shell/services/hidden-entries.sh"
     },
     {
       "invocation": "menu.when",
@@ -5232,12 +5379,6 @@
       "path": "default/omarchy/omarchy-menu.jsonc"
     },
     {
-      "invocation": "menu.checked",
-      "line": 0,
-      "name": "firefox",
-      "path": "default/omarchy/omarchy-menu.jsonc"
-    },
-    {
       "invocation": "menu.when",
       "line": 0,
       "name": "flatpak",
@@ -5250,22 +5391,10 @@
       "path": "default/omarchy/omarchy-menu.jsonc"
     },
     {
-      "invocation": "menu.checked",
-      "line": 0,
-      "name": "foot",
-      "path": "default/omarchy/omarchy-menu.jsonc"
-    },
-    {
-      "invocation": "menu.checked",
-      "line": 0,
-      "name": "gemini",
-      "path": "default/omarchy/omarchy-menu.jsonc"
-    },
-    {
-      "invocation": "menu.checked",
-      "line": 0,
-      "name": "ghostty",
-      "path": "default/omarchy/omarchy-menu.jsonc"
+      "invocation": "shell-eval",
+      "line": 380,
+      "name": "fprintd-list",
+      "path": "shell/plugins/lock/Service.qml"
     },
     {
       "invocation": "menu.when",
@@ -5286,38 +5415,26 @@
       "path": "default/omarchy/omarchy-menu.jsonc"
     },
     {
-      "invocation": "menu.checked",
-      "line": 0,
-      "name": "grok",
-      "path": "default/omarchy/omarchy-menu.jsonc"
+      "invocation": "shell-script",
+      "line": 15,
+      "name": "grep",
+      "path": "shell/plugins/clipboard/capture.sh"
     },
     {
-      "invocation": "menu.checked",
-      "line": 0,
-      "name": "helix",
-      "path": "default/omarchy/omarchy-menu.jsonc"
+      "invocation": "shell-script",
+      "line": 55,
+      "name": "grep",
+      "path": "shell/plugins/clipboard/capture.sh"
     },
     {
-      "invocation": "menu.checked",
-      "line": 0,
-      "name": "high",
-      "path": "default/omarchy/omarchy-menu.jsonc"
-    },
-    {
-      "invocation": "source",
-      "line": 444,
-      "name": "hyprctl",
-      "path": "shell/Commons/Style.qml"
+      "invocation": "shell-script",
+      "line": 61,
+      "name": "grep",
+      "path": "shell/plugins/clipboard/capture.sh"
     },
     {
       "invocation": "literal",
       "line": 444,
-      "name": "hyprctl",
-      "path": "shell/Commons/Style.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 453,
       "name": "hyprctl",
       "path": "shell/Commons/Style.qml"
     },
@@ -5334,18 +5451,6 @@
       "path": "shell/plugins/bar/widgets/KeyboardLayout.qml"
     },
     {
-      "invocation": "source",
-      "line": 76,
-      "name": "hyprctl",
-      "path": "shell/plugins/bar/widgets/KeyboardLayout.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 106,
-      "name": "hyprctl",
-      "path": "shell/plugins/bar/widgets/KeyboardLayout.qml"
-    },
-    {
       "invocation": "literal",
       "line": 106,
       "name": "hyprctl",
@@ -5353,12 +5458,6 @@
     },
     {
       "invocation": "shell-string",
-      "line": 35,
-      "name": "hyprctl",
-      "path": "shell/plugins/bar/widgets/Workspaces.qml"
-    },
-    {
-      "invocation": "source",
       "line": 35,
       "name": "hyprctl",
       "path": "shell/plugins/bar/widgets/Workspaces.qml"
@@ -5370,28 +5469,10 @@
       "path": "shell/plugins/panels/monitor/Panel.qml"
     },
     {
-      "invocation": "source",
-      "line": 303,
-      "name": "hyprctl",
-      "path": "shell/plugins/panels/monitor/Panel.qml"
-    },
-    {
       "invocation": "literal",
       "line": 303,
       "name": "hyprctl",
       "path": "shell/plugins/panels/monitor/Panel.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 51,
-      "name": "hyprctl",
-      "path": "shell/plugins/services/nightlight/Service.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 57,
-      "name": "hyprctl",
-      "path": "shell/plugins/services/nightlight/Service.qml"
     },
     {
       "invocation": "literal",
@@ -5412,40 +5493,16 @@
       "path": "shell/services/PluginRegistry.qml"
     },
     {
-      "invocation": "source",
-      "line": 880,
-      "name": "ip",
-      "path": "shell/plugins/panels/tailscale/Panel.qml"
+      "invocation": "shell-script",
+      "line": 17,
+      "name": "md5sum",
+      "path": "shell/plugins/image-picker/list.sh"
     },
     {
-      "invocation": "source",
-      "line": 909,
-      "name": "ip",
-      "path": "shell/plugins/panels/tailscale/Panel.qml"
-    },
-    {
-      "invocation": "menu.checked",
-      "line": 0,
-      "name": "kitty",
-      "path": "default/omarchy/omarchy-menu.jsonc"
-    },
-    {
-      "invocation": "menu.checked",
-      "line": 0,
-      "name": "low",
-      "path": "default/omarchy/omarchy-menu.jsonc"
-    },
-    {
-      "invocation": "menu.checked",
-      "line": 0,
-      "name": "mid",
-      "path": "default/omarchy/omarchy-menu.jsonc"
-    },
-    {
-      "invocation": "source",
-      "line": 404,
-      "name": "mkdir",
-      "path": "shell/plugins/agents/Main.qml"
+      "invocation": "shell-script",
+      "line": 25,
+      "name": "md5sum",
+      "path": "shell/plugins/image-picker/list.sh"
     },
     {
       "invocation": "literal",
@@ -5454,22 +5511,16 @@
       "path": "shell/plugins/agents/Main.qml"
     },
     {
-      "invocation": "source",
+      "invocation": "shell-script",
       "line": 11,
       "name": "mkdir",
       "path": "shell/plugins/clipboard/capture.sh"
     },
     {
-      "invocation": "source",
+      "invocation": "shell-script",
       "line": 7,
       "name": "mkdir",
       "path": "shell/plugins/image-picker/list.sh"
-    },
-    {
-      "invocation": "source",
-      "line": 413,
-      "name": "mkdir",
-      "path": "shell/plugins/notifications/Service.qml"
     },
     {
       "invocation": "literal",
@@ -5478,70 +5529,22 @@
       "path": "shell/plugins/notifications/Service.qml"
     },
     {
-      "invocation": "source",
-      "line": 504,
-      "name": "mkdir",
-      "path": "shell/plugins/notifications/Service.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 543,
-      "name": "mkdir",
-      "path": "shell/plugins/notifications/Service.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 571,
-      "name": "mkdir",
-      "path": "shell/plugins/notifications/Service.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 211,
-      "name": "mkdir",
-      "path": "shell/plugins/services/idle/Service.qml"
-    },
-    {
-      "invocation": "source",
+      "invocation": "shell-eval",
       "line": 303,
       "name": "mkdir",
       "path": "shell/plugins/services/idle/Service.qml"
     },
     {
-      "invocation": "source",
-      "line": 697,
-      "name": "mkdir",
-      "path": "shell/services/PluginRegistry.qml"
+      "invocation": "shell-script",
+      "line": 26,
+      "name": "mktemp",
+      "path": "shell/plugins/clipboard/capture.sh"
     },
     {
-      "invocation": "source",
-      "line": 545,
+      "invocation": "shell-script",
+      "line": 38,
       "name": "mv",
-      "path": "shell/plugins/notifications/Service.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 770,
-      "name": "nmcli",
-      "path": "shell/plugins/panels/network/Panel.qml"
-    },
-    {
-      "invocation": "menu.checked",
-      "line": 0,
-      "name": "nvim",
-      "path": "default/omarchy/omarchy-menu.jsonc"
-    },
-    {
-      "invocation": "menu.checked",
-      "line": 0,
-      "name": "omp",
-      "path": "default/omarchy/omarchy-menu.jsonc"
-    },
-    {
-      "invocation": "menu.checked",
-      "line": 0,
-      "name": "opencode",
-      "path": "default/omarchy/omarchy-menu.jsonc"
+      "path": "shell/plugins/clipboard/capture.sh"
     },
     {
       "invocation": "menu.when",
@@ -5556,12 +5559,6 @@
       "path": "shell/plugins/bar/indicators/ScreenRecording.qml"
     },
     {
-      "invocation": "menu.checked",
-      "line": 0,
-      "name": "pi",
-      "path": "default/omarchy/omarchy-menu.jsonc"
-    },
-    {
       "invocation": "literal",
       "line": 353,
       "name": "pkexec",
@@ -5572,12 +5569,6 @@
       "line": 0,
       "name": "pkill",
       "path": "default/omarchy/omarchy-menu.jsonc"
-    },
-    {
-      "invocation": "source",
-      "line": 266,
-      "name": "pkill",
-      "path": "shell/plugins/clipboard/Clipboard.qml"
     },
     {
       "invocation": "literal",
@@ -5592,28 +5583,10 @@
       "path": "shell/plugins/panels/dropbox/Service.qml"
     },
     {
-      "invocation": "menu.checked",
-      "line": 0,
-      "name": "rc",
-      "path": "default/omarchy/omarchy-menu.jsonc"
-    },
-    {
-      "invocation": "source",
-      "line": 125,
-      "name": "readlink",
-      "path": "shell/plugins/background/Background.qml"
-    },
-    {
       "invocation": "literal",
       "line": 125,
       "name": "readlink",
       "path": "shell/plugins/background/Background.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 365,
-      "name": "readlink",
-      "path": "shell/plugins/lock/Service.qml"
     },
     {
       "invocation": "literal",
@@ -5622,32 +5595,20 @@
       "path": "shell/plugins/lock/Service.qml"
     },
     {
-      "invocation": "source",
-      "line": 523,
+      "invocation": "shell-script",
+      "line": 29,
       "name": "rm",
-      "path": "shell/plugins/notifications/Service.qml"
+      "path": "shell/plugins/clipboard/capture.sh"
     },
     {
-      "invocation": "source",
-      "line": 212,
+      "invocation": "shell-script",
+      "line": 36,
       "name": "rm",
-      "path": "shell/plugins/services/idle/Service.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 285,
-      "name": "setpriv",
-      "path": "shell/plugins/clipboard/Clipboard.qml"
+      "path": "shell/plugins/clipboard/capture.sh"
     },
     {
       "invocation": "literal",
       "line": 285,
-      "name": "setpriv",
-      "path": "shell/plugins/clipboard/Clipboard.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 294,
       "name": "setpriv",
       "path": "shell/plugins/clipboard/Clipboard.qml"
     },
@@ -5658,16 +5619,28 @@
       "path": "shell/plugins/clipboard/Clipboard.qml"
     },
     {
-      "invocation": "menu.checked",
-      "line": 0,
-      "name": "stable",
-      "path": "default/omarchy/omarchy-menu.jsonc"
+      "invocation": "shell-script",
+      "line": 33,
+      "name": "sha256sum",
+      "path": "shell/plugins/clipboard/capture.sh"
     },
     {
-      "invocation": "menu.checked",
-      "line": 0,
-      "name": "sublime_text",
-      "path": "default/omarchy/omarchy-menu.jsonc"
+      "invocation": "shell-script",
+      "line": 41,
+      "name": "sort",
+      "path": "shell/plugins/image-picker/list.sh"
+    },
+    {
+      "invocation": "shell-script",
+      "line": 92,
+      "name": "sort",
+      "path": "shell/services/hidden-entries.sh"
+    },
+    {
+      "invocation": "shell-script",
+      "line": 13,
+      "name": "stat",
+      "path": "shell/plugins/image-picker/list.sh"
     },
     {
       "invocation": "menu.when",
@@ -5724,166 +5697,16 @@
       "path": "shell/plugins/panels/tailscale/Service.qml"
     },
     {
-      "invocation": "source",
-      "line": 8,
-      "name": "top",
-      "path": "config/omarchy/shell.json"
-    },
-    {
-      "invocation": "source",
-      "line": 67,
-      "name": "top",
-      "path": "shell/Ui/KeyboardPanel.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 121,
-      "name": "top",
-      "path": "shell/Ui/KeyboardPanel.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 157,
-      "name": "top",
-      "path": "shell/Ui/KeyboardPanel.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 197,
-      "name": "top",
-      "path": "shell/Ui/KeyboardPanel.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 36,
-      "name": "top",
-      "path": "shell/Ui/PopupCard.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 122,
-      "name": "top",
-      "path": "shell/Ui/PopupCard.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 139,
-      "name": "top",
-      "path": "shell/Ui/PopupCard.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 37,
-      "name": "top",
-      "path": "shell/plugins/bar/Bar.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 58,
-      "name": "top",
-      "path": "shell/plugins/bar/Bar.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 253,
-      "name": "top",
-      "path": "shell/plugins/bar/Bar.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 1006,
-      "name": "top",
-      "path": "shell/plugins/bar/Bar.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 1013,
-      "name": "top",
-      "path": "shell/plugins/bar/Bar.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 1247,
-      "name": "top",
-      "path": "shell/plugins/bar/Bar.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 1642,
-      "name": "top",
-      "path": "shell/plugins/bar/Bar.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 7,
-      "name": "top",
-      "path": "shell/plugins/bar/BarModel.js"
-    },
-    {
-      "invocation": "source",
-      "line": 81,
-      "name": "top",
-      "path": "shell/plugins/dev-gallery/GalleryPanel.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 105,
-      "name": "top",
-      "path": "shell/plugins/dev-gallery/GalleryPanel.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 211,
-      "name": "top",
-      "path": "shell/plugins/dev-gallery/GalleryPanel.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 1037,
-      "name": "top",
-      "path": "shell/plugins/dev-gallery/GalleryPanel.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 290,
-      "name": "top",
-      "path": "shell/plugins/notifications/NotificationLogic.js"
-    },
-    {
-      "invocation": "source",
-      "line": 299,
-      "name": "top",
-      "path": "shell/plugins/notifications/NotificationLogic.js"
-    },
-    {
-      "invocation": "source",
-      "line": 48,
-      "name": "top",
-      "path": "shell/plugins/notifications/Service.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 48,
-      "name": "top",
-      "path": "shell/plugins/notifications/Service.qml"
-    },
-    {
-      "invocation": "source",
-      "line": 43,
-      "name": "top",
-      "path": "shell/shell.qml"
+      "invocation": "shell-script",
+      "line": 56,
+      "name": "timeout",
+      "path": "shell/plugins/clipboard/capture.sh"
     },
     {
       "invocation": "menu.action",
       "line": 0,
       "name": "uwsm-app",
       "path": "default/omarchy/omarchy-menu.jsonc"
-    },
-    {
-      "invocation": "source",
-      "line": 131,
-      "name": "uwsm-app",
-      "path": "shell/plugins/panels/dropbox/Service.qml"
     },
     {
       "invocation": "literal",
@@ -5898,40 +5721,28 @@
       "path": "shell/services/AppLibrary.qml"
     },
     {
-      "invocation": "source",
-      "line": 85,
-      "name": "uwsm-app",
-      "path": "shell/services/AppLibrary.qml"
-    },
-    {
-      "invocation": "menu.checked",
-      "line": 0,
-      "name": "vim",
-      "path": "default/omarchy/omarchy-menu.jsonc"
-    },
-    {
       "invocation": "literal",
       "line": 155,
       "name": "which",
       "path": "shell/plugins/panels/tailscale/Service.qml"
     },
     {
-      "invocation": "source",
-      "line": 266,
+      "invocation": "shell-script",
+      "line": 13,
       "name": "wl-paste",
-      "path": "shell/plugins/clipboard/Clipboard.qml"
+      "path": "shell/plugins/clipboard/capture.sh"
     },
     {
-      "invocation": "source",
-      "line": 285,
+      "invocation": "shell-script",
+      "line": 56,
       "name": "wl-paste",
-      "path": "shell/plugins/clipboard/Clipboard.qml"
+      "path": "shell/plugins/clipboard/capture.sh"
     },
     {
-      "invocation": "source",
-      "line": 294,
+      "invocation": "shell-script",
+      "line": 62,
       "name": "wl-paste",
-      "path": "shell/plugins/clipboard/Clipboard.qml"
+      "path": "shell/plugins/clipboard/capture.sh"
     },
     {
       "invocation": "menu.action",
@@ -5947,12 +5758,6 @@
     },
     {
       "invocation": "menu.action",
-      "line": 0,
-      "name": "xdg-terminal-exec",
-      "path": "default/omarchy/omarchy-menu.jsonc"
-    },
-    {
-      "invocation": "menu.when",
       "line": 0,
       "name": "xdg-terminal-exec",
       "path": "default/omarchy/omarchy-menu.jsonc"
@@ -5968,18 +5773,6 @@
       "line": 163,
       "name": "xkbcli",
       "path": "shell/plugins/bar/widgets/KeyboardLayout.qml"
-    },
-    {
-      "invocation": "menu.checked",
-      "line": 0,
-      "name": "zeditor",
-      "path": "default/omarchy/omarchy-menu.jsonc"
-    },
-    {
-      "invocation": "menu.checked",
-      "line": 0,
-      "name": "zen",
-      "path": "default/omarchy/omarchy-menu.jsonc"
     }
   ],
   "filesystem_contracts": [
@@ -6000,6 +5793,12 @@
       "line": 4,
       "name": "$HOME/.cache}/omarchy/image-selector",
       "path": "shell/plugins/image-picker/list.sh"
+    },
+    {
+      "kind": "read",
+      "line": 10,
+      "name": "$HOME/.config/hypr/monitors.lua",
+      "path": "bin/omarchy-hyprland-monitor-clamshell"
     },
     {
       "kind": "read",
@@ -6057,6 +5856,42 @@
     },
     {
       "kind": "read",
+      "line": 6,
+      "name": "$HOME/.local/state/omarchy/toggles/hypr",
+      "path": "bin/omarchy-hyprland-monitor-clamshell"
+    },
+    {
+      "kind": "read",
+      "line": 6,
+      "name": "$HOME/.local/state/omarchy/toggles/hypr/$1.lua",
+      "path": "bin/omarchy-hyprland-toggle-disabled"
+    },
+    {
+      "kind": "read",
+      "line": 6,
+      "name": "$HOME/.local/state/omarchy/toggles/hypr/$1.lua",
+      "path": "bin/omarchy-hyprland-toggle-enabled"
+    },
+    {
+      "kind": "read",
+      "line": 17,
+      "name": "$HOME/.local/state/omarchy/toggles/hypr/$FLAG_NAME.lua",
+      "path": "bin/omarchy-hyprland-toggle"
+    },
+    {
+      "kind": "read",
+      "line": 7,
+      "name": "$HOME/.local/state/omarchy/toggles/hypr/$TOGGLE.lua",
+      "path": "bin/omarchy-hyprland-monitor-internal"
+    },
+    {
+      "kind": "read",
+      "line": 7,
+      "name": "$HOME/.local/state/omarchy/toggles/hypr/$TOGGLE.lua",
+      "path": "bin/omarchy-hyprland-monitor-internal-mirror"
+    },
+    {
+      "kind": "read",
       "line": 9,
       "name": "$HOME/.local/state}/omarchy",
       "path": "shell/plugins/clipboard/capture.sh"
@@ -6069,15 +5904,63 @@
     },
     {
       "kind": "read",
+      "line": 61,
+      "name": "$OMARCHY_PATH/default/alacritty/screensaver.toml",
+      "path": "bin/omarchy-launch-screensaver"
+    },
+    {
+      "kind": "read",
+      "line": 67,
+      "name": "$OMARCHY_PATH/default/foot/screensaver.ini",
+      "path": "bin/omarchy-launch-screensaver"
+    },
+    {
+      "kind": "read",
+      "line": 64,
+      "name": "$OMARCHY_PATH/default/ghostty/screensaver",
+      "path": "bin/omarchy-launch-screensaver"
+    },
+    {
+      "kind": "read",
+      "line": 18,
+      "name": "$OMARCHY_PATH/default/hypr/toggles/$FLAG_NAME.lua",
+      "path": "bin/omarchy-hyprland-toggle"
+    },
+    {
+      "kind": "read",
+      "line": 39,
+      "name": "$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock",
+      "path": "bin/omarchy-launch-screensaver"
+    },
+    {
+      "kind": "read",
       "line": 358,
       "name": "/etc/hostname",
       "path": "shell/plugins/agents/Main.qml"
     },
     {
       "kind": "read",
+      "line": 39,
+      "name": "/etc/pam.d/omarchy-lock-fingerprint",
+      "path": "bin/omarchy-apply-lock"
+    },
+    {
+      "kind": "write",
+      "line": 45,
+      "name": "/etc/pam.d/omarchy-lock-fingerprint",
+      "path": "bin/omarchy-apply-lock"
+    },
+    {
+      "kind": "read",
       "line": 380,
       "name": "/etc/pam.d/omarchy-lock-fingerprint",
       "path": "shell/plugins/lock/Service.qml"
+    },
+    {
+      "kind": "read",
+      "line": 25,
+      "name": "/etc/pam.d/omarchy-lock-password",
+      "path": "bin/omarchy-apply-lock"
     },
     {
       "kind": "read",
@@ -6090,6 +5973,30 @@
       "line": 161,
       "name": "/etc/pam.d/polkit-1",
       "path": "shell/plugins/polkit/PolkitAgent.qml"
+    },
+    {
+      "kind": "read",
+      "line": 6,
+      "name": "/proc/acpi/button/lid/",
+      "path": "bin/omarchy-hw-laptop-closed"
+    },
+    {
+      "kind": "read",
+      "line": 6,
+      "name": "/sys/class/backlight",
+      "path": "bin/omarchy-hw-display"
+    },
+    {
+      "kind": "read",
+      "line": 5,
+      "name": "/sys/class/drm",
+      "path": "bin/omarchy-hw-external-monitors"
+    },
+    {
+      "kind": "read",
+      "line": 16,
+      "name": "/sys/class/leds/",
+      "path": "bin/omarchy-brightness-keyboard"
     },
     {
       "kind": "read",
@@ -9362,12 +9269,27 @@
     "config/omarchy/extensions/omarchy-menu.jsonc",
     "default/omarchy/omarchy-menu.jsonc"
   ],
-  "schema": 1,
+  "schema": 4,
   "security_contracts": [
+    {
+      "line": 39,
+      "name": "/etc/pam.d/omarchy-lock-fingerprint",
+      "path": "bin/omarchy-apply-lock"
+    },
+    {
+      "line": 45,
+      "name": "/etc/pam.d/omarchy-lock-fingerprint",
+      "path": "bin/omarchy-apply-lock"
+    },
     {
       "line": 380,
       "name": "/etc/pam.d/omarchy-lock-fingerprint",
       "path": "shell/plugins/lock/Service.qml"
+    },
+    {
+      "line": 25,
+      "name": "/etc/pam.d/omarchy-lock-password",
+      "path": "bin/omarchy-apply-lock"
     },
     {
       "line": 485,
@@ -9565,6 +9487,1604 @@
       "path": "shell/plugins/polkit/PolkitAgent.qml"
     }
   ],
+  "security_dead_dispositions": [],
+  "security_dead_dynamic_execution_dispositions": [],
+  "security_direct_shell_commands": [
+    {
+      "invocation": "literal",
+      "line": 365,
+      "name": "readlink",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
+      "invocation": "literal",
+      "line": 380,
+      "name": "bash",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
+      "invocation": "shell-eval",
+      "line": 380,
+      "name": "fprintd-list",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
+      "invocation": "literal",
+      "line": 391,
+      "name": "bash",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
+      "invocation": "shell-eval",
+      "line": 391,
+      "name": "omarchy-hyprland-session-locked",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
+      "invocation": "literal",
+      "line": 406,
+      "name": "bash",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
+      "invocation": "shell-eval",
+      "line": 406,
+      "name": "omarchy-system-wake",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
+      "invocation": "literal",
+      "line": 411,
+      "name": "bash",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
+      "invocation": "shell-eval",
+      "line": 411,
+      "name": "omarchy-brightness-display",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
+      "invocation": "shell-eval",
+      "line": 411,
+      "name": "omarchy-brightness-keyboard",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
+      "invocation": "literal",
+      "line": 413,
+      "name": "mkdir",
+      "path": "shell/plugins/notifications/Service.qml"
+    },
+    {
+      "invocation": "literal",
+      "line": 503,
+      "name": "bash",
+      "path": "shell/plugins/notifications/Service.qml"
+    },
+    {
+      "invocation": "literal",
+      "line": 570,
+      "name": "bash",
+      "path": "shell/plugins/notifications/Service.qml"
+    },
+    {
+      "invocation": "literal",
+      "line": 644,
+      "name": "bash",
+      "path": "shell/plugins/notifications/Service.qml"
+    },
+    {
+      "invocation": "literal",
+      "line": 845,
+      "name": "bash",
+      "path": "shell/plugins/notifications/Service.qml"
+    },
+    {
+      "invocation": "literal",
+      "line": 171,
+      "name": "bash",
+      "path": "shell/plugins/polkit/PolkitAgent.qml"
+    },
+    {
+      "invocation": "shell-eval",
+      "line": 171,
+      "name": "omarchy-hw-laptop-closed",
+      "path": "shell/plugins/polkit/PolkitAgent.qml"
+    },
+    {
+      "invocation": "literal",
+      "line": 60,
+      "name": "bash",
+      "path": "shell/plugins/services/idle/Service.qml"
+    },
+    {
+      "invocation": "literal",
+      "line": 220,
+      "name": "bash",
+      "path": "shell/plugins/services/idle/Service.qml"
+    },
+    {
+      "invocation": "literal",
+      "line": 303,
+      "name": "bash",
+      "path": "shell/plugins/services/idle/Service.qml"
+    },
+    {
+      "invocation": "shell-eval",
+      "line": 303,
+      "name": "mkdir",
+      "path": "shell/plugins/services/idle/Service.qml"
+    }
+  ],
+  "security_dynamic_executions": [
+    {
+      "category": "ambiguous-shell-shape",
+      "invocation": "helper-shell",
+      "line": 17,
+      "name": "\"$@\"",
+      "path": "bin/omarchy-apply-lock"
+    },
+    {
+      "category": "ambiguous-shell-shape",
+      "invocation": "helper-shell",
+      "line": 77,
+      "name": "$1 == \"VCP\" && toupper($2) == \"10\" && $3 == \"C\" && $4 ~ /^[0-9]+$/ && $5 ~ /^[0-9]+$/ && $5 > 0 {",
+      "path": "bin/omarchy-brightness-display-ddc"
+    },
+    {
+      "category": "variable-command-head",
+      "invocation": "helper-shell",
+      "line": 125,
+      "name": "if [[ $bus =~ ^[0-9]+$ && $maximum =~ ^[0-9]+$ && $range_cached_at =~ ^[0-9]+$ ]] && (( maximum > 0 )); then",
+      "path": "bin/omarchy-brightness-display-ddc"
+    },
+    {
+      "category": "ambiguous-shell-shape",
+      "invocation": "helper-shell",
+      "line": 18,
+      "name": "timeout --kill-after=1s 3s 1password --lock >/dev/null 2>&1 || true",
+      "path": "bin/omarchy-system-lock"
+    },
+    {
+      "category": "ambiguous-shell-shape",
+      "invocation": "dynamic",
+      "line": 363,
+      "name": "entry ? String(entry.exec || \"\") : \"\"",
+      "path": "shell/plugins/notifications/Service.qml"
+    },
+    {
+      "category": "ambiguous-shell-shape",
+      "invocation": "dynamic",
+      "line": 367,
+      "name": "Util.execDetached(command)",
+      "path": "shell/plugins/notifications/Service.qml"
+    },
+    {
+      "category": "ambiguous-shell-shape",
+      "invocation": "dynamic",
+      "line": 443,
+      "name": "command, done: done || null }])",
+      "path": "shell/plugins/notifications/Service.qml"
+    },
+    {
+      "category": "ambiguous-shell-shape",
+      "invocation": "dynamic",
+      "line": 464,
+      "name": "job.command",
+      "path": "shell/plugins/notifications/Service.qml"
+    },
+    {
+      "category": "dynamic-shell-payload",
+      "invocation": "shell-eval",
+      "line": 503,
+      "name": "var command = [\"bash\", \"-c\",",
+      "path": "shell/plugins/notifications/Service.qml"
+    },
+    {
+      "category": "dynamic-shell-payload",
+      "invocation": "shell-eval",
+      "line": 570,
+      "name": "var command = [\"bash\", \"-c\",",
+      "path": "shell/plugins/notifications/Service.qml"
+    },
+    {
+      "category": "dynamic-shell-payload",
+      "invocation": "shell-eval",
+      "line": 644,
+      "name": "readHistoryProc.command = [\"bash\", \"-c\",",
+      "path": "shell/plugins/notifications/Service.qml"
+    },
+    {
+      "category": "dynamic-shell-payload",
+      "invocation": "shell-eval",
+      "line": 845,
+      "name": "restorePopupsProc.command = [\"bash\", \"-c\",",
+      "path": "shell/plugins/notifications/Service.qml"
+    },
+    {
+      "category": "dynamic-shell-payload",
+      "invocation": "shell-eval",
+      "line": 60,
+      "name": "process.command = [\"bash\", \"-lc\", command]",
+      "path": "shell/plugins/services/idle/Service.qml"
+    },
+    {
+      "category": "ambiguous-shell-shape",
+      "invocation": "dynamic",
+      "line": 210,
+      "name": "value",
+      "path": "shell/plugins/services/idle/Service.qml"
+    },
+    {
+      "category": "dynamic-shell-payload",
+      "invocation": "shell-eval",
+      "line": 220,
+      "name": "stayAwakeStateWriter.command = [\"bash\", \"-lc\", command]",
+      "path": "shell/plugins/services/idle/Service.qml"
+    }
+  ],
+  "security_external_executables": [
+    {
+      "invocation": "helper-shell",
+      "line": 50,
+      "name": "/BRIGHTNESS=/",
+      "path": "bin/omarchy-brightness-display-apple"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 30,
+      "name": "/DRM",
+      "path": "bin/omarchy-brightness-display-ddc"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 25,
+      "name": "/I2C",
+      "path": "bin/omarchy-brightness-display-ddc"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 55,
+      "name": "END",
+      "path": "bin/omarchy-brightness-display-apple"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 83,
+      "name": "END",
+      "path": "bin/omarchy-brightness-display-ddc"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 25,
+      "name": "address",
+      "path": "bin/omarchy-hyprland-focus-app"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 49,
+      "name": "awk",
+      "path": "bin/omarchy-brightness-display-apple"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 24,
+      "name": "awk",
+      "path": "bin/omarchy-brightness-display-ddc"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 76,
+      "name": "awk",
+      "path": "bin/omarchy-brightness-display-ddc"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 23,
+      "name": "awk",
+      "path": "bin/omarchy-hyprland-monitor-clamshell"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 18,
+      "name": "basename",
+      "path": "bin/omarchy-brightness-keyboard"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 68,
+      "name": "basename",
+      "path": "bin/omarchy-hyprland-monitor-internal"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 61,
+      "name": "basename",
+      "path": "bin/omarchy-hyprland-monitor-internal-mirror"
+    },
+    {
+      "invocation": "literal",
+      "line": 380,
+      "name": "bash",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
+      "invocation": "literal",
+      "line": 391,
+      "name": "bash",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
+      "invocation": "literal",
+      "line": 406,
+      "name": "bash",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
+      "invocation": "literal",
+      "line": 411,
+      "name": "bash",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
+      "invocation": "literal",
+      "line": 503,
+      "name": "bash",
+      "path": "shell/plugins/notifications/Service.qml"
+    },
+    {
+      "invocation": "literal",
+      "line": 570,
+      "name": "bash",
+      "path": "shell/plugins/notifications/Service.qml"
+    },
+    {
+      "invocation": "literal",
+      "line": 644,
+      "name": "bash",
+      "path": "shell/plugins/notifications/Service.qml"
+    },
+    {
+      "invocation": "literal",
+      "line": 845,
+      "name": "bash",
+      "path": "shell/plugins/notifications/Service.qml"
+    },
+    {
+      "invocation": "literal",
+      "line": 171,
+      "name": "bash",
+      "path": "shell/plugins/polkit/PolkitAgent.qml"
+    },
+    {
+      "invocation": "literal",
+      "line": 60,
+      "name": "bash",
+      "path": "shell/plugins/services/idle/Service.qml"
+    },
+    {
+      "invocation": "literal",
+      "line": 220,
+      "name": "bash",
+      "path": "shell/plugins/services/idle/Service.qml"
+    },
+    {
+      "invocation": "literal",
+      "line": 303,
+      "name": "bash",
+      "path": "shell/plugins/services/idle/Service.qml"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 20,
+      "name": "blockers",
+      "path": "bin/omarchy-hyprland-session-locked"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 118,
+      "name": "brightnessctl",
+      "path": "bin/omarchy-brightness-display"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 29,
+      "name": "brightnessctl",
+      "path": "bin/omarchy-brightness-keyboard"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 32,
+      "name": "brightnessctl",
+      "path": "bin/omarchy-brightness-keyboard"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 37,
+      "name": "brightnessctl",
+      "path": "bin/omarchy-brightness-keyboard"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 38,
+      "name": "brightnessctl",
+      "path": "bin/omarchy-brightness-keyboard"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 57,
+      "name": "brightnessctl",
+      "path": "bin/omarchy-brightness-keyboard"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 26,
+      "name": "bus",
+      "path": "bin/omarchy-brightness-display-ddc"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 33,
+      "name": "bus",
+      "path": "bin/omarchy-brightness-display-ddc"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 37,
+      "name": "bus",
+      "path": "bin/omarchy-brightness-display-ddc"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 20,
+      "name": "cache_file",
+      "path": "bin/omarchy-brightness-display-ddc"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 31,
+      "name": "connector",
+      "path": "bin/omarchy-brightness-display-ddc"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 23,
+      "name": "cp",
+      "path": "bin/omarchy-hyprland-toggle"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 11,
+      "name": "cut",
+      "path": "bin/omarchy-apply-lock"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 20,
+      "name": "date",
+      "path": "bin/omarchy-brightness-display-ddc"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 52,
+      "name": "date",
+      "path": "bin/omarchy-brightness-display-ddc"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 98,
+      "name": "date",
+      "path": "bin/omarchy-brightness-display-ddc"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 126,
+      "name": "date",
+      "path": "bin/omarchy-brightness-display-ddc"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 24,
+      "name": "ddcutil",
+      "path": "bin/omarchy-brightness-display-ddc"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 76,
+      "name": "ddcutil",
+      "path": "bin/omarchy-brightness-display-ddc"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 163,
+      "name": "ddcutil",
+      "path": "bin/omarchy-brightness-display-ddc"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 17,
+      "name": "def",
+      "path": "bin/omarchy-hyprland-session-locked"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 63,
+      "name": "dev",
+      "path": "bin/omarchy-brightness-display"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 69,
+      "name": "dev",
+      "path": "bin/omarchy-brightness-display"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 70,
+      "name": "dev",
+      "path": "bin/omarchy-brightness-display"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 30,
+      "name": "dev",
+      "path": "bin/omarchy-hyprland-focus-app"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 157,
+      "name": "dev",
+      "path": "bin/omarchy-hyprland-monitor-clamshell"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 176,
+      "name": "dev",
+      "path": "bin/omarchy-hyprland-monitor-clamshell"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 6,
+      "name": "dev",
+      "path": "bin/omarchy-hyprland-monitor-external-active"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 12,
+      "name": "dev",
+      "path": "bin/omarchy-hyprland-monitor-focused-apple"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 13,
+      "name": "dev",
+      "path": "bin/omarchy-hyprland-monitor-internal"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 29,
+      "name": "dev",
+      "path": "bin/omarchy-launch-screensaver"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 36,
+      "name": "dev",
+      "path": "bin/omarchy-launch-screensaver"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 24,
+      "name": "diff",
+      "path": "bin/omarchy-hyprland-monitor-clamshell"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 25,
+      "name": "diff",
+      "path": "bin/omarchy-hyprland-monitor-clamshell"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 22,
+      "name": "dirname",
+      "path": "bin/omarchy-hyprland-toggle"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 23,
+      "name": "end",
+      "path": "bin/omarchy-hyprland-session-locked"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 77,
+      "name": "flock",
+      "path": "bin/omarchy-brightness-display"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 17,
+      "name": "flock",
+      "path": "bin/omarchy-system-lock"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 29,
+      "name": "found",
+      "path": "bin/omarchy-brightness-display"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 52,
+      "name": "found",
+      "path": "bin/omarchy-brightness-display-apple"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 79,
+      "name": "found",
+      "path": "bin/omarchy-brightness-display-ddc"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 37,
+      "name": "fprintd-list",
+      "path": "bin/omarchy-apply-lock"
+    },
+    {
+      "invocation": "shell-eval",
+      "line": 380,
+      "name": "fprintd-list",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 11,
+      "name": "getent",
+      "path": "bin/omarchy-apply-lock"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 37,
+      "name": "grep",
+      "path": "bin/omarchy-apply-lock"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 11,
+      "name": "grep",
+      "path": "bin/omarchy-hw-display"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 11,
+      "name": "head",
+      "path": "bin/omarchy-hw-display"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 19,
+      "name": "hyprctl",
+      "path": "bin/omarchy-hyprland-focus-app"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 31,
+      "name": "hyprctl",
+      "path": "bin/omarchy-hyprland-focus-app"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 188,
+      "name": "hyprctl",
+      "path": "bin/omarchy-hyprland-monitor-clamshell"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 211,
+      "name": "hyprctl",
+      "path": "bin/omarchy-hyprland-monitor-clamshell"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 8,
+      "name": "hyprctl",
+      "path": "bin/omarchy-hyprland-monitor-focused-apple"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 39,
+      "name": "hyprctl",
+      "path": "bin/omarchy-hyprland-monitor-internal"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 30,
+      "name": "hyprctl",
+      "path": "bin/omarchy-hyprland-monitor-internal-mirror"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 14,
+      "name": "hyprctl",
+      "path": "bin/omarchy-hyprland-session-locked"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 54,
+      "name": "hyprctl",
+      "path": "bin/omarchy-hyprland-toggle"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 56,
+      "name": "hyprctl",
+      "path": "bin/omarchy-launch-screensaver"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 11,
+      "name": "hyprctl",
+      "path": "bin/omarchy-system-lock"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 20,
+      "name": "jq",
+      "path": "bin/omarchy-hyprland-focus-app"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 8,
+      "name": "jq",
+      "path": "bin/omarchy-hyprland-monitor-focused-apple"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 56,
+      "name": "jq",
+      "path": "bin/omarchy-launch-screensaver"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 11,
+      "name": "ls",
+      "path": "bin/omarchy-hw-display"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 19,
+      "name": "mkdir",
+      "path": "bin/omarchy-brightness-display-ddc"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 66,
+      "name": "mkdir",
+      "path": "bin/omarchy-brightness-display-ddc"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 99,
+      "name": "mkdir",
+      "path": "bin/omarchy-brightness-display-ddc"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 111,
+      "name": "mkdir",
+      "path": "bin/omarchy-hyprland-monitor-clamshell"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 203,
+      "name": "mkdir",
+      "path": "bin/omarchy-hyprland-monitor-clamshell"
+    },
+    {
+      "invocation": "literal",
+      "line": 413,
+      "name": "mkdir",
+      "path": "shell/plugins/notifications/Service.qml"
+    },
+    {
+      "invocation": "shell-eval",
+      "line": 303,
+      "name": "mkdir",
+      "path": "shell/plugins/services/idle/Service.qml"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 37,
+      "name": "n",
+      "path": "bin/omarchy-hyprland-monitor-internal"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 28,
+      "name": "n",
+      "path": "bin/omarchy-hyprland-monitor-internal-mirror"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 5,
+      "name": "name",
+      "path": "bin/omarchy-hyprland-monitor-focused"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 5,
+      "name": "name",
+      "path": "bin/omarchy-hyprland-monitor-laptop"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 18,
+      "name": "not",
+      "path": "bin/omarchy-hyprland-session-locked"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 127,
+      "name": "now",
+      "path": "bin/omarchy-brightness-display-ddc"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 79,
+      "name": "p",
+      "path": "bin/omarchy-hyprland-monitor-clamshell"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 140,
+      "name": "percent",
+      "path": "bin/omarchy-brightness-display-ddc"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 150,
+      "name": "percent",
+      "path": "bin/omarchy-brightness-display-ddc"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 10,
+      "name": "pgrep",
+      "path": "bin/omarchy-launch-screensaver"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 15,
+      "name": "pgrep",
+      "path": "bin/omarchy-system-lock"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 25,
+      "name": "pidwait",
+      "path": "bin/omarchy-system-lock"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 23,
+      "name": "pkill",
+      "path": "bin/omarchy-system-lock"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 26,
+      "name": "pkill",
+      "path": "bin/omarchy-system-lock"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 29,
+      "name": "print",
+      "path": "bin/omarchy-brightness-display"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 34,
+      "name": "print",
+      "path": "bin/omarchy-brightness-display-ddc"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 78,
+      "name": "print",
+      "path": "bin/omarchy-brightness-display-ddc"
+    },
+    {
+      "invocation": "literal",
+      "line": 365,
+      "name": "readlink",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 60,
+      "name": "rm",
+      "path": "bin/omarchy-brightness-display-apple"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 57,
+      "name": "rm",
+      "path": "bin/omarchy-brightness-display-ddc"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 94,
+      "name": "rm",
+      "path": "bin/omarchy-brightness-display-ddc"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 164,
+      "name": "rm",
+      "path": "bin/omarchy-brightness-display-ddc"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 183,
+      "name": "rm",
+      "path": "bin/omarchy-hyprland-monitor-clamshell"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 31,
+      "name": "rm",
+      "path": "bin/omarchy-hyprland-toggle"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 104,
+      "name": "scale",
+      "path": "bin/omarchy-hyprland-monitor-clamshell"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 66,
+      "name": "sed",
+      "path": "bin/omarchy-hyprland-monitor-clamshell"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 43,
+      "name": "socat",
+      "path": "bin/omarchy-launch-screensaver"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 16,
+      "name": "state",
+      "path": "bin/omarchy-hyprland-session-locked"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 19,
+      "name": "sudo",
+      "path": "bin/omarchy-apply-lock"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 49,
+      "name": "sudo",
+      "path": "bin/omarchy-brightness-display-apple"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 89,
+      "name": "sudo",
+      "path": "bin/omarchy-brightness-display-apple"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 91,
+      "name": "sudo",
+      "path": "bin/omarchy-brightness-display-apple"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 18,
+      "name": "timeout",
+      "path": "bin/omarchy-system-lock"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 25,
+      "name": "timeout",
+      "path": "bin/omarchy-system-lock"
+    },
+    {
+      "invocation": "helper-shell",
+      "line": 18,
+      "name": "xdg-terminal-exec",
+      "path": "bin/omarchy-launch-screensaver"
+    }
+  ],
+  "security_filesystem_contracts": [
+    {
+      "kind": "read",
+      "line": 10,
+      "name": "$HOME/.config/hypr/monitors.lua",
+      "path": "bin/omarchy-hyprland-monitor-clamshell"
+    },
+    {
+      "kind": "write",
+      "line": 303,
+      "name": "$HOME/.local/state/omarchy/indicators/stay-awake",
+      "path": "shell/plugins/services/idle/Service.qml"
+    },
+    {
+      "kind": "write",
+      "line": 211,
+      "name": "$HOME/.local/state/omarchy/indicators/stay-awake\\",
+      "path": "shell/plugins/services/idle/Service.qml"
+    },
+    {
+      "kind": "write",
+      "line": 212,
+      "name": "$HOME/.local/state/omarchy/indicators/stay-awake\\",
+      "path": "shell/plugins/services/idle/Service.qml"
+    },
+    {
+      "kind": "write",
+      "line": 211,
+      "name": "$HOME/.local/state/omarchy/indicators\\",
+      "path": "shell/plugins/services/idle/Service.qml"
+    },
+    {
+      "kind": "write",
+      "line": 303,
+      "name": "$HOME/.local/state/omarchy/indicators\\",
+      "path": "shell/plugins/services/idle/Service.qml"
+    },
+    {
+      "kind": "read",
+      "line": 6,
+      "name": "$HOME/.local/state/omarchy/toggles/hypr",
+      "path": "bin/omarchy-hyprland-monitor-clamshell"
+    },
+    {
+      "kind": "read",
+      "line": 6,
+      "name": "$HOME/.local/state/omarchy/toggles/hypr/$1.lua",
+      "path": "bin/omarchy-hyprland-toggle-disabled"
+    },
+    {
+      "kind": "read",
+      "line": 6,
+      "name": "$HOME/.local/state/omarchy/toggles/hypr/$1.lua",
+      "path": "bin/omarchy-hyprland-toggle-enabled"
+    },
+    {
+      "kind": "read",
+      "line": 17,
+      "name": "$HOME/.local/state/omarchy/toggles/hypr/$FLAG_NAME.lua",
+      "path": "bin/omarchy-hyprland-toggle"
+    },
+    {
+      "kind": "read",
+      "line": 7,
+      "name": "$HOME/.local/state/omarchy/toggles/hypr/$TOGGLE.lua",
+      "path": "bin/omarchy-hyprland-monitor-internal"
+    },
+    {
+      "kind": "read",
+      "line": 7,
+      "name": "$HOME/.local/state/omarchy/toggles/hypr/$TOGGLE.lua",
+      "path": "bin/omarchy-hyprland-monitor-internal-mirror"
+    },
+    {
+      "kind": "read",
+      "line": 61,
+      "name": "$OMARCHY_PATH/default/alacritty/screensaver.toml",
+      "path": "bin/omarchy-launch-screensaver"
+    },
+    {
+      "kind": "read",
+      "line": 67,
+      "name": "$OMARCHY_PATH/default/foot/screensaver.ini",
+      "path": "bin/omarchy-launch-screensaver"
+    },
+    {
+      "kind": "read",
+      "line": 64,
+      "name": "$OMARCHY_PATH/default/ghostty/screensaver",
+      "path": "bin/omarchy-launch-screensaver"
+    },
+    {
+      "kind": "read",
+      "line": 18,
+      "name": "$OMARCHY_PATH/default/hypr/toggles/$FLAG_NAME.lua",
+      "path": "bin/omarchy-hyprland-toggle"
+    },
+    {
+      "kind": "read",
+      "line": 39,
+      "name": "$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock",
+      "path": "bin/omarchy-launch-screensaver"
+    },
+    {
+      "kind": "read",
+      "line": 39,
+      "name": "/etc/pam.d/omarchy-lock-fingerprint",
+      "path": "bin/omarchy-apply-lock"
+    },
+    {
+      "kind": "write",
+      "line": 45,
+      "name": "/etc/pam.d/omarchy-lock-fingerprint",
+      "path": "bin/omarchy-apply-lock"
+    },
+    {
+      "kind": "read",
+      "line": 380,
+      "name": "/etc/pam.d/omarchy-lock-fingerprint",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
+      "kind": "read",
+      "line": 25,
+      "name": "/etc/pam.d/omarchy-lock-password",
+      "path": "bin/omarchy-apply-lock"
+    },
+    {
+      "kind": "read",
+      "line": 485,
+      "name": "/etc/pam.d/omarchy-lock-password",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
+      "kind": "read",
+      "line": 161,
+      "name": "/etc/pam.d/polkit-1",
+      "path": "shell/plugins/polkit/PolkitAgent.qml"
+    },
+    {
+      "kind": "read",
+      "line": 6,
+      "name": "/proc/acpi/button/lid/",
+      "path": "bin/omarchy-hw-laptop-closed"
+    },
+    {
+      "kind": "read",
+      "line": 6,
+      "name": "/sys/class/backlight",
+      "path": "bin/omarchy-hw-display"
+    },
+    {
+      "kind": "read",
+      "line": 5,
+      "name": "/sys/class/drm",
+      "path": "bin/omarchy-hw-external-monitors"
+    },
+    {
+      "kind": "read",
+      "line": 16,
+      "name": "/sys/class/leds/",
+      "path": "bin/omarchy-brightness-keyboard"
+    },
+    {
+      "kind": "read",
+      "line": 403,
+      "name": "omarchyPath + /bin/omarchy-hyprland-focus-app",
+      "path": "shell/plugins/notifications/Service.qml"
+    }
+  ],
+  "security_helper_edges": [
+    {
+      "disposition": "audited-source",
+      "hash": "8d94016350733ae40b002b097e605b4ca3e3e4a3c49ae0d63a6cca9031b31608",
+      "name": "omarchy-apply-lock",
+      "path": "bin/omarchy-apply-lock",
+      "present": true
+    },
+    {
+      "disposition": "audited-source",
+      "hash": "b3d1478822876a0a2dbacf067c458f998dc6980656292965e4daafa176fbaf4a",
+      "name": "omarchy-brightness-display",
+      "path": "bin/omarchy-brightness-display",
+      "present": true
+    },
+    {
+      "disposition": "audited-source",
+      "hash": "5339287cd28412348402981b193072a11748a48985e06ca2154260ed7618b091",
+      "name": "omarchy-brightness-display-apple",
+      "path": "bin/omarchy-brightness-display-apple",
+      "present": true
+    },
+    {
+      "disposition": "audited-source",
+      "hash": "d79594de3fd0cd674bcd3500c0d0c59a6b6c1c1209a7d0f8c5236802bd3c7df3",
+      "name": "omarchy-brightness-display-ddc",
+      "path": "bin/omarchy-brightness-display-ddc",
+      "present": true
+    },
+    {
+      "disposition": "audited-source",
+      "hash": "9cdd9592a861fc047f216734f8c9faf51556c56ff2d1526110fac94ac2c7facd",
+      "name": "omarchy-brightness-keyboard",
+      "path": "bin/omarchy-brightness-keyboard",
+      "present": true
+    },
+    {
+      "disposition": "incidental-upstream-policy-omitted",
+      "hash": "6c930fb708c90cb3d8229f85364801080c3c7a462121e8ac0350307a3b2d60e2",
+      "name": "omarchy-cmd-missing",
+      "path": "bin/omarchy-cmd-missing",
+      "present": true
+    },
+    {
+      "disposition": "incidental-upstream-policy-omitted",
+      "hash": "5580c5fcb364a4ce9e03f8de8af149f4532873e4bdea1c03cf73883f403e9f85",
+      "name": "omarchy-cmd-present",
+      "path": "bin/omarchy-cmd-present",
+      "present": true
+    },
+    {
+      "disposition": "audited-source",
+      "hash": "4473988df255946b8cbed4db392b6629df9ad85cbe2e1a53343bc91ea6f80856",
+      "name": "omarchy-hw-clamshell",
+      "path": "bin/omarchy-hw-clamshell",
+      "present": true
+    },
+    {
+      "disposition": "audited-source",
+      "hash": "7ee9a6ef7f88233e37f542eb19e1cc35c892bf3c8bcfb1233b3f0f31bcb32a30",
+      "name": "omarchy-hw-display",
+      "path": "bin/omarchy-hw-display",
+      "present": true
+    },
+    {
+      "disposition": "audited-source",
+      "hash": "d66d1fbbf9509aaaddf747379e416fe0f64eb8a4d9a943b9e3e86fa5d9cd6efb",
+      "name": "omarchy-hw-external-monitors",
+      "path": "bin/omarchy-hw-external-monitors",
+      "present": true
+    },
+    {
+      "disposition": "audited-source",
+      "hash": "b75e91aedd0af20c527a57cf866e5da23db4fef172d8e12c719d174bcbd06c83",
+      "name": "omarchy-hw-laptop-closed",
+      "path": "bin/omarchy-hw-laptop-closed",
+      "present": true
+    },
+    {
+      "disposition": "audited-source",
+      "hash": "80c01f8fbb8eead8ccdb0836559629e060e849307f7bafdbcf91a3c287680af7",
+      "name": "omarchy-hyprland-focus-app",
+      "path": "bin/omarchy-hyprland-focus-app",
+      "present": true
+    },
+    {
+      "disposition": "audited-source",
+      "hash": "13144df63444e215df1c7e363fa852e8dd2000ee638a7c0bc1a0c8089ab43114",
+      "name": "omarchy-hyprland-monitor-clamshell",
+      "path": "bin/omarchy-hyprland-monitor-clamshell",
+      "present": true
+    },
+    {
+      "disposition": "audited-source",
+      "hash": "5f9d241d915142a0337cbc4ee52a8911f8f4f742f5f443a3609c2153a8867f45",
+      "name": "omarchy-hyprland-monitor-external-active",
+      "path": "bin/omarchy-hyprland-monitor-external-active",
+      "present": true
+    },
+    {
+      "disposition": "audited-source",
+      "hash": "7e61803581e68cf745695ca200899695be2c718bb75b60485d93d6c0370dfa4c",
+      "name": "omarchy-hyprland-monitor-focused",
+      "path": "bin/omarchy-hyprland-monitor-focused",
+      "present": true
+    },
+    {
+      "disposition": "audited-source",
+      "hash": "f55def9d2c3be1083f8c3460a91e178e241c2f6bea57ff06392d57f182ed20b0",
+      "name": "omarchy-hyprland-monitor-focused-apple",
+      "path": "bin/omarchy-hyprland-monitor-focused-apple",
+      "present": true
+    },
+    {
+      "disposition": "audited-source",
+      "hash": "6aa24c7062c2f9a1c7d17891ef620077fd1920cb04ee1595de7e729761981177",
+      "name": "omarchy-hyprland-monitor-internal",
+      "path": "bin/omarchy-hyprland-monitor-internal",
+      "present": true
+    },
+    {
+      "disposition": "audited-source",
+      "hash": "3e34ae277c9f4977e70028836146a275030edb892dfcbd24da99e1655f227147",
+      "name": "omarchy-hyprland-monitor-internal-mirror",
+      "path": "bin/omarchy-hyprland-monitor-internal-mirror",
+      "present": true
+    },
+    {
+      "disposition": "audited-source",
+      "hash": "bac25686331b90bcb40fdab2300605f88091208cdfe068641c1e248517f52372",
+      "name": "omarchy-hyprland-monitor-laptop",
+      "path": "bin/omarchy-hyprland-monitor-laptop",
+      "present": true
+    },
+    {
+      "disposition": "audited-source",
+      "hash": "61eea8abaff3ba5c008e29d111e73c996d5cd11adda87f2d971dc16029afd049",
+      "name": "omarchy-hyprland-session-locked",
+      "path": "bin/omarchy-hyprland-session-locked",
+      "present": true
+    },
+    {
+      "disposition": "audited-source",
+      "hash": "995cecefddf10d9a6742ed2e3c8bfccfcc63f9a9aeef2cfb93a154d61753cb91",
+      "name": "omarchy-hyprland-toggle",
+      "path": "bin/omarchy-hyprland-toggle",
+      "present": true
+    },
+    {
+      "disposition": "audited-source",
+      "hash": "8738d76ac4fd94989563a86f1bafb6d4851b40f811dd2c594775b094bf447455",
+      "name": "omarchy-hyprland-toggle-disabled",
+      "path": "bin/omarchy-hyprland-toggle-disabled",
+      "present": true
+    },
+    {
+      "disposition": "audited-source",
+      "hash": "964836dca31efefe4080c01d5b6122f639fc81bb1aa0752f45a4c68eca552af2",
+      "name": "omarchy-hyprland-toggle-enabled",
+      "path": "bin/omarchy-hyprland-toggle-enabled",
+      "present": true
+    },
+    {
+      "disposition": "audited-source",
+      "hash": "c719e884cbdff6a7956db6f7993a2360cfdfa1ba5643e0963900ebcfeb8bb29e",
+      "name": "omarchy-launch-screensaver",
+      "path": "bin/omarchy-launch-screensaver",
+      "present": true
+    },
+    {
+      "disposition": "not-an-invocation",
+      "name": "omarchy-lock-fingerprint",
+      "path": "bin/omarchy-lock-fingerprint",
+      "present": false
+    },
+    {
+      "disposition": "existing-omanixy-capability",
+      "hash": "0a3e4f2ad84cdb83d9b1aefe1d6c33f793b434ac51cb455df29b587507070ed5",
+      "name": "omarchy-notification-send",
+      "path": "bin/omarchy-notification-send",
+      "present": true
+    },
+    {
+      "disposition": "presentation-only-unreachable",
+      "hash": "f3d890dd4155b40a3b6e36da5512abddf77d61fcff1651874c9c8438fc1b073d",
+      "name": "omarchy-osd",
+      "path": "bin/omarchy-osd",
+      "present": true
+    },
+    {
+      "disposition": "existing-omanixy-capability",
+      "hash": "e942a8df84d806c99233c21b0cd041ab95f6ff5eb10b61de3beb9be131330bf4",
+      "name": "omarchy-shell",
+      "path": "bin/omarchy-shell",
+      "present": true
+    },
+    {
+      "disposition": "audited-source",
+      "hash": "850ee07c27d6d450a46d4334f645bd72e93000b499d1c7d2f53101981c34bcb2",
+      "name": "omarchy-system-lock",
+      "path": "bin/omarchy-system-lock",
+      "present": true
+    },
+    {
+      "disposition": "audited-source",
+      "hash": "62fa99b86d0886ac14fa8685c020438aee870a610dd8cf36794612cc48ce9c4a",
+      "name": "omarchy-system-wake",
+      "path": "bin/omarchy-system-wake",
+      "present": true
+    },
+    {
+      "disposition": "incidental-upstream-policy-omitted",
+      "hash": "b7589eefb0cc8316006185cbe4b025538434d85ab64d907ec065491b2a4aaa38",
+      "name": "omarchy-toggle-enabled",
+      "path": "bin/omarchy-toggle-enabled",
+      "present": true
+    }
+  ],
+  "security_helpers": [
+    {
+      "invocation": "shell-eval",
+      "line": 411,
+      "name": "omarchy-brightness-display",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
+      "invocation": "source",
+      "line": 411,
+      "name": "omarchy-brightness-display",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
+      "invocation": "shell-eval",
+      "line": 411,
+      "name": "omarchy-brightness-keyboard",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
+      "invocation": "source",
+      "line": 411,
+      "name": "omarchy-brightness-keyboard",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
+      "invocation": "shell-eval",
+      "line": 171,
+      "name": "omarchy-hw-laptop-closed",
+      "path": "shell/plugins/polkit/PolkitAgent.qml"
+    },
+    {
+      "invocation": "source",
+      "line": 171,
+      "name": "omarchy-hw-laptop-closed",
+      "path": "shell/plugins/polkit/PolkitAgent.qml"
+    },
+    {
+      "form": "OMARCHY_PATH/bin",
+      "line": 403,
+      "name": "omarchy-hyprland-focus-app",
+      "path": "shell/plugins/notifications/Service.qml"
+    },
+    {
+      "invocation": "source",
+      "line": 403,
+      "name": "omarchy-hyprland-focus-app",
+      "path": "shell/plugins/notifications/Service.qml"
+    },
+    {
+      "invocation": "shell-eval",
+      "line": 391,
+      "name": "omarchy-hyprland-session-locked",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
+      "invocation": "source",
+      "line": 391,
+      "name": "omarchy-hyprland-session-locked",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
+      "invocation": "source",
+      "line": 68,
+      "name": "omarchy-launch-screensaver",
+      "path": "shell/plugins/services/idle/Service.qml"
+    },
+    {
+      "invocation": "source",
+      "line": 380,
+      "name": "omarchy-lock-fingerprint",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
+      "invocation": "source",
+      "line": 68,
+      "name": "omarchy-shell",
+      "path": "shell/plugins/services/idle/Service.qml"
+    },
+    {
+      "invocation": "source",
+      "line": 79,
+      "name": "omarchy-system-lock",
+      "path": "shell/plugins/services/idle/Service.qml"
+    },
+    {
+      "invocation": "shell-eval",
+      "line": 406,
+      "name": "omarchy-system-wake",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
+      "invocation": "source",
+      "line": 406,
+      "name": "omarchy-system-wake",
+      "path": "shell/plugins/lock/Service.qml"
+    },
+    {
+      "invocation": "source",
+      "line": 106,
+      "name": "omarchy-system-wake",
+      "path": "shell/plugins/services/idle/Service.qml"
+    }
+  ],
+  "security_source_files": [
+    {
+      "hash": "ddc05881b571c1ffc526d751a83002649d873969a2fd66297b347c152ac6111b",
+      "path": "shell/plugins/lock/LockView.qml",
+      "present": true,
+      "root": "shell/plugins/lock/"
+    },
+    {
+      "hash": "3f0a265a09f7957e8f5d74666595d3136ec64899c414426190460f9e2098e701",
+      "path": "shell/plugins/lock/Service.qml",
+      "present": true,
+      "root": "shell/plugins/lock/"
+    },
+    {
+      "hash": "4a0658bff8ac1cb8d428cf32e7eb05027709e2d49beed0b2482c63cca9c5b3f4",
+      "path": "shell/plugins/lock/manifest.json",
+      "present": true,
+      "root": "shell/plugins/lock/"
+    },
+    {
+      "hash": "d45dc8debd8946a48a909a126dd755ba9f95846382a85afdd6fd1e8921f5d131",
+      "path": "shell/plugins/notifications/NotificationLogic.js",
+      "present": true,
+      "root": "shell/plugins/notifications/"
+    },
+    {
+      "hash": "f806759a6ccb27a19d39ab9884d438b69af392256cae7b760d944619738f2726",
+      "path": "shell/plugins/notifications/Service.qml",
+      "present": true,
+      "root": "shell/plugins/notifications/"
+    },
+    {
+      "hash": "3ffb66ebc065886fc05b6215bd6fff9cd9e5769fac15f807748d550c91efc2f4",
+      "path": "shell/plugins/notifications/components/NotificationCard.qml",
+      "present": true,
+      "root": "shell/plugins/notifications/"
+    },
+    {
+      "hash": "82ed1a26f0040ddff78dd0ed1f12c5e4b49929ec5d0efc7ea62bedabbf48e910",
+      "path": "shell/plugins/notifications/manifest.json",
+      "present": true,
+      "root": "shell/plugins/notifications/"
+    },
+    {
+      "hash": "2307127c7c600d1f2844298dbd6b12e0f3fc029acc9382cbb321cca1c96fd805",
+      "path": "shell/plugins/polkit/PolkitAgent.qml",
+      "present": true,
+      "root": "shell/plugins/polkit/"
+    },
+    {
+      "hash": "29c0b96b25fea18d8dcc1e61912f8906ff75c599b07f9bf8b0f8cc4f6fb985c9",
+      "path": "shell/plugins/polkit/PolkitModel.js",
+      "present": true,
+      "root": "shell/plugins/polkit/"
+    },
+    {
+      "hash": "17a06c3a933708130f3ef8bf3ee28586855708e6085bf799dbf10a46df9cbec6",
+      "path": "shell/plugins/polkit/manifest.json",
+      "present": true,
+      "root": "shell/plugins/polkit/"
+    },
+    {
+      "hash": "58226a67d5fc2f33b1a23b55cb32764a8b2091cc94c4d02af1b67f369440b9b8",
+      "path": "shell/plugins/services/idle/IdleModel.js",
+      "present": true,
+      "root": "shell/plugins/services/idle/"
+    },
+    {
+      "hash": "c61f91b55adf864e4ce571526644727b7a2e9f672964af8098b9fd9a4913eee2",
+      "path": "shell/plugins/services/idle/Service.qml",
+      "present": true,
+      "root": "shell/plugins/services/idle/"
+    },
+    {
+      "hash": "bb8a5f55257dc49c2b7632304dad19aa12bbc7ad641828f09481909232f30a6f",
+      "path": "shell/plugins/services/idle/manifest.json",
+      "present": true,
+      "root": "shell/plugins/services/idle/"
+    }
+  ],
+  "security_source_roots": [
+    "shell/plugins/lock/",
+    "shell/plugins/polkit/",
+    "shell/plugins/services/idle/",
+    "shell/plugins/notifications/"
+  ],
+  "security_unreviewed_dynamic_executions": [],
   "service_contracts": [
     {
       "line": 68,
@@ -9710,6 +11230,36 @@
       "line": 264,
       "name": "WlSessionLock",
       "path": "shell/plugins/lock/Service.qml"
+    },
+    {
+      "line": 24,
+      "name": "org.omarchy.agent",
+      "path": "bin/omarchy-hyprland-focus-app"
+    },
+    {
+      "line": 52,
+      "name": "org.omarchy.screensaver",
+      "path": "bin/omarchy-launch-screensaver"
+    },
+    {
+      "line": 61,
+      "name": "org.omarchy.screensaver",
+      "path": "bin/omarchy-launch-screensaver"
+    },
+    {
+      "line": 64,
+      "name": "org.omarchy.screensaver",
+      "path": "bin/omarchy-launch-screensaver"
+    },
+    {
+      "line": 67,
+      "name": "org.omarchy.screensaver",
+      "path": "bin/omarchy-launch-screensaver"
+    },
+    {
+      "line": 70,
+      "name": "org.omarchy.screensaver",
+      "path": "bin/omarchy-launch-screensaver"
     },
     {
       "line": 26,

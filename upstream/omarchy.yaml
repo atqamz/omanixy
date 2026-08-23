@@ -9,7 +9,13 @@ policy:
   integration_target: omarchy-quattro
   current_pin_role: validated-quattro-runtime
   maturity_definition:
-    validated: pinned_consumer_evidence_and_reference_hash_and_focused_behavioral_test_and_contract_closure
+    audited: pinned_consumer_evidence_and_reference_hash_and_deterministic_contract_audit
+    validated: audited_plus_focused_behavioral_test_and_contract_closure
+  support_state_definition:
+    supported: enabled_by_default_or_explicitly_supported_with_required_evidence
+    experimental: explicit_opt_in_with_bounded_failure_behavior_and_promotion_evidence_pending
+    omitted: intentionally_not_provided_by_omanixy
+    blocked: not_reachable_or_not_safe_to_enable
   runtime_pair:
     status: validated
     omarchy:
@@ -36,3 +42,41 @@ contract_audit:
     - config/omarchy/shell.json
     - default/omarchy/omarchy-menu.jsonc
   drift_policy: fail-closed-on-snapshot-change
+  security_scope:
+    source_roots:
+      - shell/plugins/lock/
+      - shell/plugins/polkit/
+      - shell/plugins/services/idle/
+      - shell/plugins/notifications/
+    helper_dispositions:
+      bin/omarchy-apply-lock: audited-source
+      bin/omarchy-brightness-display: audited-source
+      bin/omarchy-brightness-display-apple: audited-source
+      bin/omarchy-brightness-display-ddc: audited-source
+      bin/omarchy-brightness-keyboard: audited-source
+      bin/omarchy-cmd-missing: incidental-upstream-policy-omitted
+      bin/omarchy-cmd-present: incidental-upstream-policy-omitted
+      bin/omarchy-hw-clamshell: audited-source
+      bin/omarchy-hw-display: audited-source
+      bin/omarchy-hw-external-monitors: audited-source
+      bin/omarchy-hw-laptop-closed: audited-source
+      bin/omarchy-hyprland-focus-app: audited-source
+      bin/omarchy-hyprland-monitor-clamshell: audited-source
+      bin/omarchy-hyprland-monitor-external-active: audited-source
+      bin/omarchy-hyprland-monitor-focused: audited-source
+      bin/omarchy-hyprland-monitor-focused-apple: audited-source
+      bin/omarchy-hyprland-monitor-internal: audited-source
+      bin/omarchy-hyprland-monitor-internal-mirror: audited-source
+      bin/omarchy-hyprland-monitor-laptop: audited-source
+      bin/omarchy-hyprland-session-locked: audited-source
+      bin/omarchy-hyprland-toggle: audited-source
+      bin/omarchy-hyprland-toggle-disabled: audited-source
+      bin/omarchy-hyprland-toggle-enabled: audited-source
+      bin/omarchy-launch-screensaver: audited-source
+      bin/omarchy-lock-fingerprint: not-an-invocation
+      bin/omarchy-notification-send: existing-omanixy-capability
+      bin/omarchy-osd: presentation-only-unreachable
+      bin/omarchy-shell: existing-omanixy-capability
+      bin/omarchy-system-lock: audited-source
+      bin/omarchy-system-wake: audited-source
+      bin/omarchy-toggle-enabled: incidental-upstream-policy-omitted

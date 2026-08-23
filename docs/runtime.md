@@ -84,6 +84,25 @@ is recomputed from the current presentation selection on every activation.
 The NixOS module is valid and intentionally has no privileged declarations for
 this baseline.
 
+Security and session plugins remain intentionally unreachable in this
+foundation layer.
+`omarchy.lock`, `omarchy.polkit`, `omarchy.idle`, and
+`omarchy.notifications` stay disabled in the generated configuration and are
+absent from the immutable compatibility view.
+The `notification` presentation group continues to mean the
+`notification-send` client capability only.
+It does not grant ownership of `org.freedesktop.Notifications`.
+
+Future security options will be separate ownership controls rather than new
+members of `programs.omanixy.features`.
+The conceptual controls are an external or consumer-owned provider by
+default, an explicitly enabled native Quattro lock, an independently optional
+fingerprint capability, an independently optional Quattro polkit agent, an
+independently optional Quattro idle manager, and an independently optional
+Quattro notification daemon.
+Option names remain unfrozen until their layer has a reviewed contract and
+validation evidence.
+
 The package output is
 `packages.${system}.omanixy-shell`.
 It contains the dedicated `omanixy-shell` IPC executable, the runtime entry

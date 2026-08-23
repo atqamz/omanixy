@@ -10,6 +10,7 @@ from collections import Counter
 
 SHELL_BUILTINS = {
     "!",
+    ".",
     ":",
     "[",
     "[[",
@@ -99,18 +100,45 @@ SHELL_STRING_RE = re.compile(
 )
 
 
+def _is_literal_command_word(word: str) -> bool:
+    return bool(word.startswith("/") or re.fullmatch(r"[A-Za-z][A-Za-z0-9_.+-]*", word))
+
+
+_REDIRECTION_WORD_RE = re.compile(r"^(?:\{[A-Za-z_][A-Za-z0-9_]*\}|[0-9]*)(?:>>?|<>?|>&|<&)")
+
+# The only SHELL_BUILTINS members that introduce a following simple command
+# rather than being one themselves. Everything else in SHELL_BUILTINS (read,
+# echo, export, if, for, ...) is either a terminal builtin invocation or a
+# reserved word that opens a compound construct - in both cases its own
+# trailing words are its arguments or a test expression, never a further
+# command to resolve, so _next_command must stop there rather than treat the
+# next word (e.g. `read -ra name`'s `name`) as if it were the invocation.
+_COMMAND_INTRODUCER_WORDS = {"!", "time", "do", "then", "else"}
+
+
 def _next_command(words: list[str], start: int) -> list[str]:
-    result: list[str] = []
+    """Return the next command-head word: a literal name, or DYNAMIC_EXECUTABLE
+    if the first non-flag, non-assignment, non-introducer, non-redirection
+    word is not a literal shape. Never skips past a dynamic word looking for
+    a literal one - a bare redirection (`exec {fd}>file`, `2>&1`) performs no
+    execution at all, so it is the only shape safe to skip past
+    unconditionally."""
+
     for word in words[start:]:
         if word.startswith("-"):
             continue
-        if word.startswith("$") or "=" in word and word.split("=", 1)[0].isidentifier():
+        if "=" in word and word.split("=", 1)[0].isidentifier():
+            continue
+        if word in _COMMAND_INTRODUCER_WORDS:
             continue
         if word in SHELL_BUILTINS:
+            return []
+        if _REDIRECTION_WORD_RE.match(word):
             continue
-        result.append(word)
-        break
-    return result
+        if _is_literal_command_word(word):
+            return [word]
+        return [DYNAMIC_EXECUTABLE]
+    return []
 
 
 def shell_executables(value: str) -> list[str]:
@@ -169,7 +197,7 @@ def shell_executables(value: str) -> list[str]:
                     commands.extend(_next_command(words, words.index(")") + 1))
             elif first == "function" and "{" in words:
                 commands.extend(shell_executables(" ".join(words[words.index("{") + 1 :])))
-            elif first == "source":
+            elif first in {"source", "."}:
                 commands.append(DYNAMIC_EXECUTABLE)
             continue
         if first in {"command", "builtin", "exec"}:
@@ -185,6 +213,12 @@ def shell_executables(value: str) -> list[str]:
                                 commands.extend(shell_executables(payload))
                             break
                     break
+        elif first == "eval":
+            payload = " ".join(words[1:])
+            if not payload or payload.startswith("$"):
+                commands.append(DYNAMIC_EXECUTABLE)
+            else:
+                commands.extend(shell_executables(payload))
         elif first.rsplit("/", 1)[-1] in {"bash", "dash", "sh", "zsh"}:
             commands.append(first)
             for index, word in enumerate(words[1:], 1):
@@ -223,9 +257,19 @@ def shell_executables(value: str) -> list[str]:
                                 commands.extend(shell_executables(payload))
                             break
                     break
-        elif first.startswith("$") or "=" in first and first.split("=", 1)[0].isidentifier():
-            if "$(" not in first:
+        elif "=" in first and (
+            (_head := first.split("=", 1)[0]).isidentifier()
+            or (_head.endswith("+") and _head[:-1].isidentifier())
+        ):
+            value_part = first.split("=", 1)[1]
+            if value_part.count("(") <= value_part.count(")"):
                 commands.extend(_next_command(words, 1))
+            # else: this word is only the leading fragment of a $(...) value
+            # containing unquoted whitespace - shlex split it into further
+            # words that are its own arguments, not a following command, and
+            # COMMAND_SUBSHELL_RE already scanned its real content above.
+        elif first.startswith("$"):
+            commands.append(DYNAMIC_EXECUTABLE)
         elif (
             first not in SHELL_BUILTINS
             and not first.startswith(("-", "#", "{"))
@@ -356,7 +400,7 @@ def source_executables(path: str, text: str, pinned_text: str = "") -> list[dict
 
     for line_number, line in enumerate(text.splitlines(), 1):
         if path.endswith((".sh", ".bash")):
-            command_line = re.sub(r"^\s*[A-Za-z_][A-Za-z0-9_]*(?:\[[^]]+\])?=", "", line)
+            command_line = line
             function_body = re.match(r"^\s*[A-Za-z_][A-Za-z0-9_]*\s*\(\s*\)\s*\{", line)
             if function_body:
                 command_line = line[function_body.end() :]

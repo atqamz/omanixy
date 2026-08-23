@@ -39,12 +39,24 @@ The taxonomy describes compatibility, not stability.
 A feature may be `adapted` and still be experimental, or `omitted` because
 omission is the correct architecture rather than unfinished work.
 
-`maturity: validated` has a stricter meaning than "implemented".
-It means the declared compatibility contract, including any intentional
-adaptation, is proven against pinned consumer evidence, a deterministic
-identity for any referenced upstream implementation, focused behavioral
-evidence for every applicable matrix case, and a passing contract-closure
-check.
+Support state is a separate field from compatibility classification.
+Every security and session-ownership entry records one of these support
+states:
+
+- `supported` means the surface is enabled by default or explicitly supported
+  with the required evidence.
+- `experimental` means the surface is explicit opt-in, has bounded failure
+  behavior, and still lacks promotion evidence.
+- `omitted` means Omanixy intentionally does not provide the surface.
+- `blocked` means the surface is not reachable or is not safe to enable.
+
+`maturity: audited` means the declared contract is recorded against pinned
+consumer evidence, a deterministic upstream identity, and the contract
+snapshot.
+`maturity: validated` additionally requires focused behavioral evidence for
+every applicable matrix case and a passing contract-closure check.
+Neither maturity nor support state means that a security surface owns the
+consumer's system policy.
 It never means that an Omanixy implementation merely agrees with its own
 tests, and it never upgrades an `adapted` entry to `exact`.
 For `exact`, `omitted`, and `blocked` entries, the evidence proves the native
@@ -63,6 +75,10 @@ The contract scanner is a static pin-drift guard.
 It records direct commands, dynamic command expressions, menu fields, absolute
 helper paths, filesystem and environment contracts, native Quickshell imports,
 service names, and security references from the pinned source roots.
+Issue #4 adds a bounded list of exact lock, PAM, polkit, idle, notification,
+and transitive helper source files.
+Those files are audited as references only and are not copied into the runtime
+compatibility view.
 It intentionally excludes the complete upstream `bin/` tree while retaining a
 narrow compatibility-bin view for the audited absolute helper paths that are
 reachable from supported Quattro.

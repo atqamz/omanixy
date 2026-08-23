@@ -889,8 +889,14 @@ items:
 
   - id: security.lock
     classification: blocked
-    maturity: validated
+    support: blocked
+    maturity: audited
     owner: atqamz/omanixy#4
+    planned_stack_layer: 3/8
+    audit_layer: 1/8
+    target:
+      classification: adapted
+      support: experimental
     upstream:
       project: basecamp/omarchy
       revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
@@ -898,75 +904,432 @@ items:
         - path: shell/plugins/lock/
           role: native Quattro lock and recovery behavior
           consumption: audited-reference
-    requirement: Inventory lock behavior without implementing session security.
+        - path: shell/plugins/lock/Service.qml
+          role: WlSessionLock, PAM, fingerprint, IPC, and recovery contract
+          consumption: audited-reference
+        - path: shell/plugins/lock/LockView.qml
+          role: password and fingerprint presentation contract
+          consumption: audited-reference
+        - path: shell/plugins/lock/manifest.json
+          role: keep-loaded plugin reachability contract
+          consumption: audited-reference
+    native_quickshell:
+      project: quickshell-mirror/quickshell
+      revision: 28771c7c74b42e20afca0b1b63980cb46515537c
+      modules:
+        - Quickshell.Services.Pam
+        - Quickshell.Wayland
+    requirement: Preserve the pinned session-lock, screen, recovery, and IPC contracts without enabling a native lock in this layer.
     ownership:
       presentation: omarchy
       adapter: "issue #4"
-      backend: host session security
+      system: NixOS and consumer host session policy
+      session: consumer or external lock provider by default
     dependencies:
+      system:
+        - declarative PAM service files
       host:
         - Wayland session lock protocol
-        - PAM policy
+        - Hyprland monitor state
+        - display DPMS
+        - optional keyboard backlight
+    helpers:
+      - omarchy-shell
+      - omarchy-system-lock
+      - omarchy-system-wake
+      - omarchy-hyprland-session-locked
+      - omarchy-brightness-display
+      - omarchy-brightness-keyboard
+      - omarchy-hyprland-monitor-clamshell
+    filesystem:
+      - /etc/pam.d/omarchy-lock-password
+      - ~/.local/state/omarchy/current/background
+      - /sys/class/leds/*kbd_backlight*
+    pam:
+      password_service: omarchy-lock-password
+      fingerprint_service: omarchy-lock-fingerprint
+      interface: Quickshell PamContext calls pam_authenticate only
+    services:
+      - ext-session-lock Wayland protocol
+    failure_sensitive:
+      - pending lock remains unresolved while no real screen exists
+      - session lock may outlive the shell process and require stranded-lock recovery
+      - password failures have a visible count but no local throttle
+      - fingerprint failures retry every 250 ms in the pinned source
+    evidence:
+      available:
+        - pinned static source audit
+        - Quickshell PAM and WlSessionLock API audit
+        - hermetic runtime reachability assertions
+      required_before_promotion:
+        - crash and restart with an ext-session-lock held
+        - stranded lock detection and recovery
+        - no-screen and monitor-change behavior
+        - bounded authentication failure behavior
+        - nested compositor and live session validation
+    tests:
+      - test/quattro-contract-audit.sh
+      - test/security-contracts.sh
+    notes:
+      - The initial native topology is in-process because it preserves the pinned service and recovery model; it remains experimental because third-party QML shares the process trust boundary.
+      - Omanixy does not enable the lock plugin, install a lock agent, or write PAM configuration in layer 1.
+
+  - id: security.pam-password
+    classification: blocked
+    support: blocked
+    maturity: audited
+    owner: atqamz/omanixy#4
+    planned_stack_layer: 2/8
+    audit_layer: 1/8
+    target:
+      classification: adapted
+      support: experimental
+    upstream:
+      project: basecamp/omarchy
+      revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
+      paths:
+        - path: bin/omarchy-apply-lock
+          role: pinned Arch PAM policy intent
+          consumption: audited-reference
+        - path: shell/plugins/lock/
+          role: Quickshell password PAM consumer
+          consumption: audited-reference
+    native_quickshell:
+      project: quickshell-mirror/quickshell
+      revision: 28771c7c74b42e20afca0b1b63980cb46515537c
+      modules:
+        - Quickshell.Services.Pam
+    nixpkgs:
+      revision: 241313f4e8e508cb9b13278c2b0fa25b9ca27163
+      paths:
+        - nixos/modules/security/pam.nix
+    requirement: Provide a dedicated declarative auth-only PAM service for the lock consumer without inheriting unrelated login policy.
+    ownership:
+      presentation: omarchy
+      adapter: "issue #4"
+      system: NixOS declarative PAM policy
+      session: Omanixy lock consumer when explicitly enabled
+    dependencies:
+      host:
+        - PAM
+    filesystem:
+      - /etc/pam.d/omarchy-lock-password
+    pam:
+      service: omarchy-lock-password
+      consumer_abi: pam_start_confdir, pam_authenticate, pam_end through Quickshell PamContext
+      source_intentions:
+        - pam_faillock preauth, authfail, and authsucc
+        - pam_systemd_home
+        - pam_unix try_first_pass nullok
+        - pam_env
+        - account include system-local-login
+      rejected_shortcuts:
+        - nullok is not acceptable for a screen lock
+        - account and session rules are not consumed by this Quickshell ABI
+        - generated nixpkgs rules are experimental and ordering-sensitive
+    failure_sensitive:
+      - PAM start failure must be distinct from authentication failure
+      - prompt cancellation must abort the PAM subprocess
+      - lockout policy must not be inherited accidentally from a login service
+    evidence:
+      available:
+        - exact Quickshell PamContext source and qmltypes
+        - exact nixpkgs security.pam module audit
+        - pinned Arch policy inventory without its /etc writes
+      required_before_promotion:
+        - explicit NixOS service text review
+        - empty-password rejection
+        - PAM start, prompt, cancel, failure, and lockout tests
+        - no imperative activation or /etc mutation proof
     tests:
       - test/quattro-contract-audit.sh
     notes:
-      - Omanixy does not enable the lock plugin, install a lock agent, or write PAM configuration.
+      - Later implementation uses security.pam.services.<name>.text with a complete explicit auth stack; this layer enables nothing.
 
-  - id: security.pam-fingerprint-polkit
+  - id: security.pam-fingerprint
     classification: blocked
-    maturity: validated
+    support: blocked
+    maturity: audited
     owner: atqamz/omanixy#4
+    planned_stack_layer: 4/8
+    audit_layer: 1/8
+    target:
+      classification: adapted
+      support: experimental
+    upstream:
+      project: basecamp/omarchy
+      revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
+      paths:
+        - path: bin/omarchy-apply-lock
+          role: pinned fingerprint PAM policy intent
+          consumption: audited-reference
+        - path: shell/plugins/lock/Service.qml
+          role: enrollment probe and fingerprint authentication consumer
+          consumption: audited-reference
+    native_quickshell:
+      project: quickshell-mirror/quickshell
+      revision: 28771c7c74b42e20afca0b1b63980cb46515537c
+      modules:
+        - Quickshell.Services.Pam
+    requirement: Make fingerprint authentication independently optional and bound its backend failure and retry behavior before promotion.
+    ownership:
+      presentation: omarchy
+      adapter: "issue #4"
+      system: NixOS PAM and optional fprintd capability
+      session: Omanixy lock only when explicitly selected
+    dependencies:
+      host:
+        - PAM
+        - optional fprintd
+        - optional enrolled fingerprint
+    filesystem:
+      - /etc/pam.d/omarchy-lock-fingerprint
+    pam:
+      service: omarchy-lock-fingerprint
+      consumer_abi: pam_start_confdir, pam_authenticate, pam_end through Quickshell PamContext
+      source_intention: auth required pam_fprintd.so
+    services:
+      - fprintd backend as a host capability
+    failure_sensitive:
+      - missing PAM file or fprintd must remain unavailable rather than fail open
+      - the pinned 250 ms retry loop must be replaced by bounded backoff and a stop condition
+      - fingerprint fallback must not create passwordless authentication
+    evidence:
+      available:
+        - pinned enrollment probe and fingerprint PAM source audit
+        - exact Quickshell PAM subprocess and abort behavior audit
+      required_before_promotion:
+        - no-device and daemon-unavailable tests
+        - bounded repeated-failure and log-volume tests
+        - enrolled and unenrolled hardware validation
+        - explicit password fallback behavior
+    tests:
+      - test/quattro-contract-audit.sh
+    notes:
+      - Fingerprint is not inferred from the presence of the native lock and is not enabled in layer 1.
+
+  - id: security.polkit-agent
+    classification: blocked
+    support: blocked
+    maturity: audited
+    owner: atqamz/omanixy#4
+    planned_stack_layer: 5/8
+    audit_layer: 1/8
+    target:
+      classification: adapted
+      support: experimental
     upstream:
       project: basecamp/omarchy
       revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
       paths:
         - path: shell/plugins/polkit/
-          role: polkit agent behavior
+          role: Quattro user-session polkit agent
           consumption: audited-reference
-        - path: shell/plugins/lock/
-          role: PAM and fingerprint-adjacent references
+        - path: bin/omarchy-hw-laptop-closed
+          role: optional lid-state helper
           consumption: audited-reference
-        - path: default/omarchy/omarchy-menu.jsonc
-          role: security setup actions
-          consumption: audited-reference
-    requirement: Inventory PAM, fingerprint, and polkit contracts for issue #4 without owning them here.
+    native_quickshell:
+      project: quickshell-mirror/quickshell
+      revision: 28771c7c74b42e20afca0b1b63980cb46515537c
+      modules:
+        - Quickshell.Services.Polkit
+    nixpkgs:
+      revision: 241313f4e8e508cb9b13278c2b0fa25b9ca27163
+      paths:
+        - nixos/modules/security/polkit.nix
+    requirement: Integrate one explicitly owned user-session polkit agent without duplicating polkitd or taking over an unknown agent.
     ownership:
       presentation: omarchy
       adapter: "issue #4"
-      backend: host security policy
-    dependencies:
-      host:
-        - PAM
-        - polkit
+      system: NixOS polkitd and polkit-1 PAM service
+      session: consumer or explicitly selected Quattro agent
+    filesystem:
+      - /etc/pam.d/polkit-1
+    pam:
+      observed_service: polkit-1
+      use: fingerprint detection only; not a new lock service
+    dbus_services:
+      - org.freedesktop.PolicyKit1
+      - /org/omarchy/PolkitAgent
+    failure_sensitive:
+      - registration conflict must be diagnostic and bounded
+      - authentication cancellation and failure must close the flow
+      - unknown external agents must not be killed or disabled
+      - lid and fingerprint behavior must remain optional hardware policy
+    evidence:
+      available:
+        - exact Quickshell PolkitAgent and AuthFlow audit
+        - exact NixOS polkit daemon and polkit-1 PAM ownership audit
+      required_before_promotion:
+        - explicit agent ownership conflict tests
+        - bounded registration failure test
+        - authentication cancel and failure tests
+        - nested session D-Bus validation
     tests:
       - test/quattro-contract-audit.sh
-    notes:
-      - No PAM files, polkit agent, passwordless sudo, or fingerprint setup are implemented in this issue.
 
-  - id: security.idle-notifications
+  - id: security.idle
     classification: blocked
-    maturity: validated
+    support: blocked
+    maturity: audited
     owner: atqamz/omanixy#4
+    planned_stack_layer: 6/8
+    audit_layer: 1/8
+    target:
+      classification: adapted
+      support: experimental
     upstream:
       project: basecamp/omarchy
       revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
       paths:
         - path: shell/plugins/services/idle/
-          role: idle and DPMS security lifecycle
+          role: idle detection, screensaver lifecycle, lock dependency, and DPMS
           consumption: audited-reference
-        - path: shell/plugins/notifications/
-          role: notification daemon integration
+        - path: bin/omarchy-launch-screensaver
+          role: screensaver launch contract
           consumption: audited-reference
-    requirement: Inventory idle-lock and notification ownership without enabling competing agents.
+        - path: bin/omarchy-system-lock
+          role: lock action contract
+          consumption: audited-reference
+        - path: bin/omarchy-system-wake
+          role: wake action contract
+          consumption: audited-reference
+    native_quickshell:
+      project: quickshell-mirror/quickshell
+      revision: 28771c7c74b42e20afca0b1b63980cb46515537c
+      modules:
+        - Quickshell.Services.IdleMonitor
+        - Quickshell.Hyprland
+        - Quickshell.Wayland
+    requirement: Provide idle detection only with an explicit owner and a valid lock provider for lock-on-idle.
     ownership:
       presentation: omarchy
       adapter: "issue #4"
-      backend: host session security
-    dependencies:
-      host:
-        - idle protocol
-        - notification daemon
+      system: consumer host power and display policy
+      session: consumer or explicitly selected Quattro idle manager
+    helpers:
+      - omarchy-launch-screensaver
+      - omarchy-system-lock
+      - omarchy-system-wake
+    filesystem:
+      - ~/.local/state/omarchy/indicators/stay-awake
+    services:
+      - Hyprland raw event socket
+    failure_sensitive:
+      - inhibitors must be respected
+      - lock-on-idle must fail closed without a valid provider
+      - screensaver launch and early close must not create a lock loop
+      - suspend and resume must not rely on an unbounded wall-clock assumption
+    evidence:
+      available:
+        - exact IdleMonitor and Hyprland event audit
+        - pinned helper and state-path inventory
+      required_before_promotion:
+        - known declarative idle-owner conflict test
+        - inhibitor and activity cancellation tests
+        - nested compositor idle, lock, wake, and resume tests
     tests:
       - test/quattro-contract-audit.sh
+
+  - id: security.notification-daemon
+    classification: blocked
+    support: blocked
+    maturity: audited
+    owner: atqamz/omanixy#4
+    planned_stack_layer: 7/8
+    audit_layer: 1/8
+    target:
+      classification: adapted
+      support: experimental
+    upstream:
+      project: basecamp/omarchy
+      revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
+      paths:
+        - path: shell/plugins/notifications/
+          role: freedesktop notification daemon, lifecycle, DND, history, and persistence
+          consumption: audited-reference
+        - path: bin/omarchy-hyprland-focus-app
+          role: notification action focus helper
+          consumption: audited-reference
+    native_quickshell:
+      project: quickshell-mirror/quickshell
+      revision: 28771c7c74b42e20afca0b1b63980cb46515537c
+      modules:
+        - Quickshell.Services.Notifications
+    requirement: Keep notification-send as a client capability and make daemon ownership a separate explicit opt-in.
+    ownership:
+      presentation: omarchy
+      adapter: "issue #4"
+      system: consumer D-Bus session and notification service policy
+      session: consumer or external daemon by default; explicitly selected Quattro daemon later
+    helpers:
+      - omarchy-hyprland-focus-app
+      - omarchy-notification-send
+    filesystem:
+      - ~/.local/state/omarchy/notifications.json
+      - ~/.local/state/omarchy/notifications/
+    dbus_services:
+      - org.freedesktop.Notifications
+    failure_sensitive:
+      - replacement IDs must update the tracked notification object
+      - DND, actions, history, popup state, and images persist according to the selected owner
+      - shell restart must not silently claim an existing daemon name
+    evidence:
+      available:
+        - exact NotificationServer and lifecycle source audit
+        - existing notification-send client adapter evidence
+        - runtime proof that the notification daemon plugin is absent
+      required_before_promotion:
+        - explicit daemon ownership and conflict test
+        - DND, replacement, action, history, persistence, and restart tests
+        - nested D-Bus notification ownership validation
+    tests:
+      - test/quattro-contract-audit.sh
+      - test/security-contracts.sh
     notes:
-      - The weather notification adapter is a client only and does not change this ownership boundary.
+      - This entry is distinct from notification.client, which remains an adapted client contract and does not supervise a notification daemon.
+
+  - id: security.recovery
+    classification: blocked
+    support: blocked
+    maturity: audited
+    owner: atqamz/omanixy#4
+    planned_stack_layer: 8/8
+    audit_layer: 1/8
+    target:
+      classification: adapted
+      support: experimental
+    upstream:
+      project: basecamp/omarchy
+      revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
+      paths:
+        - path: shell/plugins/lock/Service.qml
+          role: stranded-lock and authentication failure recovery
+          consumption: audited-reference
+        - path: shell/plugins/polkit/PolkitAgent.qml
+          role: registration and authentication failure recovery
+          consumption: audited-reference
+        - path: shell/plugins/services/idle/Service.qml
+          role: idle and screensaver recovery
+          consumption: audited-reference
+        - path: shell/plugins/notifications/Service.qml
+          role: notification persistence and restart recovery
+          consumption: audited-reference
+    requirement: Promote security surfaces only after the complete failure and recovery matrix passes.
+    ownership:
+      presentation: omarchy
+      adapter: "issue #4"
+      system: NixOS and consumer host policy
+      session: explicitly selected Omanixy owner only
+    evidence:
+      available:
+        - pinned failure-sensitive behavior inventory
+        - separate compatibility and support-state ledger
+      required_before_promotion:
+        - complete failure and recovery matrix
+        - nested compositor and D-Bus validation
+        - live manual and hardware evidence
+    tests:
+      - test/security-contracts.sh
+    notes:
+      - This is the final promotion gate, not a permission to enable any security runtime in layer 1.

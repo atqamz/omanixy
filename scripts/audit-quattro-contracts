@@ -3,14 +3,91 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
-import shlex
 import sys
 from pathlib import Path
+from typing import TypeVar
+
+import source_discovery
 
 
 TEXT_SUFFIXES = {".qml", ".js", ".sh"}
+
+# Every file recursively found under these roots is a security source: the
+# roots are the allowlist, never the individual files inside them. Adding,
+# removing, renaming, or editing a file under a root changes the snapshot
+# even when it matches no recognized pattern.
+SECURITY_SOURCE_ROOTS = (
+    "shell/plugins/lock/",
+    "shell/plugins/polkit/",
+    "shell/plugins/services/idle/",
+    "shell/plugins/notifications/",
+)
+
+# omarchy-* helpers reached from a security source or an already-audited
+# security helper. Every helper the scanner discovers by traversal must have
+# exactly one disposition here or the drift-checkable output records it
+# unresolved: unresolved.length must be zero for the audit to pass.
+#
+# Only "audited-source" edges are traversed further; every other disposition
+# is a deliberate stop: the edge is recorded and hashed evidence is not
+# claimed beyond it.
+SECURITY_HELPER_DISPOSITIONS = {
+    "bin/omarchy-apply-lock": "audited-source",
+    "bin/omarchy-system-lock": "audited-source",
+    "bin/omarchy-system-wake": "audited-source",
+    "bin/omarchy-hyprland-session-locked": "audited-source",
+    "bin/omarchy-brightness-keyboard": "audited-source",
+    "bin/omarchy-brightness-display": "audited-source",
+    "bin/omarchy-brightness-display-apple": "audited-source",
+    "bin/omarchy-brightness-display-ddc": "audited-source",
+    "bin/omarchy-hyprland-monitor-clamshell": "audited-source",
+    "bin/omarchy-hyprland-monitor-external-active": "audited-source",
+    "bin/omarchy-hyprland-monitor-focused": "audited-source",
+    "bin/omarchy-hyprland-monitor-focused-apple": "audited-source",
+    "bin/omarchy-hyprland-monitor-internal": "audited-source",
+    "bin/omarchy-hyprland-monitor-internal-mirror": "audited-source",
+    "bin/omarchy-hyprland-monitor-laptop": "audited-source",
+    "bin/omarchy-hw-laptop-closed": "audited-source",
+    "bin/omarchy-hw-clamshell": "audited-source",
+    "bin/omarchy-hw-display": "audited-source",
+    "bin/omarchy-hw-external-monitors": "audited-source",
+    "bin/omarchy-hyprland-focus-app": "audited-source",
+    "bin/omarchy-launch-screensaver": "audited-source",
+    "bin/omarchy-hyprland-toggle": "audited-source",
+    "bin/omarchy-hyprland-toggle-enabled": "audited-source",
+    "bin/omarchy-hyprland-toggle-disabled": "audited-source",
+    "bin/omarchy-notification-send": "existing-omanixy-capability",
+    "bin/omarchy-shell": "existing-omanixy-capability",
+    "bin/omarchy-cmd-present": "incidental-upstream-policy-omitted",
+    "bin/omarchy-cmd-missing": "incidental-upstream-policy-omitted",
+    "bin/omarchy-toggle-enabled": "incidental-upstream-policy-omitted",
+    "bin/omarchy-osd": "presentation-only-unreachable",
+    "bin/omarchy-lock-fingerprint": "not-an-invocation",
+}
+SECURITY_HELPER_SEEDS = ("bin/omarchy-apply-lock",)
+TRAVERSABLE_HELPER_DISPOSITIONS = {"audited-source"}
+
+
+_DispositionKey = TypeVar("_DispositionKey")
+
+
+def dead_dispositions(
+    dispositions: dict[_DispositionKey, str], reachable: set[_DispositionKey]
+) -> set[_DispositionKey]:
+    """Disposition entries never reached by traversal or current scan output.
+
+    A dead entry cannot be resolved by adding evidence: the only fix is
+    removing it. The scanner refuses to run rather than relying on manual
+    review to notice an unused policy row. Used for both the helper-edge
+    disposition table (str keys) and the dynamic-execution disposition table
+    ((path, line, name) keys) below.
+    """
+
+    return set(dispositions) - reachable
+
 MENU_FIELDS = ("action", "when", "checked", "provider")
 ENV_RE = re.compile(r"\$(?:\{)?([A-Z][A-Z0-9_]*)(?:\})?")
 HELPER_RE = re.compile(r"(?<![A-Za-z0-9_-])(omarchy-[a-z0-9][a-z0-9-]*)(?![A-Za-z0-9_-])")
@@ -28,13 +105,95 @@ SECURITY_RE = re.compile(
     r"org\.freedesktop\.Notifications|org\.freedesktop\.PolicyKit1)"
 )
 
-SHELL_WORDS = {
-    "!", "[[", "]]", "if", "then", "else", "elif", "fi", "for", "while",
-    "do", "done", "case", "esac", "in", "function", "true", "false", "test",
+DYNAMIC_EXECUTABLE = source_discovery.DYNAMIC_EXECUTABLE
+
+DYNAMIC_EVAL_RE = re.compile(r"(?<![A-Za-z0-9_])eval\b")
+DYNAMIC_SOURCE_RE = re.compile(r"^\s*(?:source|\.)\s+")
+DYNAMIC_SHELL_PAYLOAD_RE = re.compile(r"\b(?:bash|dash|sh|zsh)\b[^\n]*-[A-Za-z]*c\b")
+DYNAMIC_VARIABLE_HEAD_RE = re.compile(r"\$\{?[A-Za-z_][A-Za-z0-9_]*\}?")
+SHELL_EVAL_LITERAL_RE = re.compile(
+    r"\bcommand\s*[:=].*\[\s*[\"'](?:bash|sh)[\"']\s*,\s*[\"']-(?:l)?c[\"']\s*,\s*"
+    r"([\"'])((?:\\.|(?!\1).)*)\1\s*\]"
+)
+
+
+def classify_dynamic_category(shape: str) -> str:
+    """Best-effort taxonomy label for a dynamic/ambiguous execution record.
+
+    This is review metadata, not a correctness signal: presence in
+    security_dynamic_executions is what fail-closed behavior depends on.
+    """
+
+    if DYNAMIC_EVAL_RE.search(shape):
+        return "eval"
+    if DYNAMIC_SOURCE_RE.search(shape):
+        return "dynamic-source"
+    if DYNAMIC_SHELL_PAYLOAD_RE.search(shape):
+        return "dynamic-shell-payload"
+    if DYNAMIC_VARIABLE_HEAD_RE.search(shape):
+        return "variable-command-head"
+    return "ambiguous-shell-shape"
+
+
+# Every recorded dynamic/ambiguous execution inside a security source or an
+# audited-source security helper needs an exact, pinned, reviewed
+# disposition: either a legitimate runtime-determined dispatch (forwarding
+# "$@", running a caller-supplied command), or a known artifact of the
+# scanner's deliberately non-parsing line/delimiter splitter misreading
+# something that is not a command at all (an awk program, a `[[ ]]`/`(( ))`
+# test expression, a `2>&1`/`||` redirection sequence broken by single-char
+# splitting). Keyed on the exact (path, line, name) triple so a disposition
+# only ever covers the one shape it was reviewed against, never a class of
+# shapes: a changed line invalidates its entry and the audit fails closed.
+SECURITY_DYNAMIC_EXECUTION_DISPOSITIONS: dict[tuple[str, int, str], str] = {
+    ("bin/omarchy-apply-lock", 17, '"$@"'):
+        "as_root() forwards its own caller's fixed, file-local argv",
+    ("bin/omarchy-brightness-display-ddc", 77,
+     '$1 == "VCP" && toupper($2) == "10" && $3 == "C" && $4 ~ /^[0-9]+$/ && $5 ~ /^[0-9]+$/ && $5 > 0 {'):
+        "continuation line of a multi-line single-quoted awk program, not a shell command",
+    ("bin/omarchy-brightness-display-ddc", 125,
+     "if [[ $bus =~ ^[0-9]+$ && $maximum =~ ^[0-9]+$ && $range_cached_at =~ ^[0-9]+$ ]] && (( maximum > 0 )); then"):
+        "a [[ ]]/(( )) test expression split on its internal && by the non-parsing splitter, not a command",
+    ("bin/omarchy-system-lock", 18,
+     "timeout --kill-after=1s 3s 1password --lock >/dev/null 2>&1 || true"):
+        "a literal timeout invocation; the 2>&1/|| redirection sequence is split by the non-parsing splitter",
+    ("shell/plugins/notifications/Service.qml", 363, 'entry ? String(entry.exec || "") : ""'):
+        "reads a notification's own advertised exec string; not a shell invocation",
+    ("shell/plugins/notifications/Service.qml", 367, "Util.execDetached(command)"):
+        "forwards a notification action's own exec command, defined by the notifying application",
+    ("shell/plugins/notifications/Service.qml", 443, "command, done: done || null }])"):
+        "an object-literal field literally named command, not a shell invocation",
+    ("shell/plugins/notifications/Service.qml", 464, "job.command"):
+        "reads back a prior job's own recorded command for its own history display",
+    ("shell/plugins/notifications/Service.qml", 503, 'var command = ["bash", "-c",'):
+        "opening line of a multi-line bash -c payload built from history-log fields",
+    ("shell/plugins/notifications/Service.qml", 570, 'var command = ["bash", "-c",'):
+        "opening line of a multi-line bash -c payload built from history-log fields",
+    ("shell/plugins/notifications/Service.qml", 644, 'readHistoryProc.command = ["bash", "-c",'):
+        "opening line of a multi-line bash -c payload reading the notification history file",
+    ("shell/plugins/notifications/Service.qml", 845, 'restorePopupsProc.command = ["bash", "-c",'):
+        "opening line of a multi-line bash -c payload restoring popup state",
+    ("shell/plugins/services/idle/Service.qml", 60, 'process.command = ["bash", "-lc", command]'):
+        "forwards an idle-hook command from the caller-supplied inhibitor/wake configuration",
+    ("shell/plugins/services/idle/Service.qml", 210, "value"):
+        "generic property-setter parameter name, not a shell invocation",
+    ("shell/plugins/services/idle/Service.qml", 220, 'stayAwakeStateWriter.command = ["bash", "-lc", command]'):
+        "forwards the same caller-supplied idle-hook command as line 60",
 }
 
 
-def strip_comments(text: str) -> str:
+def sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def strip_comments(text: str, shell: bool = False) -> str:
+    """Strip comments for line-oriented scanning.
+
+    Shell has no block-comment syntax, so treating "/*" as a QML/JS block
+    comment opener would eat glob patterns like "image/*)" in a case arm.
+    Shell scripts strip only unquoted "#" to end of line instead.
+    """
+
     result: list[str] = []
     block = False
     for line in text.splitlines(keepends=True):
@@ -42,22 +201,28 @@ def strip_comments(text: str) -> str:
         quote = ""
         index = 0
         while index < len(line):
-            if block:
-                end = line.find("*/", index)
-                if end < 0:
-                    index = len(line)
+            if shell:
+                if not quote and line[index] == "#":
+                    newline = "\n" if line.endswith("\n") else ""
+                    out.append(newline)
                     break
-                block = False
-                index = end + 2
-                continue
-            if not quote and line.startswith("/*", index):
-                block = True
-                index += 2
-                continue
-            if not quote and line.startswith("//", index):
-                newline = "\n" if line.endswith("\n") else ""
-                out.append(newline)
-                break
+            else:
+                if block:
+                    end = line.find("*/", index)
+                    if end < 0:
+                        index = len(line)
+                        break
+                    block = False
+                    index = end + 2
+                    continue
+                if not quote and line.startswith("/*", index):
+                    block = True
+                    index += 2
+                    continue
+                if not quote and line.startswith("//", index):
+                    newline = "\n" if line.endswith("\n") else ""
+                    out.append(newline)
+                    break
             char = line[index]
             if char in "\"'`":
                 if quote == char:
@@ -78,23 +243,71 @@ def record(path: str, line: int, name: str, **extra: object) -> dict[str, object
     return {"name": name, "path": path, "line": line, **extra}
 
 
-def shell_commands(value: str) -> list[str]:
-    commands: list[str] = []
-    for part in re.split(r"(?:&&|\|\||[;&|])", value):
-        part = re.sub(r"^\s*(?:!|if|then|else|elif|while|do)\s+", "", part)
-        part = re.sub(r"^\s*\[\[?\s*", "", part)
-        part = re.sub(r"^\s*\$\(", "", part)
-        try:
-            words = shlex.split(part, comments=False, posix=True)
-        except ValueError:
-            words = re.findall(r"[A-Za-z][A-Za-z0-9_.+-]*", part)
-        for word in words:
-            if word in SHELL_WORDS or word.startswith("$"):
-                continue
-            if re.fullmatch(r"[A-Za-z][A-Za-z0-9_.+-]*", word):
-                commands.append(word)
-                break
-    return commands
+def shell_command_line(line: str) -> str:
+    """Extract the command portion of a shell line, stripping a function
+    opener or case arm. A leading variable-assignment prefix is left intact:
+    shell_executables already distinguishes a bare assignment (no command)
+    from an assignment prefix to a real command, and stripping it here would
+    promote the assigned value itself to "the executable"."""
+
+    function_body = re.match(r"^\s*[A-Za-z_][A-Za-z0-9_]*\s*\(\s*\)\s*\{", line)
+    if function_body:
+        return line[function_body.end():]
+    # The pattern text must contribute a non-whitespace character of its own;
+    # otherwise a bare subshell-closing paren (e.g. `  ) 9>lock &`) would be
+    # mistaken for a zero-width case-arm pattern and swallow the following
+    # command word.
+    case_arm = re.match(r"^\s*[^;&\s][^;&]*\)\s*", line)
+    if case_arm:
+        return line[case_arm.end():]
+    return line
+
+
+HEREDOC_START_RE = re.compile(r"<<(-?)\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\2")
+
+
+def scan_shell_names(text: str) -> list[tuple[str, int, str]]:
+    """Discover every command head (helper or external) in shell script text.
+    Heredoc bodies are skipped entirely: their content is literal data (e.g. a
+    PAM config block), never shell syntax, so scanning it as commands would
+    misreport words like a heredoc-embedded `auth` line as external
+    executables."""
+
+    shell_functions = {
+        match.group(1)
+        for match in re.finditer(
+            r"^\s*(?:function\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*\)\s*\{",
+            text,
+            re.MULTILINE,
+        )
+    }
+    found: list[tuple[str, int, str]] = []
+    lines = text.splitlines()
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        line_index = index + 1
+        index += 1
+        for name in source_discovery.shell_executables(shell_command_line(line)):
+            if name not in shell_functions:
+                found.append((name, line_index, line.strip()))
+        for match in source_discovery.COMMAND_SUBSHELL_RE.finditer(line):
+            for name in source_discovery.shell_executables(match.group(1)):
+                if name not in shell_functions:
+                    found.append((name, line_index, line.strip()))
+        for match in source_discovery.PROCESS_SUBSHELL_RE.finditer(line):
+            for name in source_discovery.shell_executables(match.group(1)):
+                if name not in shell_functions:
+                    found.append((name, line_index, line.strip()))
+        heredoc = HEREDOC_START_RE.search(line)
+        if heredoc:
+            dash, _quote, terminator = heredoc.groups()
+            while index < len(lines):
+                body = lines[index]
+                index += 1
+                if (body.strip() if dash else body) == terminator:
+                    break
+    return found
 
 
 def parse_menu(path: Path, root: Path) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
@@ -115,10 +328,139 @@ def parse_menu(path: Path, root: Path) -> tuple[list[dict[str, object]], list[di
             if not isinstance(value, str) or not value:
                 continue
             menu_commands.append(record(relative, 0, value, field=field, id=item_id))
-            for command in shell_commands(value):
+            for command in source_discovery.shell_executables(value):
                 if command.startswith("omarchy-"):
                     helpers.append(record(relative, 0, command, invocation=f"menu.{field}", id=item_id))
     return menu_commands, helpers
+
+
+def collect_line_contracts(
+    relative: str,
+    line_index: int,
+    line: str,
+    environments: set[str],
+    filesystem: list[dict[str, object]],
+    services: list[dict[str, object]],
+    security: list[dict[str, object]],
+) -> None:
+    for variable in ENV_RE.findall(line):
+        environments.add(variable)
+    for match in ENV_CALL_RE.finditer(line):
+        environments.add(match.group(1))
+
+    for match in SERVICE_RE.finditer(line):
+        services.append(record(relative, line_index, match.group(0)))
+    for match in SECURITY_RE.finditer(line):
+        security.append(record(relative, line_index, match.group(0)))
+
+    path_matches = re.findall(
+        r"(?:\$OMARCHY_PATH[^\s\"']*|\$HOME[^\s\"']*|\$XDG_[A-Z_]+[^\s\"']*|"
+        r"/etc/[A-Za-z0-9_./-]+|/sys/[A-Za-z0-9_./-]+|/proc/[A-Za-z0-9_./-]+)",
+        line,
+    )
+    path_matches.extend(
+        f"omarchyPath + {suffix}"
+        for suffix in re.findall(
+            r"(?:\b(?:root|service)\.omarchyPath\b|\bomarchyPath\b)\s*\+\s*[\"']([^\"']+)",
+            line,
+        )
+    )
+    path_matches.extend(
+        f"{variable} + {suffix}"
+        for variable, suffix in re.findall(
+            r"Quickshell\.env\(\s*[\"']([A-Za-z_][A-Za-z0-9_]*)[\"']\s*\)\s*\+\s*[\"']([^\"']+)",
+            line,
+        )
+    )
+    for value in path_matches:
+        kind = "watch" if "watchChanges" in line or "onFileChanged" in line else "read"
+        if any(token in line for token in ("setText", "atomicWrites", "mkdir", "install", "mv", "rm ", " > ", " >> ")):
+            kind = "write"
+        filesystem.append(record(relative, line_index, value, kind=kind))
+
+
+def collect_security_source_files(root: Path) -> list[dict[str, object]]:
+    files: list[dict[str, object]] = []
+    for source_root in SECURITY_SOURCE_ROOTS:
+        root_dir = root / source_root
+        if not root_dir.is_dir():
+            continue
+        for file_path in sorted(p for p in root_dir.rglob("*") if p.is_file()):
+            relative = str(file_path.relative_to(root))
+            files.append(
+                {
+                    "path": relative,
+                    "root": source_root,
+                    "present": True,
+                    "hash": sha256_bytes(file_path.read_bytes()),
+                }
+            )
+    return files
+
+
+def collect_security_helper_edges(
+    root: Path,
+    seed_names: set[str],
+    environments: set[str],
+    filesystem: list[dict[str, object]],
+    services: list[dict[str, object]],
+    security: list[dict[str, object]],
+    dynamic: list[dict[str, object]],
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    """Traverse the omarchy-* helper graph reached from security sources.
+
+    Returns (helper_edges, external_executables_from_helpers). Only edges
+    dispositioned as audited-source are traversed further; every other
+    disposition is a deliberate stop. Traversed files feed the same
+    environment/filesystem/service/security/dynamic contract collections as
+    QML/JS sources, so an audited helper's contracts are not lost. A command
+    head whose executable identity cannot be statically resolved is recorded
+    into dynamic rather than silently dropped or misread as a literal name.
+    """
+
+    edges: dict[str, dict[str, object]] = {}
+    externals: list[dict[str, object]] = []
+    queue = sorted({f"bin/{name}" for name in seed_names} | set(SECURITY_HELPER_SEEDS))
+    while queue:
+        relative = queue.pop(0)
+        if relative in edges:
+            continue
+        name = relative.rsplit("/", 1)[-1]
+        file_path = root / relative
+        present = file_path.is_file()
+        disposition = SECURITY_HELPER_DISPOSITIONS.get(relative)
+        entry: dict[str, object] = {
+            "path": relative,
+            "name": name,
+            "disposition": disposition,
+            "present": present,
+        }
+        if disposition is not None and present:
+            entry["hash"] = sha256_bytes(file_path.read_bytes())
+        edges[relative] = entry
+        if disposition in TRAVERSABLE_HELPER_DISPOSITIONS and present:
+            text = strip_comments(file_path.read_text(errors="replace"), shell=True)
+            for line_index, line in enumerate(text.splitlines(), 1):
+                collect_line_contracts(relative, line_index, line, environments, filesystem, services, security)
+            for found_name, found_line, shape in scan_shell_names(text):
+                if found_name == DYNAMIC_EXECUTABLE:
+                    dynamic.append(
+                        record(
+                            relative,
+                            found_line,
+                            shape,
+                            invocation="helper-shell",
+                            category=classify_dynamic_category(shape),
+                        )
+                    )
+                    continue
+                if found_name.startswith("omarchy-"):
+                    queue.append(f"bin/{found_name}")
+                else:
+                    externals.append(record(relative, found_line, found_name, invocation="helper-shell"))
+    return sorted(edges.values(), key=lambda item: item["path"]), sorted(
+        externals, key=lambda item: (item["name"], item["path"], item["line"])
+    )
 
 
 def main() -> int:
@@ -143,6 +485,9 @@ def main() -> int:
     security: list[dict[str, object]] = []
     menu_commands: list[dict[str, object]] = []
 
+    security_source_files = collect_security_source_files(root)
+    security_paths = {entry["path"] for entry in security_source_files}
+
     source_files = sorted(
         {
             *(
@@ -160,54 +505,37 @@ def main() -> int:
     for path in source_files:
         relative = str(path.relative_to(root))
         raw = path.read_text(errors="replace")
-        text = strip_comments(raw)
+        text = strip_comments(raw, shell=relative.endswith(".sh"))
         lines = text.splitlines()
 
         for match in IMPORT_RE.finditer(text):
             imports.add(match.group(1))
 
         for line_index, line in enumerate(lines, 1):
-            for variable in ENV_RE.findall(line):
-                environments.add(variable)
-            for match in ENV_CALL_RE.finditer(line):
-                environments.add(match.group(1))
-
-            for match in SERVICE_RE.finditer(line):
-                services.append(record(relative, line_index, match.group(0)))
-            for match in SECURITY_RE.finditer(line):
-                security.append(record(relative, line_index, match.group(0)))
-
-            path_matches = re.findall(
-                r"(?:\$OMARCHY_PATH[^\s\"']*|\$HOME[^\s\"']*|\$XDG_[A-Z_]+[^\s\"']*|"
-                r"/etc/[A-Za-z0-9_./-]+|/sys/[A-Za-z0-9_./-]+|/proc/[A-Za-z0-9_./-]+)",
-                line,
-            )
-            path_matches.extend(
-                f"omarchyPath + {suffix}"
-                for suffix in re.findall(
-                    r"(?:\b(?:root|service)\.omarchyPath\b|\bomarchyPath\b)\s*\+\s*[\"']([^\"']+)",
-                    line,
-                )
-            )
-            path_matches.extend(
-                f"{variable} + {suffix}"
-                for variable, suffix in re.findall(
-                    r"Quickshell\.env\(\s*[\"']([A-Za-z_][A-Za-z0-9_]*)[\"']\s*\)\s*\+\s*[\"']([^\"']+)",
-                    line,
-                )
-            )
-            for value in path_matches:
-                kind = "watch" if "watchChanges" in line or "onFileChanged" in line else "read"
-                if any(token in line for token in ("setText", "atomicWrites", "mkdir", "install", "mv", "rm ", " > ", " >> ")):
-                    kind = "write"
-                filesystem.append(record(relative, line_index, value, kind=kind))
+            collect_line_contracts(relative, line_index, line, environments, filesystem, services, security)
 
             if re.search(r"\bcommand\s*[:=]\s*(?!\[\s*\])", line) and not re.search(r"\bcommand\s*[:=]\s*\[", line):
                 expression = re.split(r"\bcommand\s*[:=]", line, maxsplit=1)[1].strip()
                 if expression:
-                    dynamic.append(record(relative, line_index, expression, invocation="dynamic"))
+                    dynamic.append(
+                        record(
+                            relative,
+                            line_index,
+                            expression,
+                            invocation="dynamic",
+                            category=classify_dynamic_category(expression),
+                        )
+                    )
             if re.search(r"(?:Quickshell|Util)\.exec(?:Detached)?\(\s*[A-Za-z_]", line):
-                dynamic.append(record(relative, line_index, line.strip(), invocation="dynamic"))
+                dynamic.append(
+                    record(
+                        relative,
+                        line_index,
+                        line.strip(),
+                        invocation="dynamic",
+                        category=classify_dynamic_category(line),
+                    )
+                )
             if re.search(r"\bcommand\s*[:=].*\?", line) or re.search(r"(?:Quickshell|Util)\.exec(?:Detached)?\(\s*[A-Za-z_]", line):
                 for command_match in re.finditer(r"\[\s*[\"']([^\"']+)", line):
                     name = command_match.group(1)
@@ -220,7 +548,27 @@ def main() -> int:
                 r"\bcommand\s*[:=].*\[\s*[\"'](?:bash|sh)[\"']\s*,\s*[\"']-(?:l)?c[\"']",
                 line,
             ):
-                dynamic.append(record(relative, line_index, line.strip(), invocation="shell-eval"))
+                literal_match = SHELL_EVAL_LITERAL_RE.search(line)
+                payload = literal_match.group(2) if literal_match else None
+                resolved = source_discovery.shell_executables(payload) if payload is not None else None
+                if resolved is not None and DYNAMIC_EXECUTABLE not in resolved:
+                    for command in resolved:
+                        entry = record(relative, line_index, command, invocation="shell-eval")
+                        direct_commands.append(entry)
+                        if command.startswith("omarchy-"):
+                            helpers.append(entry)
+                        elif not command.startswith(("$", "/")):
+                            external.append(entry)
+                else:
+                    dynamic.append(
+                        record(
+                            relative,
+                            line_index,
+                            line.strip(),
+                            invocation="shell-eval",
+                            category=classify_dynamic_category(line),
+                        )
+                    )
 
             for match in re.finditer(r"\[\s*[\"'](omarchy-[a-z0-9][a-z0-9-]*)[\"']", line):
                 helpers.append(record(relative, line_index, match.group(1), invocation="command-array"))
@@ -230,7 +578,22 @@ def main() -> int:
                 r"([\"'])(.*?)(?<!\\)\1",
                 line,
             ):
-                for command in shell_commands(match.group(2)):
+                payload = match.group(2)
+                local_functions = set(re.findall(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(\)\s*\{", payload))
+                for command in source_discovery.shell_executables(payload):
+                    if command in local_functions:
+                        continue
+                    if command == DYNAMIC_EXECUTABLE:
+                        dynamic.append(
+                            record(
+                                relative,
+                                line_index,
+                                line.strip(),
+                                invocation="shell-string",
+                                category=classify_dynamic_category(payload),
+                            )
+                        )
+                        continue
                     entry = record(relative, line_index, command, invocation="shell-string")
                     direct_commands.append(entry)
                     if command.startswith("omarchy-"):
@@ -240,11 +603,27 @@ def main() -> int:
 
             for match in HELPER_RE.finditer(line):
                 command_context = "\n".join(lines[max(0, line_index - 3):line_index])
-                if any(token in command_context for token in ("command", "execDetached", "exec(", "bar.run", "/bin/")):
+                if any(token in command_context for token in ("command", "execDetached", "exec(", "bar.run", "runProcess", "/bin/")):
                     helpers.append(record(relative, line_index, match.group(1), invocation="source"))
 
-            for match in re.finditer(r"(?:^|[\"'])((?:bash|sh|env|timeout|systemctl|nmcli|bluetoothctl|wpctl|pactl|wl-copy|wl-paste|wtype|grim|slurp|curl|jq|hyprctl|gsettings|gtk-launch|uwsm-app|pkill|setpriv|find|mkdir|readlink|cp|mv|rm|top|ip|iw|ping|uuidgen|powerprofilesctl|upower|brightnessctl|rfkill))(?=\b)", line):
-                external.append(record(relative, line_index, match.group(1), invocation="source"))
+        if relative.endswith(".sh"):
+            for name, found_line, shape in scan_shell_names(text):
+                if name == DYNAMIC_EXECUTABLE:
+                    dynamic.append(
+                        record(
+                            relative,
+                            found_line,
+                            shape,
+                            invocation="shell-script",
+                            category=classify_dynamic_category(shape),
+                        )
+                    )
+                    continue
+                entry = record(relative, found_line, name, invocation="shell-script")
+                if name.startswith("omarchy-"):
+                    helpers.append(entry)
+                else:
+                    external.append(entry)
 
         for match in ABSOLUTE_HELPER_RE.finditer(text):
             absolute_helpers.append(record(relative, line_number(text, match.start()), match.group(1), form="OMARCHY_PATH/bin"))
@@ -274,13 +653,48 @@ def main() -> int:
         helpers.extend(menu_helpers)
         for entry in commands:
             if entry["field"] != "provider":
-                for command in shell_commands(str(entry["name"])):
-                    if not command.startswith(("omarchy-", "$", "/")):
+                for command in source_discovery.shell_executables(str(entry["name"])):
+                    if command != DYNAMIC_EXECUTABLE and not command.startswith(("omarchy-", "$", "/")):
                         external.append(record(entry["path"], entry["line"], command, invocation=f"menu.{entry['field']}"))
 
     helpers.extend(absolute_helpers)
+
+    security_seed_names = {
+        entry["name"]
+        for entry in helpers
+        if entry["path"] in security_paths and str(entry["name"]).startswith("omarchy-")
+    }
+    security_helper_edges, security_helper_externals = collect_security_helper_edges(
+        root, security_seed_names, environments, filesystem, services, security, dynamic
+    )
+    security_helper_paths = {edge["path"] for edge in security_helper_edges}
+    security_dead_dispositions = sorted(dead_dispositions(SECURITY_HELPER_DISPOSITIONS, security_helper_paths))
+
+    security_helpers = [entry for entry in helpers if entry["path"] in security_paths]
+    security_executables = [entry for entry in external if entry["path"] in security_paths] + security_helper_externals
+    security_filesystem = [
+        entry for entry in filesystem if entry["path"] in security_paths or entry["path"] in security_helper_paths
+    ]
+    security_direct_commands = [entry for entry in direct_commands if entry["path"] in security_paths]
+    security_dynamic_executions = [
+        entry for entry in dynamic if entry["path"] in security_paths or entry["path"] in security_helper_paths
+    ]
+    security_dynamic_execution_keys = {
+        (entry["path"], entry["line"], entry["name"]) for entry in security_dynamic_executions
+    }
+    security_unreviewed_dynamic_executions = sorted(
+        (
+            entry
+            for entry in security_dynamic_executions
+            if (entry["path"], entry["line"], entry["name"]) not in SECURITY_DYNAMIC_EXECUTION_DISPOSITIONS
+        ),
+        key=lambda item: (item["path"], item["line"], item["name"]),
+    )
+    security_dead_dynamic_execution_dispositions = sorted(
+        dead_dispositions(SECURITY_DYNAMIC_EXECUTION_DISPOSITIONS, security_dynamic_execution_keys)
+    )
     result = {
-        "schema": 1,
+        "schema": 4,
         "roots": [
             "shell/shell.qml",
             "shell/services/",
@@ -300,6 +714,35 @@ def main() -> int:
         "native_quickshell_modules": sorted(imports),
         "service_contracts": sorted(services, key=lambda item: (item["name"], item["path"], item["line"])),
         "security_contracts": sorted(security, key=lambda item: (item["name"], item["path"], item["line"])),
+        "security_source_roots": list(SECURITY_SOURCE_ROOTS),
+        "security_source_files": sorted(security_source_files, key=lambda item: item["path"]),
+        "security_helper_edges": security_helper_edges,
+        "security_dead_dispositions": security_dead_dispositions,
+        "security_dynamic_executions": sorted(
+            security_dynamic_executions,
+            key=lambda item: (item["path"], item["line"], item["name"]),
+        ),
+        "security_unreviewed_dynamic_executions": security_unreviewed_dynamic_executions,
+        "security_dead_dynamic_execution_dispositions": [
+            {"path": key[0], "line": key[1], "name": key[2]}
+            for key in sorted(security_dead_dynamic_execution_dispositions)
+        ],
+        "security_direct_shell_commands": sorted(
+            security_direct_commands,
+            key=lambda item: (item["path"], item["line"], item["name"]),
+        ),
+        "security_helpers": sorted(
+            security_helpers,
+            key=lambda item: (item["name"], item["path"], item["line"], item.get("invocation", "")),
+        ),
+        "security_external_executables": sorted(
+            security_executables,
+            key=lambda item: (item["name"], item["path"], item["line"]),
+        ),
+        "security_filesystem_contracts": sorted(
+            security_filesystem,
+            key=lambda item: (item["name"], item["path"], item["line"], item["kind"]),
+        ),
     }
     json.dump(result, sys.stdout, indent=2, sort_keys=True)
     sys.stdout.write("\n")

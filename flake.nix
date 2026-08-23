@@ -389,16 +389,23 @@
               nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.diffutils pkgs.jq pkgs.python3 ];
             } ''
             generated="$TMPDIR/quattro-contracts.json"
-            ${pkgs.python3}/bin/python3 ${./scripts/audit-quattro-contracts} ${runtime.passthru.omarchySource} > "$generated"
+            PYTHONPATH=${./scripts} ${pkgs.python3}/bin/python3 ${./scripts/audit-quattro-contracts} ${runtime.passthru.omarchySource} > "$generated"
             cmp "$generated" ${./upstream/quattro-contracts.json}
             ${pkgs.bash}/bin/bash ${./test/quattro-contract-audit.sh} ${./.}
+            touch "$out"
+          '';
+          security-contracts = pkgs.runCommand "omanixy-security-contracts"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.jq pkgs.ripgrep (pkgs.python3.withPackages (ps: [ ps.pyyaml ])) ];
+            } ''
+            PYTHON=${pkgs.python3.withPackages (ps: [ ps.pyyaml ])}/bin/python ${pkgs.bash}/bin/bash ${./test/security-contracts.sh} ${./.} ${runtime.passthru.omarchyCompatibilityRoot}
             touch "$out"
           '';
           contract-closure = pkgs.runCommand "omanixy-contract-closure"
             {
               nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gawk pkgs.gnugrep pkgs.gnused pkgs.jq pkgs.procps pkgs.python3 pkgs.util-linux ];
             } ''
-            ${pkgs.python3}/bin/python3 ${./scripts/check-contract-closure} \
+            PYTHONPATH=${./scripts} ${pkgs.python3}/bin/python3 ${./scripts/check-contract-closure} \
               ${./.} ${runtime.passthru.omarchySource} ${compatibilityRoot} ${runtime.passthru.compatibilityBin} ${runtime.passthru.compatibilityProbes} ${runtime} \
               ${./upstream/compatibility-contracts.json} ${./upstream/quattro-contracts.json} \
               ${./test/compat-adapters.sh} ${./packages/omanixy-shell/compat-adapter.bash} ${./scripts/audit-quattro-contracts}
