@@ -114,6 +114,12 @@ before committing.
 
 Read `docs/release.md` before changing release-owned files or release
 workflows.
+Release semantics follow `docs/release.md`.
+The final squash title is release-significant.
+Do not manually edit version-managed files outside bootstrap or a Release PR.
+Do not manually create release tags or GitHub Releases.
+Breaking public changes require migration notes.
+`v1.0.0` requires an explicit project decision.
 
 ## NixOS Module Principles
 
