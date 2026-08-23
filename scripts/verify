@@ -13,6 +13,14 @@ test -s docs/upstream.md
 test -s docs/runtime.md
 test -s upstream/omarchy.yaml
 test -s upstream/porting-matrix.yaml
+test -s release-please-config.json
+test -s .release-please-manifest.json
+test -s version.txt
+test -s CHANGELOG.md
+test -s docs/release.md
+test -s .github/workflows/ci.yaml
+test -s .github/workflows/release-please.yaml
+test -x scripts/release-context
 test -x scripts/verify
 test -x .githooks/pre-commit
 test -x .githooks/commit-msg

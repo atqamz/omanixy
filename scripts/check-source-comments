@@ -31,6 +31,7 @@ SHEBANG_LANGUAGE = {
     "#!/bin/sh": "shell",
 }
 NON_SOURCE_SUFFIXES = {".md", ".json", ".lock"}
+EXACT_MACHINE_DATA_PATHS = {Path("version.txt")}
 
 
 @dataclass(frozen=True)
@@ -73,6 +74,8 @@ def match_directive(language, comment_text):
 def classify_language(path, root):
     rel = path.relative_to(root)
     if rel.name in EXCLUDED_FILENAMES:
+        return None
+    if rel in EXACT_MACHINE_DATA_PATHS:
         return None
     if rel.suffix in NON_SOURCE_SUFFIXES:
         return None
