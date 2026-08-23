@@ -128,7 +128,7 @@ def assert_ci(ci):
 
     provenance = named["Verify main PR provenance"]
     assert provenance["if"] == "github.event_name == 'push'"
-    assert '.merge_commit_sha == env.EXPECTED_SHA' in provenance["run"]
+    assert '.merge_commit_sha == $sha' in provenance["run"]
     assert 'test "$merged_pr_count" = "1"' in provenance["run"]
 
     nix_steps = [step for step in ordered if step.get("uses") == NIX_ACTION]
@@ -208,7 +208,7 @@ def assert_release_workflow(release, release_text):
     for text in (
         '.merge_commit_sha == $sha',
         'test "$(jq length <<< "$matches")" = "1"',
-        'author" = "github-actions[bot]',
+        '$author" = "github-actions[bot]"',
         'git diff-tree --no-commit-id --name-only -r "$EXPECTED_SHA"',
         'test "$actual_release_files" = "$expected_release_files"',
         "release_commit=true",
@@ -246,7 +246,7 @@ def assert_release_workflow(release, release_text):
     assert query["if"] == current
     assert '--label "autorelease: pending"' in query["run"]
     assert "--limit 100" in query["run"]
-    assert "headRepository.nameWithOwner == env.GITHUB_REPOSITORY" in query["run"]
+    assert "headRepository.nameWithOwner == $repo" in query["run"]
     assert '.author.login == "github-actions[bot]"' in query["run"]
 
     identity = named["Verify pending Release PR identity"]
