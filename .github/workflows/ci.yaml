@@ -21,8 +21,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       NIX_CONFIG: |
-        max-jobs = 1
-        cores = 1
+        max-jobs = 2
+        cores = 2
     steps:
       - uses: actions/checkout@v7
         with:
