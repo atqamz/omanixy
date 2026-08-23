@@ -25,3 +25,4 @@ test -x scripts/verify
 test -x .githooks/pre-commit
 test -x .githooks/commit-msg
 test -s .github/copilot-instructions.md
+bash test/release-workflow-hardening.sh
