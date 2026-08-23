@@ -21,13 +21,22 @@ jobs:
     runs-on: ubuntu-latest
     env:
       NIX_CONFIG: |
-        max-jobs = 2
-        cores = 2
+        max-jobs = 1
+        cores = 1
+      CMAKE_BUILD_PARALLEL_LEVEL: 1
+      MAKEFLAGS: -j1
+      NINJAFLAGS: -j1
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: DeterminateSystems/nix-installer-action@v22
+      - name: Configure swap
+        run: |
+          sudo fallocate -l 4G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
       - name: Format
         run: |
           nix fmt
