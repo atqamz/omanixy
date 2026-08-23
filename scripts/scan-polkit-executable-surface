@@ -1,0 +1,138 @@
+#!/usr/bin/env python3
+"""Fail-closed scan proving the final generated PolkitAgent.qml has no
+external process-execution surface at all.
+
+Unlike security.lock's executable-surface scanner (which allowlists a small
+set of literal, audited commands bound to Process.command), the Layer-5
+polkit adaptation needs no Process object, and no process-execution call of
+any shape, whatsoever: patch-polkit-agent already removes the only Process
+the pinned upstream source had (the omarchy-hw-laptop-closed lid probe)
+along with the FileView that read /etc/pam.d/polkit-1. A command-property
+inventory alone is not a sufficient invariant here - the pinned Quickshell
+`Process` type also exposes `Q_INVOKABLE void exec(QList<QString> command)`
+(and an overload taking a ProcessContext), so a Process object with no
+`command:` property at all can still execute an arbitrary command via
+`someProcess.exec([...])`, an unqualified `exec([...])` called from within
+that Process's own scope, or a literal array handed to an unrelated
+`object.run([...])`. None of those shapes are a "command binding" in the
+sense security.lock's scanner cares about, so this scanner does not try to
+extend that allowlist model. Instead it enforces the stronger invariant the
+real generated file actually satisfies: zero `Process` object
+instantiations, zero `command:`/`.command =` property bindings, and zero
+`exec(...)`/`execDetached(...)`/`.run(...)` calls of any shape - qualified
+or bare, literal-argument or dynamic. Finding even one is a failure,
+regardless of how harmless its current arguments look.
+
+Discovery reuses the shared QML source-discovery lexical primitives
+(scripts/source_discovery.py) for comment/string masking only - the same
+`strip_comments`/`mask_string_literals`/`UnsafeSource` scan-lock-executable-
+surface already relies on - so a comment or string cannot spoof or hide a
+real executable surface. The actual policy regexes below are local to this
+script and deliberately do not touch scripts/source_discovery.py: Layer 3's
+lock scanner (and any other consumer of that shared module) must keep its
+existing, narrower behavior unchanged. Any live backtick template literal
+that survives both masking passes is rejected outright, for the same reason
+scan-lock-executable-surface rejects one: QML/JS template-literal
+interpolation cannot be proven safe by regex alone.
+"""
+
+from __future__ import annotations
+
+import re
+import sys
+from pathlib import Path
+
+import source_discovery
+
+# A QML object declaration: an optional dotted qualifier (e.g. an aliased
+# `import Quickshell.Io as Io` -> `Io.Process { ... }`) followed by the bare
+# word "Process" and an opening brace. The final adapted PolkitAgent.qml
+# must contain zero of these - not "zero with an unsafe command", zero,
+# full stop, since a Process object needs no `command:` property at all to
+# be able to execute something via `.exec(...)` later.
+PROCESS_OBJECT_RE = re.compile(r"\b(?:[A-Za-z_][A-Za-z0-9_]*\.)?Process\b\s*\{")
+
+# A `command:` (declarative) or `.command =` (procedural) property binding,
+# qualified or not. Process is the only pinned type with a `command`
+# property, so this is redundant with PROCESS_OBJECT_RE for any
+# syntactically well-formed file, but is kept as an independent, narrower
+# check in its own right - belt and suspenders, not a substitute.
+COMMAND_BINDING_RE = re.compile(r"\b(?:[A-Za-z_][A-Za-z0-9_]*\.)?command\s*[:=]")
+
+# Any exec/execDetached call: qualified (`p.exec(...)`, `Quickshell.exec(...)`,
+# `Quickshell.execDetached(...)`, `Util.execDetached(...)`) or bare
+# (`exec(...)` called from inside a Process's own scope). Argument shape
+# (literal array, dynamic expression, ProcessContext object) does not
+# matter - every shape starts a process.
+EXEC_CALL_RE = re.compile(r"\b(?:[A-Za-z_][A-Za-z0-9_]*\.)?exec(?:Detached)?\s*\(")
+
+# Any .run(...) call, qualified or bare, literal or dynamic argument. The
+# previously shared DYNAMIC_RUN_RE in source_discovery.py deliberately
+# excludes a literal array argument (`(?![\"'\[])`) because security.lock's
+# allowlist model needs to inspect that literal rather than reject it
+# outright; this scanner's invariant is absence, so a literal-array
+# `.run(["mystery-tool"])` must be rejected exactly like a dynamic one.
+RUN_CALL_RE = re.compile(r"\b(?:[A-Za-z_][A-Za-z0-9_]*\.)?run\s*\(")
+
+PATTERNS = (
+    ("Process object instantiation", PROCESS_OBJECT_RE),
+    ("command property binding", COMMAND_BINDING_RE),
+    ("exec/execDetached call", EXEC_CALL_RE),
+    ("run call", RUN_CALL_RE),
+)
+
+
+def fail(message: str) -> None:
+    print(f"polkit executable surface: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def line_of(text: str, offset: int) -> int:
+    return text.count("\n", 0, offset) + 1
+
+
+def scan(text: str) -> int:
+    try:
+        stripped = source_discovery.strip_comments(text, shell=False)
+        masked = source_discovery.mask_string_literals(stripped)
+    except source_discovery.UnsafeSource as exc:
+        fail(f"unsafe source, cannot prove executable surface is empty: {exc}")
+        raise  # unreachable, fail() always raises SystemExit
+
+    if "`" in masked:
+        fail("template literals are unsupported in security.polkit executable source")
+
+    matches: list[tuple[int, str, re.Match[str]]] = []
+    for label, pattern in PATTERNS:
+        for match in pattern.finditer(masked):
+            matches.append((match.start(), label, match))
+    matches.sort(key=lambda item: item[0])
+
+    if matches:
+        start, label, match = matches[0]
+        context = f"line {line_of(stripped, start)}"
+        found = stripped[match.start():match.end()].strip()
+        fail(
+            f"{context}: {label} found ({found!r}) - the final polkit agent must have "
+            "no external process-execution surface"
+        )
+
+    print(
+        "polkit executable surface: 0 Process objects, 0 command bindings, "
+        "0 exec/run calls found (expected)",
+        file=sys.stderr,
+    )
+    return 0
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) != 1:
+        print(f"usage: {sys.argv[0]} POLKIT_AGENT_QML", file=sys.stderr)
+        return 2
+
+    path = Path(argv[0])
+    return scan(path.read_text())
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

@@ -46,7 +46,11 @@ let
   fingerprintPackageValid = lib.assertMsg
     (!fingerprintEnabled || fingerprintPackage != null)
     "omanixy fingerprint security requires security.fingerprintPackage to be the NixOS-selected services.fprintd.package";
-  managedEnabledSecurityPlugins = lib.optionals lockEnabled [ "omarchy.lock" ];
+  # Independent of lock/fingerprint entirely - polkit-agent selection never
+  # implies or requires the native lock.
+  polkitAgentEnabled = security != null && (security.polkitAgent or false);
+  managedEnabledSecurityPlugins = lib.optionals lockEnabled [ "omarchy.lock" ]
+    ++ lib.optionals polkitAgentEnabled [ "omarchy.polkit" ];
   managedSecurityPluginIds = builtins.toJSON managedEnabledSecurityPlugins;
   externalExecutableCapabilities = contractSource.externalExecutableCapabilities or { };
   helperCapabilities = contractSource.helperCapabilities or { };
@@ -180,6 +184,16 @@ let
               --fingerprint ${if fingerprintEnabled then "enabled" else "disabled"} \
               "$out/shell/plugins/lock/Service.qml"
             ''}
+            ${lib.optionalString polkitAgentEnabled ''
+            mkdir -p "$out/shell/plugins/polkit"
+            install -Dm644 ${omarchySource}/shell/plugins/polkit/manifest.json "$out/shell/plugins/polkit/manifest.json"
+            install -Dm644 ${omarchySource}/shell/plugins/polkit/PolkitAgent.qml "$out/shell/plugins/polkit/PolkitAgent.qml"
+            install -Dm644 ${omarchySource}/shell/plugins/polkit/PolkitModel.js "$out/shell/plugins/polkit/PolkitModel.js"
+            chmod u+w "$out/shell/plugins/polkit/PolkitAgent.qml" "$out/shell/plugins/polkit/PolkitModel.js"
+            ${pkgs.python3}/bin/python3 ${../../scripts/patch-polkit-agent} \
+              "$out/shell/plugins/polkit/PolkitAgent.qml" \
+              "$out/shell/plugins/polkit/PolkitModel.js"
+            ''}
 
             chmod u+w "$out/shell" "$out/shell/shell.qml" "$out/shell/services" "$out/shell/services/PluginRegistry.qml" "$out/shell/services/AppLibrary.qml" "$out/shell/plugins/menu" "$out/shell/plugins/menu/BarWidget.qml"
             ${lib.optionalString (!builtins.elem "launcher" selectedFeatures) ''
@@ -307,7 +321,7 @@ let
             done
     '';
     passthru = {
-      inherit omarchySource safeMenu safeShellConfig selectedFeatures compatibilityHelpers runtimeBlockedPlugins lockEnabled fingerprintEnabled managedEnabledSecurityPlugins;
+      inherit omarchySource safeMenu safeShellConfig selectedFeatures compatibilityHelpers runtimeBlockedPlugins lockEnabled fingerprintEnabled polkitAgentEnabled managedEnabledSecurityPlugins;
     };
   };
 
@@ -546,7 +560,12 @@ pkgs.symlinkJoin {
     ln -s ${theme} "$out/share/omarchy-theme"
   '';
   passthru = {
-    inherit omarchyRevision quickshellRevision nixpkgsRevision omarchySource omarchyCompatibilityRoot compatibilityBin compatibilityProbes quickshell theme supportedSystems safeMenu safeShellConfig selectedFeatures selectedCapabilities compatibilityHelpers runtimeBlockedPlugins adapterSources adapterSourceHash featureSurface lockEnabled fingerprintEnabled managedEnabledSecurityPlugins declaredRuntimeInputs;
+    inherit omarchyRevision quickshellRevision nixpkgsRevision omarchySource omarchyCompatibilityRoot compatibilityBin compatibilityProbes quickshell theme supportedSystems safeMenu safeShellConfig selectedFeatures selectedCapabilities compatibilityHelpers runtimeBlockedPlugins adapterSources adapterSourceHash featureSurface lockEnabled fingerprintEnabled polkitAgentEnabled managedEnabledSecurityPlugins declaredRuntimeInputs;
+    # Exposed only so closure-independence tests can name the exact set of
+    # Omanixy-owned derivations expected to change identity when the
+    # compatibility root's contents change (e.g. a security capability
+    # adding plugin files), as opposed to filtering by package-name pattern.
+    inherit ipc compatAdapter runtime;
     buildProvenance = {
       inherit omarchyRevision quickshellRevision nixpkgsRevision;
     };

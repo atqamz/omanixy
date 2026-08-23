@@ -10,8 +10,54 @@ let
   fingerprintPamText = ''
     auth required ${config.services.fprintd.package}/lib/security/pam_fprintd.so
   '';
+
+  cfgPolkitSystem = config.programs.omanixy.security.polkit.system;
 in
 {
+  options.programs.omanixy.security.polkit.system = {
+    enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Declare the NixOS `security.polkit.enable` system capability that a
+        polkit authentication agent (Quattro's own, via
+        `programs.omanixy.security.polkit.agent.enable` in the Home Manager
+        module, or any other consumer- or externally-managed agent) needs in
+        order to have something to register with.
+
+        This option owns exactly one thing: turning on NixOS's own native
+        `security.polkit` module. It declares `security.polkit.enable = true`
+        using an ordinary (non-forced) assignment, deliberately leaving
+        NixOS's own polkit module to do everything it already does -
+        `polkitd`, its D-Bus and systemd integration, the `polkit-agent-helper`
+        binary, and the `polkit-1` PAM service - exactly as it would for any
+        other consumer of `security.polkit.enable`. Omanixy does not
+        second-guess, duplicate, or imperatively mutate any of that: no second
+        `polkitd`, no custom `polkit-1` PAM text or `lib.mkForce` override of
+        it, no new PAM service, and no
+        `security.polkit.enablePkexecWrapper` (a separate NixOS knob this
+        option never sets or requires).
+
+        Because the assignment is ordinary rather than forced, a host or
+        another module can still legitimately set `security.polkit.enable`
+        itself; this option resolving to `true` and NixOS's own
+        `security.polkit.enable` module option resolving to `true` are
+        expected to agree, and an assertion fails the build closed if a
+        stronger override (for example `lib.mkForce false` placed by some
+        other module) disagrees with it, rather than silently leaving this
+        option's stated capability unfulfilled.
+
+        Enabling this option selects no session-side polkit authentication
+        agent by itself: it is purely the system-capability half of the
+        Layer-5 ownership split. Home Manager's
+        `programs.omanixy.security.polkit.agent.enable` is the independent,
+        session-side half that actually selects the Quattro polkit agent
+        plugin, and requires this option to be enabled on the paired NixOS
+        configuration before it will do so.
+      '';
+    };
+  };
+
   options.programs.omanixy.security.pam = {
     password.enable = lib.mkOption {
       type = lib.types.bool;
@@ -104,6 +150,27 @@ in
   };
 
   config = lib.mkMerge [
+    (lib.mkIf cfgPolkitSystem.enable {
+      security.polkit.enable = true;
+
+      assertions = [
+        {
+          assertion = config.security.polkit.enable == true;
+          message = ''
+            programs.omanixy.security.polkit.system.enable is true, but the
+            resolved security.polkit.enable is not true. This capability
+            declares security.polkit.enable with an ordinary assignment
+            rather than lib.mkForce, deliberately letting genuine consumer
+            policy win; another module or host configuration is overriding
+            security.polkit.enable at an equal-or-stronger priority (for
+            example lib.mkForce false). If that override is intentional,
+            disable programs.omanixy.security.polkit.system.enable instead
+            of contesting security.polkit.enable underneath it.
+          '';
+        }
+      ];
+    })
+
     (lib.mkIf cfgPassword.enable {
       security.pam.services."omarchy-lock-password" = {
         enable = lib.mkForce true;

@@ -1171,11 +1171,12 @@ items:
       - No polkit agent, idle manager, or notification daemon is enabled by this layer.
 
   - id: security.polkit-agent
-    classification: blocked
-    support: blocked
+    classification: adapted
+    support: experimental
     maturity: audited
     owner: atqamz/omanixy#4
     planned_stack_layer: 5/8
+    promoted_at_layer: 5/8
     audit_layer: 1/8
     target:
       classification: adapted
@@ -1188,7 +1189,7 @@ items:
           role: Quattro user-session polkit agent
           consumption: audited-reference
         - path: bin/omarchy-hw-laptop-closed
-          role: optional lid-state helper
+          role: optional lid-state helper, deliberately not ported
           consumption: audited-reference
     native_quickshell:
       project: quickshell-mirror/quickshell
@@ -1203,13 +1204,13 @@ items:
     ownership:
       presentation: omarchy
       adapter: "issue #4"
-      system: NixOS polkitd and polkit-1 PAM service
-      session: consumer or explicitly selected Quattro agent
+      system: NixOS security.polkit owns polkitd, D-Bus/systemd integration, polkit-agent-helper, and the polkit-1 PAM service
+      session: consumer, or the Quattro agent explicitly selected via the paired programs.omanixy.security.polkit.system/agent.enable handshake
     filesystem:
       - /etc/pam.d/polkit-1
     pam:
       observed_service: polkit-1
-      use: fingerprint detection only; not a new lock service
+      use: native polkit-1 authentication path only; Omanixy neither declares nor parses this PAM service. Pinned Omarchy additionally reads this file only to infer fingerprint UI policy, which Layer 5 deliberately does not port (see notes).
     dbus_services:
       - org.freedesktop.PolicyKit1
       - /org/omarchy/PolkitAgent
@@ -1217,18 +1218,52 @@ items:
       - registration conflict must be diagnostic and bounded
       - authentication cancellation and failure must close the flow
       - unknown external agents must not be killed or disabled
-      - lid and fingerprint behavior must remain optional hardware policy
+      - the adapted presentation is authentication-method-neutral and assumes no particular hardware policy
     evidence:
       available:
         - exact Quickshell PolkitAgent and AuthFlow audit
         - exact NixOS polkit daemon and polkit-1 PAM ownership audit
+        - declarative programs.omanixy.security.polkit.system.enable NixOS option, disabled by default, declaring security.polkit.enable with an ordinary assignment plus a resolved-state assertion that fails a stronger external override closed
+        - declarative programs.omanixy.security.polkit.agent.enable Home Manager option, disabled by default, structurally independent of programs.omanixy.security.lock and its fingerprint sub-option
+        - exact-source, fail-on-drift patcher (scripts/patch-polkit-agent) removing the pinned PAM-file fingerprint inference and laptop-lid presentation policy, proven against adversarial drift fixtures
+        - fail-closed executable-surface scan (scripts/scan-polkit-executable-surface) proving the final generated PolkitAgent.qml has zero Process object instantiations, zero command bindings, and zero exec/execDetached/run calls of any shape - not merely no command bindings, since a bare Process object can execute via .exec(...) with no command property at all
+        - hermetic offscreen Quickshell behavior proof (test/security-polkit-qml-behavior.sh) covering inactive/waiting/response-required/submit/cancel/failure/success/daemon-cancellation states against a deterministic fake agent
+        - static ABI contract evidence against the pinned Quickshell polkit service source (one registration attempt per construction, no retry on registration failure, ordinary failure restarts a fresh session, destruction drains queued requests and cancels the active flow, and unregisters only through the listener helper's own null-checked, self-clearing handle)
+        - known declarative agent-conflict assertions (services.hyprpolkitagent.enable, services.polkit-gnome.enable) proven via a 12-case Home Manager x NixOS evaluation matrix
+        - shell.json and managed-plugin ownership proofs mirroring the Layer-3 lock model exactly
+        - core-only closure proof at raw store-path granularity: declaredRuntimeInputs and the compat-bin entry set are byte-identical, and after excluding the exact, named set of Omanixy-owned derivations expected to change identity because the compatibility root's contents differ, every remaining external dependency store path is byte-identical (not merely same-named)
       required_before_promotion:
-        - explicit agent ownership conflict tests
-        - bounded registration failure test
-        - authentication cancel and failure tests
-        - nested session D-Bus validation
+        - real, nested D-Bus polkit agent registration success against a live polkitd - the pinned Quickshell ABI proof (test/security-polkit-quickshell-contract.sh) and the offscreen fake-agent behavior proof (test/security-polkit-qml-behavior.sh) are both hermetic and cover the declarative known-conflict and bounded-registration-failure invariants already, but neither exercises a real D-Bus session
+        - real collision with a second, independently managed session polkit agent already registered at runtime (not the declarative hyprpolkitagent/polkit-gnome conflict assertions, which are already proven)
+        - real polkit authentication success against actual polkit-agent-helper/PAM
+        - real wrong-password/authentication-failure behavior against the real backend
+        - real user cancellation and real daemon-initiated cancellation against a live session
+        - polkitd disappearance/reappearance while a request is in flight
+        - Quickshell crash/restart during an active authentication request
+        - repeated-backend-failure/log-volume behavior under real, sustained failure conditions
+        - nested session validation (a real Wayland/Hyprland session, not an offscreen fixture)
     tests:
       - test/quattro-contract-audit.sh
+      - test/security-contracts.sh
+      - test/security-polkit-system.sh
+      - test/security-polkit-hm.sh
+      - test/security-polkit-shell-json.sh
+      - test/security-polkit-managed-plugin.sh
+      - test/security-polkit-core-only.sh
+      - test/security-polkit-closure.sh
+      - test/security-polkit-executable-surface.sh
+      - test/security-polkit-model.sh
+      - test/security-polkit-qml-behavior.sh
+      - test/security-polkit-quickshell-contract.sh
+      - test/security-polkit-no-fingerprint-widening.sh
+    notes:
+      - Omanixy does not enable the polkit system capability or the Quattro agent, install a competing agent, or write PAM configuration in layer 1.
+      - Layer 5 makes the native Quattro polkit agent reachable only when both programs.omanixy.security.polkit.system.enable (NixOS) and programs.omanixy.security.polkit.agent.enable (Home Manager) are explicitly set to true; both remain off by default and structurally outside programs.omanixy.features.
+      - The pinned Omarchy PolkitAgent.qml infers fingerprint availability by parsing /etc/pam.d/polkit-1 and checks a laptop-lid helper before showing a fingerprint-specific presentation; Layer 5 deliberately removes both. The adapted presentation is authentication-method-neutral, driven only by the pinned Quickshell AuthFlow.isResponseRequired signal, and never assumes fingerprint hardware.
+      - security.lock and security.polkit-agent are fully independent: enabling one never implies or requires the other, proven directly by the Home Manager assertion matrix.
+      - experimental, not supported, because every proof in this layer is hermetic and fake-backend: no live D-Bus registration, no real polkit authentication success or wrong-password behavior against actual polkit-agent-helper/PAM, no daemon disappearance/reappearance, and no nested-session validation has been exercised. These remain the ledger's required_before_promotion items for this entry, deferred to the Layer 8 recovery/support gate.
+      - No polkit-agent restart loop is added on top of the pinned Quickshell ABI's own ordinary-failure-restarts-a-fresh-session behavior; unknown external agent registration failure remains finite and diagnostic, never resolved by killing or disabling anything.
+      - No idle manager or notification daemon is enabled by this layer.
 
   - id: security.idle
     classification: blocked

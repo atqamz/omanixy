@@ -85,6 +85,8 @@
           lockRuntime = runtimeForSecurity system null { lock = true; };
           lockFingerprintRuntime = runtimeForSecurity system null { lock = true; fingerprint = true; fingerprintPackage = pkgs.fprintd; };
           coreLockRuntime = runtimeForSecurity system [ "core" ] { lock = true; };
+          polkitRuntime = runtimeForSecurity system null { polkitAgent = true; };
+          corePolkitRuntime = runtimeForSecurity system [ "core" ] { polkitAgent = true; };
           capabilityRuntimePaths = pkgs.writeText "omanixy-capability-runtime-paths" (builtins.toJSON {
             "audio-control" = toString audioRuntime;
             "audio-default-output" = toString audioRuntime;
@@ -120,6 +122,8 @@
           lockRuntimeClosureInfo = pkgs.closureInfo { rootPaths = [ lockRuntime ]; };
           lockFingerprintRuntimeClosureInfo = pkgs.closureInfo { rootPaths = [ lockFingerprintRuntime ]; };
           coreLockRuntimeClosureInfo = pkgs.closureInfo { rootPaths = [ coreLockRuntime ]; };
+          polkitRuntimeClosureInfo = pkgs.closureInfo { rootPaths = [ polkitRuntime ]; };
+          corePolkitRuntimeClosureInfo = pkgs.closureInfo { rootPaths = [ corePolkitRuntime ]; };
           coreRuntimeClosureInfo = pkgs.closureInfo { rootPaths = [ coreRuntime ]; };
           compatibilityRoot = runtime.passthru.omarchyCompatibilityRoot;
           baselineConfigForTests = builtins.removeAttrs
@@ -582,6 +586,144 @@
           integratedFingerprintCustomPackageRuntime = builtins.elemAt
             integratedFingerprintCustomPackageNixosConfiguration.config.home-manager.users."omanixy-test".home.packages
             0;
+          # Layer 5 (polkit): plain NixOS system-capability fixture, and one
+          # stronger-external-override adversary (a second lib.mkForce false
+          # on security.polkit.enable) that must fail this configuration's
+          # config.system.build.toplevel closed via the module's own resolved
+          # -state assertion, mirroring pamPasswordStrongConflict* above.
+          polkitSystemNixosConfiguration = nixpkgs.lib.nixosSystem {
+            inherit system;
+            modules = [
+              self.nixosModules.default
+              bootableStub
+              {
+                nixpkgs.hostPlatform = system;
+                system.stateVersion = "26.11";
+                programs.omanixy.security.polkit.system.enable = true;
+              }
+            ];
+          };
+          # Reference fixture with no Omanixy involvement at all - proves the
+          # Omanixy-owned build resolves security.polkit and its PAM/systemd
+          # surface identically to plain, direct NixOS ownership rather than
+          # duplicating or imperatively mutating anything of its own.
+          plainPolkitNixosConfiguration = nixpkgs.lib.nixosSystem {
+            inherit system;
+            modules = [
+              self.nixosModules.default
+              bootableStub
+              {
+                nixpkgs.hostPlatform = system;
+                system.stateVersion = "26.11";
+                security.polkit.enable = true;
+              }
+            ];
+          };
+          polkitSystemAdversarialNixosConfiguration = nixpkgs.lib.nixosSystem {
+            inherit system;
+            modules = [
+              self.nixosModules.default
+              bootableStub
+              {
+                nixpkgs.hostPlatform = system;
+                system.stateVersion = "26.11";
+                programs.omanixy.security.polkit.system.enable = true;
+              }
+              (
+                { lib, ... }:
+                {
+                  security.polkit.enable = lib.mkForce false;
+                }
+              )
+            ];
+          };
+          # Layer 5 (polkit): standalone Home Manager matrix. Scenario 1/2:
+          # agent disabled is exactly the existing zero-capability baseline
+          # (standaloneLockDisabledEval already proves this evaluates
+          # cleanly); scenario 2/2: agent enabled standalone must fail, since
+          # there is no osConfig to provision the paired NixOS
+          # security.polkit system capability.
+          standalonePolkitAgentEnabledEval = builtins.tryEval (
+            builtins.seq
+              (homeConfigurationFor system {
+                programs.omanixy.security.polkit.agent.enable = true;
+              }).activationPackage.drvPath
+              true
+          );
+          # Layer 5 (polkit): integrated NixOS + Home Manager matrix, crossed
+          # over the NixOS system capability, the Home Manager agent option,
+          # and the two known-conflicting Home Manager-managed polkit agents.
+          # Only system-on + agent-on (with both conflicting agents off) may
+          # pass while agent is on; a known conflicting agent, or agent
+          # without the paired system capability, must fail closed. lock is
+          # deliberately left at its default (false) throughout - this
+          # matrix is the proof that polkit needs no lock involvement at all.
+          integratedPolkitHomeManagerNixosConfigurationFor = systemEnabled: agentEnabled: hyprpolkitagentEnabled: polkitGnomeEnabled: nixpkgs.lib.nixosSystem {
+            inherit system;
+            modules = [
+              self.nixosModules.default
+              bootableStub
+              home-manager.nixosModules.home-manager
+              {
+                nixpkgs.hostPlatform = system;
+                system.stateVersion = "26.11";
+                programs.omanixy.security.polkit.system.enable = systemEnabled;
+                users.users."omanixy-test" = {
+                  isNormalUser = true;
+                  home = "/build/omanixy-test";
+                };
+                home-manager.useGlobalPkgs = true;
+                home-manager.useUserPackages = true;
+                home-manager.users."omanixy-test" = {
+                  imports = [ self.homeManagerModules.default ];
+                  home.username = "omanixy-test";
+                  home.homeDirectory = "/build/omanixy-test";
+                  home.stateVersion = "25.11";
+                  programs.omanixy.enable = true;
+                  programs.omanixy.security.polkit.agent.enable = agentEnabled;
+                  services.hyprpolkitagent.enable = hyprpolkitagentEnabled;
+                  services.polkit-gnome.enable = polkitGnomeEnabled;
+                };
+              }
+            ];
+          };
+          # 3/12: neither on - PASS.
+          integratedPolkitOffOffNixosConfiguration = integratedPolkitHomeManagerNixosConfigurationFor false false false false;
+          # 4/12: system on, agent off - PASS.
+          integratedPolkitOnOffNixosConfiguration = integratedPolkitHomeManagerNixosConfigurationFor true false false false;
+          # 5/12: system off, agent on - FAIL (paired-capability assertion).
+          integratedPolkitOffOnNixosConfiguration = integratedPolkitHomeManagerNixosConfigurationFor false true false false;
+          # 6/12 (and 11/12, lock left disabled throughout): both on, no
+          # competing agent - PASS.
+          integratedPolkitOnOnNixosConfiguration = integratedPolkitHomeManagerNixosConfigurationFor true true false false;
+          # 7/12: both on, hyprpolkitagent also on - FAIL (known-conflict assertion).
+          integratedPolkitOnOnHyprConflictNixosConfiguration = integratedPolkitHomeManagerNixosConfigurationFor true true true false;
+          # 8/12: both on, polkit-gnome also on - FAIL (known-conflict assertion).
+          integratedPolkitOnOnGnomeConflictNixosConfiguration = integratedPolkitHomeManagerNixosConfigurationFor true true false true;
+          # 9/12: agent off, hyprpolkitagent on - PASS (conflict assertion is
+          # vacuous while the Quattro agent itself is off).
+          integratedPolkitAgentOffHyprNixosConfiguration = integratedPolkitHomeManagerNixosConfigurationFor false false true false;
+          # 10/12: agent off, polkit-gnome on - PASS, same reasoning.
+          integratedPolkitAgentOffGnomeNixosConfiguration = integratedPolkitHomeManagerNixosConfigurationFor false false false true;
+          # Layer 5 (polkit) x Layer 4 (fingerprint) independence: fingerprint
+          # and polkit system capability both enabled - proves enabling
+          # polkit changes nothing about the fingerprint PAM service already
+          # proven byte-for-byte by pamFingerprintServiceFile, and that
+          # services.fprintd.enable is still never set by either capability.
+          pamFingerprintPolkitSystemNixosConfiguration = nixpkgs.lib.nixosSystem {
+            inherit system;
+            modules = [
+              self.nixosModules.default
+              bootableStub
+              {
+                nixpkgs.hostPlatform = system;
+                system.stateVersion = "26.11";
+                programs.omanixy.security.pam.fingerprint.enable = true;
+                programs.omanixy.security.polkit.system.enable = true;
+              }
+            ];
+          };
+          pamFingerprintPolkitSystemServiceFile = "${pamFingerprintPolkitSystemNixosConfiguration.config.environment.etc."pam.d/omarchy-lock-fingerprint".source}";
           # Section 11-13 (TOD activation): services.fprintd.package's own
           # default already resolves to the TOD-aware daemon when
           # services.fprintd.tod.enable is set, independent of
@@ -631,6 +773,12 @@
           # which stays owned by the presentation feature model alone.
           lockEnabledActivationScript = pkgs.writeShellScript "omanixy-shell-lock-state-activation"
             integratedPamOnLockOnNixosConfiguration.config.home-manager.users."omanixy-test".home.activation.omanixyShellState.data;
+          # Extracted from the integrated system-on/agent-on polkit
+          # configuration - proves enabling the polkit agent capability never
+          # changes shell.json handling either, exactly mirroring the lock
+          # proof above.
+          polkitEnabledActivationScript = pkgs.writeShellScript "omanixy-shell-polkit-state-activation"
+            integratedPolkitOnOnNixosConfiguration.config.home-manager.users."omanixy-test".home.activation.omanixyShellState.data;
           serviceUnit = pkgs.writeText "omanixy-shell.service" ''
             [Unit]
             Description=${service.Unit.Description}
@@ -846,6 +994,37 @@
               "$enabledHasFingerprintService" "$enabledPolkitEnabled" "$disabledPolkitEnabled"
             touch "$out"
           '';
+          security-polkit-system = pkgs.runCommand "omanixy-security-polkit-system"
+            {
+              disabledPolkitEnabled = if nixosConfiguration.config.security.polkit.enable then "true" else "false";
+              systemEnabledPolkitEnable = if polkitSystemNixosConfiguration.config.security.polkit.enable then "true" else "false";
+              systemEnabledPolkit1PamEnable = if polkitSystemNixosConfiguration.config.security.pam.services."polkit-1".enable then "true" else "false";
+              systemEnabledPkexecWrapper = if polkitSystemNixosConfiguration.config.security.polkit.enablePkexecWrapper then "true" else "false";
+              disabledPkexecWrapper = if nixosConfiguration.config.security.polkit.enablePkexecWrapper then "true" else "false";
+              adversarialToplevelForced = if toplevelForced polkitSystemAdversarialNixosConfiguration then "true" else "false";
+              plainPolkitToplevelForced = if toplevelForced plainPolkitNixosConfiguration then "true" else "false";
+              plainPolkitEnable = if plainPolkitNixosConfiguration.config.security.polkit.enable then "true" else "false";
+              systemdServicesMatch =
+                if (builtins.attrNames polkitSystemNixosConfiguration.config.systemd.services)
+                  == (builtins.attrNames plainPolkitNixosConfiguration.config.systemd.services)
+                then "true" else "false";
+              dbusPackagesMatch =
+                if polkitSystemNixosConfiguration.config.services.dbus.packages
+                  == plainPolkitNixosConfiguration.config.services.dbus.packages
+                then "true" else "false";
+              pamServicesMatch =
+                if (builtins.attrNames polkitSystemNixosConfiguration.config.security.pam.services)
+                  == (builtins.attrNames plainPolkitNixosConfiguration.config.security.pam.services)
+                then "true" else "false";
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-polkit-system.sh} \
+              "$disabledPolkitEnabled" "$systemEnabledPolkitEnable" "$systemEnabledPolkit1PamEnable" \
+              "$systemEnabledPkexecWrapper" "$disabledPkexecWrapper" "$adversarialToplevelForced" \
+              "$plainPolkitToplevelForced" "$plainPolkitEnable" \
+              "$systemdServicesMatch" "$dbusPackagesMatch" "$pamServicesMatch"
+            touch "$out"
+          '';
           security-pam-composition = pkgs.runCommand "omanixy-security-pam-composition"
             {
               ownedServiceFile = pamPasswordServiceFile;
@@ -983,6 +1162,28 @@
               "$envValue" "$expectedEnvValue" "$driverPath"
             touch "$out"
           '';
+          security-polkit-hm = pkgs.runCommand "omanixy-security-polkit-hm"
+            {
+              standaloneAgentDisabledOk = if standaloneLockDisabledEval.success then "true" else "false";
+              standaloneAgentEnabledOk = if standalonePolkitAgentEnabledEval.success then "true" else "false";
+              integratedOffOffOk = if toplevelForced integratedPolkitOffOffNixosConfiguration then "true" else "false";
+              integratedOnOffOk = if toplevelForced integratedPolkitOnOffNixosConfiguration then "true" else "false";
+              integratedOffOnOk = if toplevelForced integratedPolkitOffOnNixosConfiguration then "true" else "false";
+              integratedOnOnOk = if toplevelForced integratedPolkitOnOnNixosConfiguration then "true" else "false";
+              integratedOnOnHyprConflictOk = if toplevelForced integratedPolkitOnOnHyprConflictNixosConfiguration then "true" else "false";
+              integratedOnOnGnomeConflictOk = if toplevelForced integratedPolkitOnOnGnomeConflictNixosConfiguration then "true" else "false";
+              agentOffHyprOk = if toplevelForced integratedPolkitAgentOffHyprNixosConfiguration then "true" else "false";
+              agentOffGnomeOk = if toplevelForced integratedPolkitAgentOffGnomeNixosConfiguration then "true" else "false";
+              lockOnAgentOffOk = if toplevelForced integratedPamOnLockOnNixosConfiguration then "true" else "false";
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-polkit-hm.sh} \
+              "$standaloneAgentDisabledOk" "$standaloneAgentEnabledOk" \
+              "$integratedOffOffOk" "$integratedOnOffOk" "$integratedOffOnOk" "$integratedOnOnOk" \
+              "$integratedOnOnHyprConflictOk" "$integratedOnOnGnomeConflictOk" \
+              "$agentOffHyprOk" "$agentOffGnomeOk" "$lockOnAgentOffOk"
+            touch "$out"
+          '';
           security-lock = pkgs.runCommand "omanixy-security-lock"
             {
               standaloneLockDisabledOk = if standaloneLockDisabledEval.success then "true" else "false";
@@ -1007,6 +1208,14 @@
             } ''
             ${pkgs.bash}/bin/bash ${./test/security-lock-shell-json.sh} \
               ${activationScript} ${lockEnabledActivationScript} ${storeConfig}
+            touch "$out"
+          '';
+          security-polkit-shell-json = pkgs.runCommand "omanixy-security-polkit-shell-json"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.diffutils pkgs.jq ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-polkit-shell-json.sh} \
+              ${activationScript} ${polkitEnabledActivationScript} ${storeConfig}
             touch "$out"
           '';
           security-lock-closure = pkgs.runCommand "omanixy-security-lock-closure"
@@ -1100,6 +1309,15 @@
               ${compatibilityRoot} ${runtime}/bin/quickshell
             touch "$out"
           '';
+          security-polkit-managed-plugin = pkgs.runCommand "omanixy-security-polkit-managed-plugin"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.findutils ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-polkit-managed-plugin.sh} \
+              ${polkitRuntime.passthru.omarchyCompatibilityRoot} ${polkitRuntime}/bin/quickshell \
+              ${compatibilityRoot} ${runtime}/bin/quickshell
+            touch "$out"
+          '';
           security-lock-core-only = pkgs.runCommand "omanixy-security-lock-core-only"
             {
               coreClosurePaths = "${coreRuntimeClosureInfo}/store-paths";
@@ -1112,6 +1330,104 @@
               ${coreLockRuntime.passthru.compatibilityBin} ${coreRuntime.passthru.compatibilityBin} \
               "$coreClosurePaths" "$coreLockClosurePaths" \
               "$coreDeclaredRuntimeInputs" "$coreLockDeclaredRuntimeInputs"
+            touch "$out"
+          '';
+          security-polkit-core-only = pkgs.runCommand "omanixy-security-polkit-core-only"
+            {
+              coreClosurePaths = "${coreRuntimeClosureInfo}/store-paths";
+              corePolkitClosurePaths = "${corePolkitRuntimeClosureInfo}/store-paths";
+              coreDeclaredRuntimeInputs = pkgs.writeText "omanixy-core-declared-runtime-inputs.json" coreRuntime.passthru.declaredRuntimeInputs;
+              corePolkitDeclaredRuntimeInputs = pkgs.writeText "omanixy-core-polkit-declared-runtime-inputs.json" corePolkitRuntime.passthru.declaredRuntimeInputs;
+              # The exact, named set of Omanixy-owned derivations expected to
+              # change store path when the compatibility root's contents
+              # change (here: the polkit plugin becoming reachable) - not a
+              # package-name pattern. omarchyCompatibilityRoot genuinely
+              # contains different files; ipc/compatAdapter/runtime/
+              # compatibilityBin/the final package all reference its store
+              # path in interpolated script text or their own build inputs,
+              # so they propagate a new hash without gaining any new
+              # external dependency of their own.
+              coreExpectedChanged = pkgs.writeText "omanixy-core-expected-changed" (nixpkgs.lib.concatMapStringsSep "\n" toString [
+                coreRuntime
+                coreRuntime.passthru.omarchyCompatibilityRoot
+                coreRuntime.passthru.compatibilityBin
+                coreRuntime.passthru.ipc
+                coreRuntime.passthru.compatAdapter
+                coreRuntime.passthru.runtime
+              ]);
+              corePolkitExpectedChanged = pkgs.writeText "omanixy-core-polkit-expected-changed" (nixpkgs.lib.concatMapStringsSep "\n" toString [
+                corePolkitRuntime
+                corePolkitRuntime.passthru.omarchyCompatibilityRoot
+                corePolkitRuntime.passthru.compatibilityBin
+                corePolkitRuntime.passthru.ipc
+                corePolkitRuntime.passthru.compatAdapter
+                corePolkitRuntime.passthru.runtime
+              ]);
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.findutils pkgs.diffutils pkgs.jq ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-polkit-core-only.sh} \
+              ${corePolkitRuntime.passthru.compatibilityBin} ${coreRuntime.passthru.compatibilityBin} \
+              "$coreClosurePaths" "$corePolkitClosurePaths" \
+              "$coreDeclaredRuntimeInputs" "$corePolkitDeclaredRuntimeInputs" \
+              "$coreExpectedChanged" "$corePolkitExpectedChanged"
+            touch "$out"
+          '';
+          security-polkit-closure = pkgs.runCommand "omanixy-security-polkit-closure"
+            {
+              polkitClosurePaths = "${polkitRuntimeClosureInfo}/store-paths";
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.findutils pkgs.diffutils ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-polkit-closure.sh} \
+              ${polkitRuntime} "$polkitClosurePaths" \
+              ${polkitRuntime.passthru.compatibilityBin} ${runtime.passthru.compatibilityBin} \
+              ${polkitRuntime.passthru.omarchyCompatibilityRoot}
+            touch "$out"
+          '';
+          security-polkit-model = pkgs.runCommand "omanixy-security-polkit-model"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.nodejs ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-polkit-model.sh} \
+              ${polkitRuntime.passthru.omarchyCompatibilityRoot}/shell/plugins/polkit/PolkitModel.js
+            touch "$out"
+          '';
+          security-polkit-executable-surface = pkgs.runCommand "omanixy-security-polkit-executable-surface"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.python3 ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-polkit-executable-surface.sh} \
+              ${./scripts/scan-polkit-executable-surface} \
+              ${polkitRuntime.passthru.omarchyCompatibilityRoot}/shell/plugins/polkit/PolkitAgent.qml \
+              ${pkgs.python3}/bin/python3 ${./scripts}
+            touch "$out"
+          '';
+          security-polkit-quickshell-contract = pkgs.runCommand "omanixy-security-polkit-quickshell-contract"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.gawk ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-polkit-quickshell-contract.sh} ${quickshell}
+            touch "$out"
+          '';
+          security-polkit-no-fingerprint-widening = pkgs.runCommand "omanixy-security-polkit-no-fingerprint-widening"
+            {
+              systemOnlyFprintdEnable = if polkitSystemNixosConfiguration.config.services.fprintd.enable then "true" else "false";
+              systemOnlyPolkit1FprintAuth = if polkitSystemNixosConfiguration.config.security.pam.services."polkit-1".fprintAuth then "true" else "false";
+              combinedFprintdEnable = if pamFingerprintPolkitSystemNixosConfiguration.config.services.fprintd.enable then "true" else "false";
+              fingerprintOnlyServiceFile = pamFingerprintServiceFile;
+              combinedServiceFile = pamFingerprintPolkitSystemServiceFile;
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.diffutils pkgs.gnugrep ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-polkit-no-fingerprint-widening.sh} \
+              ${./.} "$systemOnlyFprintdEnable" "$systemOnlyPolkit1FprintAuth" \
+              "$combinedFprintdEnable" "$fingerprintOnlyServiceFile" "$combinedServiceFile"
+            touch "$out"
+          '';
+          security-polkit-qml-behavior = pkgs.runCommand "omanixy-security-polkit-qml-behavior"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.python3 ];
+            } ''
+            PYTHON=${pkgs.python3}/bin/python3 ${pkgs.bash}/bin/bash ${./test/security-polkit-qml-behavior.sh} \
+              ${polkitRuntime.passthru.omarchyCompatibilityRoot} ${polkitRuntime}/bin/quickshell
             touch "$out"
           '';
           quattro-contract-audit = pkgs.runCommand "omanixy-quattro-contract-audit"

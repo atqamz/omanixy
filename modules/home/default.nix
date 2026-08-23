@@ -12,14 +12,19 @@ let
     if cfg.security.lock.enable && cfg.security.lock.fingerprint.enable && osConfig != null
     then osConfig.services.fprintd.package
     else null;
-  runtime = omanixyRuntimeFor cfg.features (
-    if cfg.security.lock.enable
-    then {
+  securitySelection =
+    (lib.optionalAttrs cfg.security.lock.enable {
       lock = true;
       fingerprint = cfg.security.lock.fingerprint.enable;
       fingerprintPackage = fingerprintPackage;
-    }
-    else null
+    })
+    // (lib.optionalAttrs cfg.security.polkit.agent.enable {
+      polkitAgent = true;
+    });
+  runtime = omanixyRuntimeFor cfg.features (
+    if securitySelection == { }
+    then null
+    else securitySelection
   );
   coreutils = "${pkgs.coreutils}/bin";
   baselineSource = builtins.fromJSON (builtins.readFile ../../upstream/shell-baseline.json);
@@ -165,6 +170,51 @@ in
         falls back to password-only.
       '';
     };
+
+    security.polkit.agent.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Select the native Quattro polkit authentication agent
+        (shell/plugins/polkit) as this session's polkit authentication agent.
+
+        This option is fully independent of
+        `programs.omanixy.security.lock.enable` and its fingerprint
+        sub-option: enabling one never implies or requires the other, and a
+        polkit-only runtime with the lock left disabled (or vice versa) is a
+        supported configuration.
+
+        Enabling this option on a standalone Home Manager installation
+        (without a paired NixOS configuration) always fails evaluation,
+        because there is no way to provision the NixOS
+        `security.polkit` system capability the agent registers against. On
+        an integrated NixOS + Home Manager installation, this option
+        additionally requires
+        `programs.omanixy.security.polkit.system.enable` to be `true` in the
+        NixOS configuration - the explicit system/session ownership
+        handshake, mirroring the lock capability's own
+        `security.pam.password` handshake.
+
+        Enabling this option asserts that no other Home Manager-managed
+        polkit agent this repository knows how to detect declaratively
+        (`services.hyprpolkitagent.enable`, `services.polkit-gnome.enable`)
+        is also enabled, since two session polkit agents intentionally
+        competing for the same registration is never correct. Omanixy does
+        not stop, disable, or otherwise mutate another agent on your behalf;
+        it only refuses to evaluate a configuration that declares two at
+        once. An agent this repository has no way to detect declaratively
+        (an unknown external agent already registered at runtime) is left
+        alone entirely: the pinned Quickshell `PolkitAgent` listener reports
+        a bounded, diagnostic registration failure rather than taking over or
+        retrying in a loop, and Omanixy never kills or disables an unknown
+        agent to make this option's agent win.
+
+        The Quattro agent presentation is authentication-method-neutral: it
+        is driven only by the pinned Quickshell `AuthFlow.isResponseRequired`
+        signal, never by parsing `/etc/pam.d/polkit-1` or laptop lid state,
+        so it never assumes or requires fingerprint hardware.
+      '';
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -267,6 +317,59 @@ in
           configuration that imports this Home Manager configuration, or
           leave programs.omanixy.security.lock.fingerprint.enable at its
           default (false).
+        '';
+      }
+      {
+        assertion = !cfg.security.polkit.agent.enable || osConfig != null;
+        message = ''
+          programs.omanixy.security.polkit.agent.enable is true, but this
+          Home Manager configuration is standalone (no NixOS osConfig is
+          available). The Quattro polkit agent registers against a
+          NixOS-provisioned security.polkit system capability
+          (programs.omanixy.security.polkit.system.enable), which a
+          standalone Home Manager installation has no way to provision.
+          Import this Home Manager configuration through the standard
+          NixOS Home Manager integration module, inside a NixOS
+          configuration that also enables
+          programs.omanixy.security.polkit.system.enable, or leave
+          programs.omanixy.security.polkit.agent.enable at its default
+          (false).
+        '';
+      }
+      {
+        assertion = !cfg.security.polkit.agent.enable || osConfig == null
+          || (osConfig.programs.omanixy.security.polkit.system.enable or false) == true;
+        message = ''
+          programs.omanixy.security.polkit.agent.enable is true, but the
+          paired NixOS configuration does not enable
+          programs.omanixy.security.polkit.system.enable. The Quattro polkit
+          agent registers against the NixOS-provisioned security.polkit
+          capability that only that NixOS option provisions; without it there
+          is nothing for the agent to register with. Enable
+          programs.omanixy.security.polkit.system.enable in the NixOS
+          configuration that imports this Home Manager configuration, or
+          leave programs.omanixy.security.polkit.agent.enable at its default
+          (false).
+        '';
+      }
+      {
+        assertion = !cfg.security.polkit.agent.enable
+          || !(config.services.hyprpolkitagent.enable or false);
+        message = ''
+          programs.omanixy.security.polkit.agent.enable is true while
+          services.hyprpolkitagent.enable is also true. Both are session
+          polkit authentication agents and must not intentionally compete.
+          Disable one; Omanixy will not stop or kill the other agent for you.
+        '';
+      }
+      {
+        assertion = !cfg.security.polkit.agent.enable
+          || !(config.services.polkit-gnome.enable or false);
+        message = ''
+          programs.omanixy.security.polkit.agent.enable is true while
+          services.polkit-gnome.enable is also true. Both are session polkit
+          authentication agents and must not intentionally compete. Disable
+          one; Omanixy will not stop or kill the other agent for you.
         '';
       }
     ];
