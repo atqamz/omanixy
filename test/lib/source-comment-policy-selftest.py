@@ -14,11 +14,12 @@ with open(policy_path, encoding="utf-8") as f:
 
 classify_language = ns["classify_language"]
 discover_source_files = ns["discover_source_files"]
+EXTENSION_LANGUAGE = ns["EXTENSION_LANGUAGE"]
+NON_SOURCE_SUFFIXES = ns["NON_SOURCE_SUFFIXES"]
 Violation = ns["Violation"]
 DIRECTIVE_GRAMMARS = ns["DIRECTIVE_GRAMMARS"]
 match_directive = ns["match_directive"]
 is_shebang_line = ns["is_shebang_line"]
-SHEBANG_PATTERN = ns["SHEBANG_PATTERN"]
 SHELLCHECK_DISABLE_PATTERN = ns["SHELLCHECK_DISABLE_PATTERN"]
 scan_python = ns["scan_python"]
 _docstring_owning_nodes = ns["_docstring_owning_nodes"]
@@ -37,6 +38,8 @@ ShellLexError = ns["ShellLexError"]
 _ShellLexer = ns["_ShellLexer"]
 scan_nix = ns["scan_nix"]
 NixLexError = ns["NixLexError"]
+scan_jsonc = ns["scan_jsonc"]
+JsoncLexError = ns["JsoncLexError"]
 BINDING_NAME_PATTERN = ns["BINDING_NAME_PATTERN"]
 CALL_HEAD_PATTERN = ns["CALL_HEAD_PATTERN"]
 WRITETEXT_NAME_PATTERN = ns["WRITETEXT_NAME_PATTERN"]
@@ -66,6 +69,15 @@ def _kinds(violations):
     return {v.kind for v in violations}
 
 
+def _scan_registered_python(relative_path, source):
+    with tempfile.TemporaryDirectory() as tmp_path_str:
+        root = Path(tmp_path_str)
+        path = root / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(source)
+        return scan_python(path, source, root=root)
+
+
 def test_classify_language_by_extension():
     assert classify_language(Path("x/y.py"), Path("x")) == "python"
     assert classify_language(Path("x/y.nix"), Path("x")) == "nix"
@@ -92,6 +104,32 @@ def test_discover_skips_git_directory():
         (tmp_path / "real.py").write_text("pass\n")
         found = discover_source_files(tmp_path)
         assert found == [tmp_path / "real.py"]
+
+
+def test_nested_result_directory_is_scanned():
+    with tempfile.TemporaryDirectory() as tmp_path_str:
+        tmp_path = Path(tmp_path_str)
+        nested = tmp_path / "packages" / "result"
+        nested.mkdir(parents=True)
+        (nested / "evil.py").write_text("# narrative\n")
+        assert main(["prog", str(tmp_path)]) == 1
+
+
+def test_maintained_source_symlink_fails_closed():
+    with tempfile.TemporaryDirectory() as tmp_path_str:
+        tmp_path = Path(tmp_path_str)
+        target = tmp_path / "target.py"
+        target.write_text("# narrative\n")
+        (tmp_path / "linked.py").symlink_to(target)
+        assert main(["prog", str(tmp_path)]) == 1
+
+
+def test_root_store_result_symlink_is_the_only_result_escape():
+    with tempfile.TemporaryDirectory() as tmp_path_str:
+        tmp_path = Path(tmp_path_str)
+        (tmp_path / "result").symlink_to("/nix/store/omanixy-result")
+        (tmp_path / "clean.py").write_text("x = 1\n")
+        assert main(["prog", str(tmp_path)]) == 0
 
 
 def test_classify_language_rejects_malformed_shebang():
@@ -126,6 +164,19 @@ def test_shebang_only_valid_at_line_one_col_zero():
     assert is_shebang_line("shell", 1, 0, "#!/usr/bin/env bash")
     assert not is_shebang_line("shell", 2, 0, "#!/usr/bin/env bash")
     assert not is_shebang_line("shell", 1, 4, "    #!/usr/bin/env bash")
+
+
+def test_arbitrary_shebang_prose_rejected():
+    assert _kinds(scan_python(Path("x.py"), "#! narrative prose\nx = 1\n")) == {"narrative-comment"}
+
+
+def test_wrong_language_shebang_rejected():
+    assert _kinds(scan_python(Path("x.py"), "#!/usr/bin/env bash\nx = 1\n")) == {"narrative-comment"}
+    assert _kinds(scan_shell(Path("x.sh"), "#!/usr/bin/env python3\nx=1\n")) == {"narrative-comment"}
+
+
+def test_shellcheck_unsupported_code_rejected():
+    assert _kinds(scan_shell(Path("x.sh"), "# shellcheck disable=SC9999\nx=1\n")) == {"narrative-comment"}
 
 
 def test_unsupported_extension_fails_closed():
@@ -390,9 +441,44 @@ def test_nix_executable_writeshellscript_comment_rejected():
     assert _kinds(scan_nix(Path("x.nix"), src)) == {"narrative-comment"}
 
 
+def test_nix_executable_writeshellscript_double_quoted_comment_rejected():
+    src = 'x = pkgs.writeShellScript "n" "# narrative\\necho hi";\n'
+    assert _kinds(scan_nix(Path("x.nix"), src)) == {"narrative-comment"}
+
+
+def test_nix_executable_writeshellscriptbin_comment_rejected():
+    src = 'x = pkgs.writeShellScriptBin "n" "# narrative\\necho hi";\n'
+    assert _kinds(scan_nix(Path("x.nix"), src)) == {"narrative-comment"}
+
+
 def test_nix_executable_runcommand_comment_rejected():
     src = 'x = pkgs.runCommand "n" { } \'\'\n# narrative\ntouch $out\n\'\';\n'
     assert _kinds(scan_nix(Path("x.nix"), src)) == {"narrative-comment"}
+
+
+def test_nix_executable_runcommandlocal_comment_rejected():
+    src = 'x = pkgs.runCommandLocal "n" { } \'\'\n# narrative\ntouch $out\n\'\';\n'
+    assert _kinds(scan_nix(Path("x.nix"), src)) == {"narrative-comment"}
+
+
+def test_nix_indirect_builder_variable_comment_rejected():
+    src = 'let script = \'\'\n# narrative\necho hi\n\'\'; in pkgs.writeShellScript "n" script\n'
+    assert _kinds(scan_nix(Path("x.nix"), src)) == {"narrative-comment"}
+
+
+def test_nix_two_hop_builder_alias_comment_rejected():
+    src = 'let script = \'\'\n# narrative\necho hi\n\'\'; alias = script; in pkgs.writeShellScript "n" alias\n'
+    assert _kinds(scan_nix(Path("x.nix"), src)) == {"narrative-comment"}
+
+
+def test_nix_dynamic_builder_body_fails_closed():
+    src = 'let script = if true then \'\'\necho hi\n\'\' else \'\'\necho bye\n\'\'; in pkgs.writeShellScript "n" script\n'
+    try:
+        scan_nix(Path("x.nix"), src)
+    except NixLexError:
+        pass
+    else:
+        raise AssertionError("expected NixLexError")
 
 
 def test_nix_install_phase_comment_rejected():
@@ -415,13 +501,48 @@ def test_nix_writetext_shell_suffix_recurses_and_rejects():
     assert _kinds(scan_nix(Path("x.nix"), src)) == {"narrative-comment"}
 
 
+def test_nix_writetext_nix_suffix_recurses_and_rejects():
+    src = 'x = pkgs.writeText "generated.nix" \'\'\n# narrative\nfoo = 1;\n\'\';\n'
+    assert _kinds(scan_nix(Path("x.nix"), src)) == {"narrative-comment"}
+
+
+def test_nix_writetext_yaml_suffix_recurses_and_rejects():
+    src = 'x = pkgs.writeText "generated.yaml" \'\'\n# narrative\nfoo: bar\n\'\';\n'
+    assert _kinds(scan_nix(Path("x.nix"), src)) == {"narrative-comment"}
+
+
+def test_nix_writetext_qml_suffix_recurses_and_rejects():
+    src = 'x = pkgs.writeText "generated.qml" \'\'\n// narrative\nItem {}\n\'\';\n'
+    assert _kinds(scan_nix(Path("x.nix"), src)) == {"narrative-comment"}
+
+
+def test_nix_writetext_python_suffix_recurses_and_rejects():
+    src = 'x = pkgs.writeText "generated.py" \'\'\n# narrative\nvalue = 1\n\'\';\n'
+    assert _kinds(scan_nix(Path("x.nix"), src)) == {"narrative-comment"}
+
+
+def test_nix_writetext_javascript_suffix_recurses_and_rejects():
+    src = 'x = pkgs.writeText "generated.js" \'\'\n// narrative\nconst value = 1\n\'\';\n'
+    assert _kinds(scan_nix(Path("x.nix"), src)) == {"narrative-comment"}
+
+
+def test_nix_writetext_toml_suffix_recurses_and_rejects():
+    src = 'x = pkgs.writeText "generated.toml" \'\'\n# narrative\nvalue = 1\n\'\';\n'
+    assert _kinds(scan_nix(Path("x.nix"), src)) == {"narrative-comment"}
+
+
+def test_nix_writetext_jsonc_suffix_recurses_and_rejects():
+    src = 'x = pkgs.writeText "generated.jsonc" \'\'\n{"key": 1 // narrative\n}\n\'\';\n'
+    assert _kinds(scan_nix(Path("x.nix"), src)) == {"narrative-comment"}
+
+
 def test_nix_writetext_non_source_suffix_is_data():
     src = 'x = pkgs.writeText "unit.service" \'\'\n# not a comment, systemd data\n\'\';\n'
     assert scan_nix(Path("x.nix"), src) == []
 
 
-def test_nix_plain_binding_indented_string_is_data():
-    src = 'x = \'\'\n# not a comment, ordinary data string\n\'\';\n'
+def test_nix_plain_double_quoted_data_string_is_data():
+    src = 'x = "ordinary # data";\n'
     assert scan_nix(Path("x.nix"), src) == []
 
 
@@ -435,9 +556,14 @@ def test_nix_test_script_binding_classifies_as_python():
     assert _kinds(scan_nix(Path("x.nix"), src)) == {"narrative-comment"}
 
 
-def test_nix_unregistered_binding_name_treated_as_data():
+def test_nix_unregistered_code_shaped_binding_fails_closed():
     src = 'someWeirdNewBuilderScriptBody = \'\'\n#!/bin/sh\necho hi\n\'\';\n'
-    assert scan_nix(Path("x.nix"), src) == []
+    try:
+        scan_nix(Path("x.nix"), src)
+    except NixLexError:
+        pass
+    else:
+        raise AssertionError("expected NixLexError")
 
 
 def test_nix_call_head_lookback_prefers_nearest_enclosing():
@@ -635,6 +761,117 @@ def test_python_embedded_qml_assignment_recognized_and_not_fail_closed():
         assert scan_python(script_path, src, root=tmp_path) == []
 
 
+def test_python_pinned_old_qml_comment_is_data():
+    src = (
+        'def patch(text):\n'
+        '    pinned = block(["  // upstream comment", "  Item {}"])\n'
+        '    generated = block(["  Item {}"])\n'
+        '    return replace_once(text, pinned, generated, "fixture")\n'
+    )
+    assert _scan_registered_python("scripts/patch-lock-service", src) == []
+
+
+def test_python_generated_new_qml_comment_is_rejected():
+    src = (
+        'def patch(text):\n'
+        '    pinned = block(["  // upstream comment", "  Item {}"])\n'
+        '    generated = block(["  // narrative", "  Item {}"])\n'
+        '    return replace_once(text, pinned, generated, "fixture")\n'
+    )
+    assert _kinds(_scan_registered_python("scripts/patch-lock-service", src)) == {"narrative-comment"}
+
+
+def test_python_generated_new_block_comment_is_rejected():
+    src = (
+        'def patch(text):\n'
+        '    pinned = block(["Item {}"])\n'
+        '    generated = block(["  /* narrative */", "  Item {}"])\n'
+        '    return replace_once(text, pinned, generated, "fixture")\n'
+    )
+    assert _kinds(_scan_registered_python("scripts/patch-lock-service", src)) == {"narrative-comment"}
+
+
+def test_python_patcher_provenance_ignores_old_and_new_names():
+    src = (
+        'def patch(text):\n'
+        '    left = block(["  // upstream comment", "  Item {}"])\n'
+        '    right = block(["  // narrative", "  Item {}"])\n'
+        '    return replace_once(text, left, right, "fixture")\n'
+    )
+    assert _kinds(_scan_registered_python("scripts/patch-lock-service", src)) == {"narrative-comment"}
+
+
+def test_python_patcher_provenance_follows_call_position_when_operands_swap():
+    src = (
+        'def patch(text):\n'
+        '    generated = block(["  Item {}"])\n'
+        '    pinned = block(["  // upstream comment", "  Item {}"])\n'
+        '    return replace_once(text, generated, pinned, "fixture")\n'
+    )
+    assert _kinds(_scan_registered_python("scripts/patch-lock-service", src)) == {"narrative-comment"}
+
+
+def test_python_unresolved_generated_operand_fails_closed():
+    src = (
+        'def patch(text):\n'
+        '    pinned = block(["Item {}"])\n'
+        '    generated = make_source()\n'
+        '    return replace_once(text, pinned, generated, "fixture")\n'
+    )
+    try:
+        _scan_registered_python("scripts/patch-lock-service", src)
+    except PythonEmbeddedStringError:
+        pass
+    else:
+        raise AssertionError("expected PythonEmbeddedStringError")
+
+
+def test_python_dynamic_formatted_generated_operand_fails_closed():
+    src = (
+        'def patch(text):\n'
+        '    pinned = "Item {}"\n'
+        '    generated = f"Item {make_source()}"\n'
+        '    return replace_once(text, pinned, generated, "fixture")\n'
+    )
+    try:
+        _scan_registered_python("scripts/patch-lock-service", src)
+    except PythonEmbeddedStringError:
+        pass
+    else:
+        raise AssertionError("expected PythonEmbeddedStringError")
+
+
+def test_python_empty_generated_operand_is_allowed():
+    src = (
+        'def patch(text):\n'
+        '    pinned = block(["  // upstream comment", "  Item {}"])\n'
+        '    return replace_once(text, pinned, "", "fixture")\n'
+    )
+    assert _scan_registered_python("scripts/patch-lock-service", src) == []
+
+
+def test_python_unrelated_prose_string_is_data():
+    src = 'message = "ordinary // prose"\n'
+    assert _scan_registered_python("scripts/patch-lock-service", src) == []
+
+
+def test_python_generate_source_patch_tuple_scans_generated_side():
+    src = (
+        'HEADLESS_SOURCE_PATCHES = {\n'
+        '    "fixture": ("// upstream comment", "// narrative"),\n'
+        '}\n'
+    )
+    assert _kinds(_scan_registered_python("scripts/generate-postpatch-runtime-surface", src)) == {"narrative-comment"}
+
+
+def test_python_generate_written_shell_source_scans_comments():
+    src = (
+        'def build(path):\n'
+        '    path.write_text("#!/bin/sh\\n# narrative\\necho hi\\n")\n'
+    )
+    assert _kinds(_scan_registered_python("scripts/generate-postpatch-runtime-surface", src)) == {"narrative-comment"}
+
+
 def test_python_unregistered_code_shaped_assignment_fails_closed():
     with tempfile.TemporaryDirectory() as tmp_path_str:
         tmp_path = Path(tmp_path_str)
@@ -691,21 +928,21 @@ def test_python_is_triple_quoted_uses_correct_line_not_absolute_offset():
 
 def test_python_unregistered_source_files_not_scanned_even_when_code_shaped():
     real_unrelated_files = {
-        "scripts/patch-menu-font-provider": (
+        "scripts/unregistered-helper-font-provider": (
             'FONT_PROVIDER = \'\'\'    "fonts": {\n'
             '      script: "current=$(omarchy-font-current)",\n'
             '      actionFor: function(value) { return value }\n'
             '    },\n'
             "'''\n"
         ),
-        "scripts/patch-menu-power-provider": (
+        "scripts/unregistered-helper-power-provider": (
             'POWER_PROVIDER = \'\'\'    "power-profiles": {\n'
             '      script: "current=$(powerprofilesctl get)",\n'
             '      actionFor: function(value) { return value }\n'
             '    }\n'
             "'''\n"
         ),
-        "scripts/patch-transparent-foreground-process": (
+        "scripts/unregistered-helper-transparent-process": (
             "import sys\n"
             "\n"
             "EXPECTED = '''  Process {\n"
@@ -841,6 +1078,35 @@ def test_yaml_apostrophe_in_prose_not_treated_as_quote_open():
 def test_yaml_apostrophe_in_prose_does_not_hide_real_comment():
     src = "key: the user's setting\n# real comment\nother: 1\n"
     assert _kinds(scan_yaml(Path("x.yaml"), src)) == {"narrative-comment"}
+
+
+def test_jsonc_real_line_comment_rejected():
+    src = '{"key": 1 // narrative\n}\n'
+    assert _kinds(scan_jsonc(Path("x.jsonc"), src)) == {"narrative-comment"}
+
+
+def test_jsonc_real_block_comment_rejected():
+    src = '{"key": /* narrative */ 1}\n'
+    assert _kinds(scan_jsonc(Path("x.jsonc"), src)) == {"narrative-comment"}
+
+
+def test_jsonc_comment_markers_inside_string_are_data():
+    src = '{"key": "// not a comment /* either */"}\n'
+    assert scan_jsonc(Path("x.jsonc"), src) == []
+
+
+def test_jsonc_unterminated_string_fails_closed():
+    try:
+        scan_jsonc(Path("x.jsonc"), '{"key": "unterminated}\n')
+    except JsoncLexError:
+        pass
+    else:
+        raise AssertionError("expected JsoncLexError")
+
+
+def test_embedded_source_languages_have_scanners():
+    assert set(EXTENSION_LANGUAGE.values()) == set(EMBEDDED_LANGUAGE_SCANNERS)
+    assert set(EXTENSION_LANGUAGE.values()) == set(SCANNERS)
 
 
 def test_toml_real_comment_rejected():

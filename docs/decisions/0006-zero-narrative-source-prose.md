@@ -37,6 +37,12 @@ Comment-like characters inside an ordinary string or data literal are not
 source comments and are not touched.
 An unsupported or unrecognized maintained-source language fails the checker
 closed with an actionable error rather than being silently skipped.
+Python patchers distinguish pinned match input from generated replacement
+source by the operands' call positions and recursively resolve only bounded
+local string construction.
+Nix executable-source builders use the same fail-closed provenance model for
+direct strings, finite local aliases, known source-producing phases, and
+maintained `writeText` suffixes.
 
 ## Ownership
 
@@ -47,6 +53,11 @@ JS/QML, YAML, and TOML, wired into `nix flake check` as
 Nix strings that embed executable code are scanned recursively as their own
 source file, closing the embedded-code escape hatch that a string-only scan
 would leave open.
+Indirect executable builder bodies are followed only through bounded,
+acyclic lexical provenance; dynamic or ambiguous bodies fail closed.
+Machine directives are exact language-aware shebang forms and a fixed
+allowlist of the ShellCheck codes present in the tree, with no generic
+shebang or suppression exemption.
 A one-time tool, `scripts/check-comment-sweep-equivalence`, and a refresh of
 the compatibility ledger's `adapterHash` anchor the initial repository sweep
 as behavior-preserving; neither becomes a second permanent checker.

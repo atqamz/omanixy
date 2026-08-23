@@ -69,15 +69,9 @@ def apply_qml(text: str) -> str:
         "  Process { id: focusAppProc; running: false }",
     ])
     invoke_default_and_focus_new = block([
-        "  // No custom omarchy-exec hint execution and no compositor-focus",
-        "  // fallback: a click with no live \"default\" FDO action simply",
-        "  // dismisses the toast. This is the standard sender-owned D-Bus action",
-        "  // contract, never shell command execution.",
         "  function invokePopupDefault(index) {",
         "    if (index < 0 || index >= popupModel.count) return",
         "    var entry = popupModel.get(index)",
-        "    // Restored rows have no live actions, and looking up liveRefs by their",
-        "    // old-generation id could fire an unrelated fresh notification's action.",
         "    var ref = entry && !isRestoredRow(entry) ? liveRefs[entry.originalId] : null",
         "    try {",
         "      if (ref && ref.actions) {",
@@ -90,7 +84,6 @@ def apply_qml(text: str) -> str:
         "        }",
         "      }",
         "    } catch (e) {",
-        "      // Notification already torn down by the server — nothing left to invoke.",
         '      console.warn("invoke default failed:", e)',
         "    }",
         "    dismissPopup(index)",
@@ -121,7 +114,6 @@ def apply_qml(text: str) -> str:
         "  function enqueuePopupFileJob(command, done) {",
     ])
     queue_done_property_new = block([
-        "  // Done callback of the job popupFileProc is currently running.",
         "  property var runningPopupFileJobDone: null",
         "  property bool popupFileJobAwaitingResult: false",
         "",
@@ -232,9 +224,6 @@ def apply_qml(text: str) -> str:
     ])
     persist_popup_new = block([
         "  function persistPopupFile(snapshot) {",
-        "    // The JSON and every image source travel as argv elements, not through",
-        "    // shell interpolation - omanixy-notification-state owns HOME/stem",
-        "    // validation, the images directory, and bounded copying internally.",
         "    var persistable = NotificationLogic.persistablePopup(snapshot, imagesDir)",
         "    var command = [\"omanixy-notification-state\", \"persist-popup\", NotificationLogic.imageStem(snapshot),",
         "      NotificationLogic.serializePopup(persistable.entry, NotificationUrgency.Normal)]",
@@ -258,8 +247,6 @@ def apply_qml(text: str) -> str:
     delete_popup_new = block([
         "  function deletePopupFileFor(row) {",
         "    if (!row) return",
-        "    // History replays and the \"no recent notifications\" placeholder never",
-        "    // had a file - delete-popup on a nonexistent stem is a harmless no-op.",
         '    var command = ["omanixy-notification-state", "delete-popup", NotificationLogic.imageStem(row)]',
         "    enqueuePopupFileJob(command)",
         "  }",
@@ -294,9 +281,6 @@ def apply_qml(text: str) -> str:
     archive_popup_new = block([
         "  function archivePopupFileFor(row) {",
         "    if (!row) return",
-        "    // A history replay or the empty-history placeholder has no file to move;",
-        "    // archive-popup on a nonexistent stem leaves the history untouched.",
-        "    // Image copies stay put - live and archived entries share imagesDir.",
         '    var command = ["omanixy-notification-state", "archive-popup", NotificationLogic.imageStem(row)]',
         "    enqueuePopupFileJob(command)",
         "  }",
@@ -408,8 +392,6 @@ def apply_qml(text: str) -> str:
         "  Process {",
         "    id: readHistoryProc",
         "    running: false",
-        "    // Let the file queue go again, whatever the read did — a failed or empty",
-        "    // read must not leave archives and clears parked behind it forever.",
         "    onExited: {",
         "      service.readHistoryAwaitingResult = false",
         "      service.runNextPopupFileJob()",
@@ -489,9 +471,6 @@ def apply_qml(text: str) -> str:
         "      restorePopupsProc.running = true",
     ])
     on_completed_new = block([
-        "      // Re-show popups that were on screen when the previous shell died.",
-        "      // omanixy-notification-state tolerates a missing/empty state directory",
-        "      // (first run) and always returns complete, newline-terminated entries.",
         '      restorePopupsProc.command = ["omanixy-notification-state", "read-popups"]',
         "      service.restorePopupsAwaitingResult = true",
         "      restorePopupsProc.running = true",

@@ -75,9 +75,6 @@ CANONICAL_BLOCKS = {
 _PRODUCER_SOURCE = {
     "persistPopupFile": block([
         "  function persistPopupFile(snapshot) {",
-        "    // The JSON and every image source travel as argv elements, not through",
-        "    // shell interpolation - omanixy-notification-state owns HOME/stem",
-        "    // validation, the images directory, and bounded copying internally.",
         "    var persistable = NotificationLogic.persistablePopup(snapshot, imagesDir)",
         '    var command = ["omanixy-notification-state", "persist-popup", NotificationLogic.imageStem(snapshot),',
         "      NotificationLogic.serializePopup(persistable.entry, NotificationUrgency.Normal)]",
@@ -89,8 +86,6 @@ _PRODUCER_SOURCE = {
     "deletePopupFileFor": block([
         "  function deletePopupFileFor(row) {",
         "    if (!row) return",
-        '    // History replays and the "no recent notifications" placeholder never',
-        "    // had a file - delete-popup on a nonexistent stem is a harmless no-op.",
         '    var command = ["omanixy-notification-state", "delete-popup", NotificationLogic.imageStem(row)]',
         "    enqueuePopupFileJob(command)",
         "  }",
@@ -98,9 +93,6 @@ _PRODUCER_SOURCE = {
     "archivePopupFileFor": block([
         "  function archivePopupFileFor(row) {",
         "    if (!row) return",
-        "    // A history replay or the empty-history placeholder has no file to move;",
-        "    // archive-popup on a nonexistent stem leaves the history untouched.",
-        "    // Image copies stay put - live and archived entries share imagesDir.",
         '    var command = ["omanixy-notification-state", "archive-popup", NotificationLogic.imageStem(row)]',
         "    enqueuePopupFileJob(command)",
         "  }",

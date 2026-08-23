@@ -37,9 +37,6 @@ def apply_qml(text: str) -> str:
     ])
     dialog_mode_new = block([
         "  readonly property bool dialogVisible: polkitAgent.isActive || closing",
-        "  // Generic waiting presentation while PAM has not yet asked for a response.",
-        "  // The backend method is not assumed here (fingerprint, smartcard, another",
-        "  // PAM module, or a transient noninteractive phase all look the same).",
         "  readonly property bool waitingForAuthentication: dialogVisible && !responseRequired && !submitted && !errorFlash",
     ])
     text = replace_once(text, dialog_mode_old, dialog_mode_new, "dialog/waiting mode property")
@@ -50,8 +47,6 @@ def apply_qml(text: str) -> str:
         "  readonly property int cardWidth: fingerprintMode ? cardHeight : Math.min(Style.space(312), Math.max(Style.space(260), panel.width - Style.gapsOut * 2))",
     ])
     card_width_new = block([
-        "  // Password mode is a wide field; the waiting presentation collapses to a",
-        "  // square that just frames the centered authentication icon.",
         "  readonly property int cardWidth: waitingForAuthentication ? cardHeight : Math.min(Style.space(312), Math.max(Style.space(260), panel.width - Style.gapsOut * 2))",
     ])
     text = replace_once(text, card_width_old, card_width_new, "card width property")
@@ -91,9 +86,6 @@ def apply_qml(text: str) -> str:
     refocus_new = block([
         "  function refocus() {",
         "    if (!dialogVisible) return",
-        "    // While waiting for authentication there is no field to type into — park",
-        "    // focus on the key catcher so Escape still cancels; otherwise focus the",
-        "    // password field.",
         "    if (waitingForAuthentication) keyCatcher.forceActiveFocus()",
         "    else passwordInput.forceActiveFocus()",
         "  }",
@@ -134,10 +126,6 @@ def apply_qml(text: str) -> str:
         "      }",
     ])
     optical_glyph_new = block([
-        "      // The waiting presentation shows just a generic authentication icon,",
-        "      // centered and alone — no field, no prompt text. The backend method is",
-        "      // not assumed (fingerprint, smartcard, another PAM module, or a",
-        "      // transient noninteractive phase all look the same here).",
         "      OpticalGlyph {",
         "        anchors.centerIn: parent",
         "        width: Math.round(root.fieldHeight * 0.7)",

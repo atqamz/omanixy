@@ -21,6 +21,7 @@ _nix_parse = ns["_nix_parse"]
 compare_shell = ns["compare_shell"]
 compare_js = ns["compare_js"]
 compare_yaml = ns["compare_yaml"]
+compare_jsonc = ns["compare_jsonc"]
 compare_toml = ns["compare_toml"]
 compare_tree = ns["compare_tree"]
 ShellLexError = ns["_check_source_comments"].ShellLexError
@@ -293,6 +294,28 @@ def test_yaml_comment_only_removal_is_equivalent():
 
 def test_yaml_value_mutation_rejected():
     assert not compare_yaml(Path("x.yaml"), "support: experimental\n", "support: supported\n")
+
+
+def test_yaml_comment_to_quoted_data_is_not_equivalent():
+    before = "note: issue #3 runtime\n"
+    after = 'note: "issue #3 runtime"\n'
+    assert not compare_yaml(Path("x.yaml"), before, after)
+
+
+def test_nix_embedded_generated_code_mutation_rejected():
+    before = '{ buildPhase = \'\'\necho one\n\'\'\n; }\n'
+    after = '{ buildPhase = \'\'\necho two\n\'\'\n; }\n'
+    assert not compare_nix(Path("x.nix"), before, after)
+
+
+def test_jsonc_comment_only_removal_is_equivalent():
+    before = '{"key": 1 // note\n}\n'
+    after = '{"key": 1\n}\n'
+    assert compare_jsonc(Path("x.jsonc"), before, after)
+
+
+def test_jsonc_value_mutation_rejected():
+    assert not compare_jsonc(Path("x.jsonc"), '{"key": 1}\n', '{"key": 2}\n')
 
 
 def test_yaml_malformed_input_propagates_yaml_error():

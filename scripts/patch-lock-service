@@ -175,9 +175,7 @@ def apply_fingerprint_disabled(text: str) -> str:
         "      // fingerprint PAM stays armed for the whole lock, so gating on",
         "      // `authenticating` here would keep the panel lit until unlock.",
     ])
-    blank_comment_new = block([
-        "      // Only a password check in flight should hold the display up.",
-    ])
+    blank_comment_new = ""
     text = replace_once(text, blank_comment_old, blank_comment_new, "stale fingerprint blank-timer comment")
 
     return text
@@ -368,10 +366,6 @@ def apply_fingerprint_enabled(text: str) -> str:
         "",
         "    if (!lockRequested) return",
         "    if (result === PamResult.Success) {",
-        "      // fingerprintConfigured reflects capability+readiness as of right",
-        "      // now, not as of when this PAM conversation started - a success",
-        "      // callback arriving after capability/readiness was revoked",
-        "      // mid-conversation must fail closed rather than unlock.",
         "      if (FingerprintPolicy.shouldFinishUnlockOnSuccess(fingerprintConfigured)) finishUnlock()",
         "    } else if (FingerprintPolicy.shouldRetryAfterFailure({",
         "      fingerprintConfigured: fingerprintConfigured,",
@@ -420,12 +414,6 @@ def apply_fingerprint_enabled(text: str) -> str:
         "    id: fingerprintReadyProbe",
         '    command: ["omarchy-lock-fingerprint-ready"]',
         "    onExited: function(exitCode) {",
-        "      // omarchy-lock-fingerprint-ready's ABI mirrors",
-        "      // omarchy-hyprland-session-locked's: 0/1 are resolved answers, 2 is",
-        '      // "cannot determine". An indeterminate result fails closed too -',
-        "      // it never leaves a prior fingerprintReady = true standing, since",
-        "      // that would let a stale readiness answer survive whatever made",
-        "      // this probe indeterminate.",
         "      root.fingerprintReady = FingerprintPolicy.nextReadyAfterProbe(exitCode)",
         "      if (!root.fingerprintReady && fingerprintPam.active) fingerprintPam.abort()",
         "      if (root.lockRequested) root.startFingerprint()",
@@ -457,9 +445,6 @@ def apply_fingerprint_enabled(text: str) -> str:
         "",
         "  onFingerprintPamConfiguredChanged: {",
         "    if (!fingerprintPamConfigured) {",
-        "      // Capability revocation must never unlock, crash, or restart",
-        "      // Quickshell, and must always leave the password path usable -",
-        "      // it only tears down the fingerprint side.",
         "      fingerprintReady = FingerprintPolicy.nextReadyAfterCapabilityRevoked()",
         "      fingerprintRetryTimer.stop()",
         "      fingerprintAuthenticating = false",
@@ -518,12 +503,7 @@ def apply_fingerprint_enabled(text: str) -> str:
         "      // fingerprint PAM stays armed for the whole lock, so gating on",
         "      // `authenticating` here would keep the panel lit until unlock.",
     ])
-    blank_comment_new = block([
-        "      // Only a password check in flight should hold the display up. The",
-        "      // fingerprint PAM is bounded and gets aborted on password submission",
-        "      // or exhaustion, so gating on `authenticating` here would keep the",
-        "      // panel lit past those points.",
-    ])
+    blank_comment_new = ""
     text = replace_once(text, blank_comment_old, blank_comment_new, "stale fingerprint blank-timer comment")
 
     return text

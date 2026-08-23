@@ -869,8 +869,6 @@ read_history_proc_old = (
     "  Process {\n"
     "    id: readHistoryProc\n"
     "    running: false\n"
-    "    // Let the file queue go again, whatever the read did — a failed or empty\n"
-    "    // read must not leave archives and clears parked behind it forever.\n"
     "    onExited: {\n"
     "      service.readHistoryAwaitingResult = false\n"
     "      service.runNextPopupFileJob()\n"

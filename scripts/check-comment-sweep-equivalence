@@ -77,6 +77,7 @@ _check_source_comments = _load_check_source_comments()
 _ShellLexer = _check_source_comments._ShellLexer
 _scan_nix = _check_source_comments.scan_nix
 _scan_js_region = _check_source_comments._scan_js_region
+_scan_jsonc = _check_source_comments.scan_jsonc
 
 
 def _line_starts(text):
@@ -190,6 +191,30 @@ def compare_yaml(path, before_text, after_text):
     return yaml.safe_load(before_text) == yaml.safe_load(after_text)
 
 
+def _jsonc_comment_spans(path, text):
+    starts = _line_starts(text)
+    spans = []
+    for violation in _scan_jsonc(path, text):
+        if violation.kind != "narrative-comment":
+            continue
+        start = starts[violation.line - 1] + violation.col
+        if not text.startswith(violation.text, start):
+            raise ValueError(f"{path}: cannot locate JSONC comment at line {violation.line}")
+        spans.append((start, start + len(violation.text)))
+    return spans
+
+
+def _jsonc_data(path, text):
+    without_comments = _strip_spans_and_normalize_whitespace(
+        text, _jsonc_comment_spans(path, text)
+    )
+    return json.loads(without_comments)
+
+
+def compare_jsonc(path, before_text, after_text):
+    return _jsonc_data(path, before_text) == _jsonc_data(path, after_text)
+
+
 def compare_toml(path, before_text, after_text):
     return tomllib.loads(before_text) == tomllib.loads(after_text)
 
@@ -201,11 +226,73 @@ COMPARATORS = {
     "js": compare_js,
     "qml": compare_js,
     "yaml": compare_yaml,
+    "jsonc": compare_jsonc,
     "toml": compare_toml,
 }
 
 
-def compare_tree(before_root, after_root):
+STRUCTURED_DATA_CORRECTIONS = {
+    "upstream/porting-matrix.yaml": {
+        "path": ("items", 12, "notes", 1),
+        "before": "No third-party endpoint, token, background worker, or fabricated sample is retained in the issue",
+        "after": "No third-party endpoint, token, background worker, or fabricated sample is retained in the issue #3 runtime.",
+    },
+}
+SWEEP_POLICY_TOOL_ADDITIONS = {
+    "scripts/check-comment-sweep-equivalence",
+    "test/lib/comment-sweep-equivalence-selftest.py",
+}
+SWEEP_POLICY_TOOL_CHANGES = {
+    "flake.nix",
+    "scripts/check-source-comments",
+    "test/lib/source-comment-policy-selftest.py",
+}
+
+
+def _value_at_path(value, path):
+    for part in path:
+        value = value[part]
+    return value
+
+
+def _structured_data_correction(relative_path, before_text, after_text):
+    correction = STRUCTURED_DATA_CORRECTIONS.get(str(relative_path))
+    if correction is None:
+        return None
+    before = yaml.safe_load(before_text)
+    after = yaml.safe_load(after_text)
+    path = correction["path"]
+    if _value_at_path(before, path) != correction["before"]:
+        return None
+    if _value_at_path(after, path) != correction["after"]:
+        return None
+    before_without_value = yaml.safe_load(before_text)
+    after_without_value = yaml.safe_load(after_text)
+    before_cursor = before_without_value
+    after_cursor = after_without_value
+    for part in path[:-1]:
+        before_cursor = before_cursor[part]
+        after_cursor = after_cursor[part]
+    before_cursor[path[-1]] = None
+    after_cursor[path[-1]] = None
+    if before_without_value != after_without_value:
+        return None
+    return {
+        "path": str(relative_path),
+        "yamlPath": [*path],
+        "beforeParsedValue": correction["before"],
+        "afterParsedValue": correction["after"],
+        "classification": "intentional-structured-data-correction",
+    }
+
+
+def compare_tree(
+    before_root,
+    after_root,
+    allow_structured_data_corrections=False,
+    allow_sweep_policy_tool_additions=False,
+    allow_sweep_policy_tool_changes=False,
+):
     before_root = Path(before_root).resolve()
     after_root = Path(after_root).resolve()
     source_trees = []
@@ -222,7 +309,20 @@ def compare_tree(before_root, after_root):
     if set(before_sources) != set(after_sources):
         missing = sorted(set(before_sources) - set(after_sources))
         added = sorted(set(after_sources) - set(before_sources))
-        raise ValueError(f"source tree changed: missing={missing}, added={added}")
+        allowed_additions = {
+            Path(path)
+            for path in SWEEP_POLICY_TOOL_ADDITIONS
+        } if allow_sweep_policy_tool_additions else set()
+        unexpected_additions = sorted(set(added) - allowed_additions)
+        if missing or unexpected_additions:
+            raise ValueError(
+                f"source tree changed: missing={missing}, added={added}, "
+                f"unexpected additions={unexpected_additions}"
+            )
+    allowed_changes = {
+        Path(path)
+        for path in SWEEP_POLICY_TOOL_CHANGES
+    } if allow_sweep_policy_tool_changes else set()
     entries = []
     for relative_path in sorted(before_sources):
         before_path, before_language = before_sources[relative_path]
@@ -234,9 +334,23 @@ def compare_tree(before_root, after_root):
             before_path.read_text(encoding="utf-8", errors="surrogateescape"),
             after_path.read_text(encoding="utf-8", errors="surrogateescape"),
         )
-        entries.append({"path": str(relative_path), "language": before_language, "equivalent": equivalent})
+        entry = {"path": str(relative_path), "language": before_language, "equivalent": equivalent}
         if not equivalent:
-            raise ValueError(f"executable semantics changed: {relative_path}")
+            correction = None
+            if allow_structured_data_corrections and before_language == "yaml":
+                correction = _structured_data_correction(
+                    relative_path,
+                    before_path.read_text(encoding="utf-8", errors="surrogateescape"),
+                    after_path.read_text(encoding="utf-8", errors="surrogateescape"),
+                )
+            if correction is None:
+                if allow_sweep_policy_tool_changes and relative_path in allowed_changes:
+                    entry["policyToolChange"] = True
+                else:
+                    raise ValueError(f"executable semantics changed: {relative_path}")
+            else:
+                entry["structuredDataCorrection"] = correction
+        entries.append(entry)
     return entries
 
 
@@ -245,16 +359,54 @@ def main(argv=None):
     parser.add_argument("before_root", type=Path)
     parser.add_argument("after_root", type=Path)
     parser.add_argument("--report", type=Path, required=True)
+    parser.add_argument("--allow-structured-data-corrections", action="store_true")
+    parser.add_argument("--allow-sweep-policy-tool-additions", action="store_true")
+    parser.add_argument("--allow-sweep-policy-tool-changes", action="store_true")
     args = parser.parse_args(argv)
-    entries = compare_tree(args.before_root, args.after_root)
+    entries = compare_tree(
+        args.before_root,
+        args.after_root,
+        allow_structured_data_corrections=args.allow_structured_data_corrections,
+        allow_sweep_policy_tool_additions=args.allow_sweep_policy_tool_additions,
+        allow_sweep_policy_tool_changes=args.allow_sweep_policy_tool_changes,
+    )
+    corrections = [entry["structuredDataCorrection"] for entry in entries if "structuredDataCorrection" in entry]
+    policy_tool_changes = [entry["path"] for entry in entries if entry.get("policyToolChange")]
+    before_paths = {
+        path.relative_to(Path(args.before_root).resolve())
+        for path in _check_source_comments.discover_source_files(args.before_root)
+        if _check_source_comments.classify_language(path, Path(args.before_root).resolve()) is not None
+    }
+    after_paths = {
+        path.relative_to(Path(args.after_root).resolve())
+        for path in _check_source_comments.discover_source_files(args.after_root)
+        if _check_source_comments.classify_language(path, Path(args.after_root).resolve()) is not None
+    }
+    policy_tool_additions = sorted(str(path) for path in after_paths - before_paths)
     report = {
         "before": str(args.before_root.resolve()),
         "after": str(args.after_root.resolve()),
         "files": entries,
-        "equivalent": True,
+        "equivalentFiles": sum(entry["equivalent"] for entry in entries),
+        "structuredDataCorrections": corrections,
+        "policyToolAdditions": policy_tool_additions,
+        "policyToolChanges": policy_tool_changes,
+        "cleanupOwnedFiles": len(entries) - len(policy_tool_changes),
+        "cleanupOwnedEquivalentFiles": sum(
+            entry["equivalent"]
+            for entry in entries
+            if not entry.get("policyToolChange")
+        ),
+        "equivalent": not corrections and all(entry["equivalent"] for entry in entries),
     }
     args.report.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
-    print(f"comment-sweep-equivalence: {len(entries)} source files equivalent")
+    print(
+        "comment-sweep-equivalence: "
+        f"{report['cleanupOwnedEquivalentFiles']} cleanup-owned source files equivalent; "
+        f"{len(corrections)} explicit structured-data corrections; "
+        f"{len(policy_tool_changes)} policy-tool changes; "
+        f"{len(policy_tool_additions)} policy-tool additions"
+    )
 
 
 if __name__ == "__main__":
