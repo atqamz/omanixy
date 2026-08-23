@@ -33,10 +33,11 @@ jobs:
       - uses: DeterminateSystems/nix-installer-action@v22
       - name: Configure swap
         run: |
-          sudo fallocate -l 4G /swapfile
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
+          swap_path="$RUNNER_TEMP/omanixy.swap"
+          sudo fallocate -l 4G "$swap_path"
+          sudo chmod 600 "$swap_path"
+          sudo mkswap "$swap_path"
+          sudo swapon "$swap_path"
       - name: Format
         run: |
           nix fmt
