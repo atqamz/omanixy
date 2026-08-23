@@ -112,12 +112,8 @@ before committing.
 
 ## Release rules
 
-- Release semantics follow `docs/release.md`.
-- The final squash title is the release-significant Conventional Commit.
-- Do not manually edit version-managed files outside bootstrap or a Release PR.
-- Do not manually create release tags or GitHub Releases.
-- Breaking public changes require usable migration notes.
-- `v1.0.0` requires an explicit project stability decision.
+Read `docs/release.md` before changing release-owned files or release
+workflows.
 
 ## NixOS Module Principles
 
