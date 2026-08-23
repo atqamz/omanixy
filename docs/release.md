@@ -8,8 +8,7 @@ The version is independent from Omarchy, Quattro, Quickshell, and nixpkgs versio
 
 Each release records the exact tested upstream pair and the compatibility state that was reviewed with it.
 
-This release system currently creates or updates a draft Release PR and its reviewed version and changelog context.
-It does not create SemVer tags or GitHub Releases until a separate project decision enables publication.
+Omanixy releases create a Release PR, update the version and changelog, create a SemVer tag, and create a GitHub Release.
 
 No package registry, Nix registry, binary archive, install script, or release asset publication is part of this contract.
 
@@ -49,9 +48,9 @@ The next commit, `c756f85dc2ad546fa2cfbad1fdf3b51913bc6723`, is the first pinned
 
 The boundary excludes earlier repository-bootstrap scaffolding while retaining runtime implementation, compatibility adapters, security layers, and relevant repository hardening.
 
-The first generated candidate is expected to be `v0.1.0` in the draft Release PR.
+The first generated candidate is expected to be `v0.1.0` with tag `v0.1.0`.
 
-This issue does not merge the first Release PR or publish a tag or GitHub Release.
+This issue does not merge the first Release PR, create a tag, or create a GitHub Release.
 
 The first Release PR remains a draft until `atqamz/omanixy#6` proves standalone public usability and the project explicitly approves release readiness.
 
@@ -146,7 +145,7 @@ human marks the draft ready and merges when release readiness is approved
 
 The context writer is idempotent and owns exactly one `Upstream` and one `Compatibility` section in the candidate entry.
 
-The final changelog entry already contains the context before the Release PR is merged.
+The final changelog entry already contains the context before the Release PR is merged, so the GitHub Release body inherits the reviewed information.
 
 ## Workflow and credentials
 
@@ -190,7 +189,7 @@ If Release PR CI fails, the draft must not be merged.
 
 If release context is stale, malformed, duplicated, or missing migration guidance, Release PR CI fails until the human-curated entry is corrected.
 
-Publication is not part of this workflow, so it cannot create an alternate version, tag, or release.
+If tag or GitHub Release creation fails, the workflow remains red and no alternate version, tag, or release is invented manually.
 
 The workflow has no unrestricted manual dispatch recovery path.
 
@@ -204,6 +203,6 @@ The release action currently runs on Node 24 and uses the current manifest confi
 
 Action majors and required permissions are checked by repository actionlint and the release contract test.
 
-Release Please alone owns the Release PR, version files, and changelog.
+Release Please alone owns the Release PR, version files, changelog, tag, and GitHub Release.
 
 No npm, PyPI, crates.io, Cachix, Nixpkgs, Nix registry, Homebrew, AUR, binary archive, or install-script publication exists here.
