@@ -15,25 +15,17 @@ test "$dbus_registered" = true
 test "$systemd_registered" = true
 test "$environment_registered" = true
 
-# The fixture's overrideAttrs must have actually changed the store path -
-# otherwise every assertion below would pass vacuously against the plain
-# default instead of proving custom-identity threading.
 if [[ "$custom_package_path" == "$default_package_path" ]]; then
   printf '%s\n' 'custom fprintd package fixture did not actually change store path' >&2
   exit 1
 fi
 
-# The generated PAM service references the custom package's exact store
-# path, never the plain default alongside it.
 grep -qF "$custom_package_path/lib/security/pam_fprintd.so" "$service_file"
 if grep -qF "$default_package_path/lib/security/pam_fprintd.so" "$service_file"; then
   printf '%s\n' 'omarchy-lock-fingerprint PAM service references the default fprintd package alongside the custom one' >&2
   exit 1
 fi
 
-# The Home Manager runtime's declared closure inputs resolve to the same
-# custom identity, and never independently pull in the plain default
-# alongside it - the split-brain this capability must never reintroduce.
 if ! jq -e --arg p "$custom_package_path" 'any(.[]; startswith($p))' "$declared_runtime_inputs" >/dev/null; then
   printf '%s\n' 'declaredRuntimeInputs does not contain the custom fprintd package' >&2
   exit 1

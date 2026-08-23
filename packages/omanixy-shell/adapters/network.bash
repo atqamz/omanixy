@@ -1,4 +1,4 @@
-# shellcheck disable=SC2154 # shared adapter state is initialized by common.bash.
+# shellcheck disable=SC2154
 network_device() {
   need ip
   local route_output status

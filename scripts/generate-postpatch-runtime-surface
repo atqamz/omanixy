@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Generate post-patch consumer identity and executable probes."""
 
 from __future__ import annotations
 
@@ -422,7 +421,7 @@ def main() -> int:
                     "#!/bin/sh\n"
                     "set -eu\n"
                     f"real={json.dumps(str(path))}\n"
-                    f"helper={json.dumps(path.name)}\n"
+                    f"helper={json.dumps(str(path.name))}\n"
                     "if COMPAT_ADAPTER_NAME=\"$helper\" OMANIXY_CONSUMER_MARKER= \"$real\" \"$@\"; then\n"
                     "  if [ -n \"${OMANIXY_CONSUMER_MARKER:-}\" ]; then\n"
                     "    printf '%s\\n' \"$helper\" > \"$OMANIXY_CONSUMER_MARKER.$helper\"\n"
@@ -592,17 +591,18 @@ def main() -> int:
         probe_path.write_text(
             "#!/bin/sh\n"
             "set -eu\n"
+            f"probe_helper_name={json.dumps(str(helper))}\n"
             f"test -f {json.dumps(str(consumer_path))}\n"
-            f"printf '%s\\t%s\\n' CONSUMER_PROBE {json.dumps(helper)}\n"
+            "printf '%s\\t%s\\n' CONSUMER_PROBE \"$probe_helper_name\"\n"
             f"export QML2_IMPORT_PATH={json.dumps(str(probe_root))}:{json.dumps(str(compatibility_bin))}\n"
             f"export OMARCHY_PATH={json.dumps(str(probe_root))}\n"
             f"export FONTCONFIG_FILE={json.dumps(str(fontconfig_file))}\n"
             f"export PATH={json.dumps(str(probe_bin))}:{json.dumps(str(compatibility_bin / 'bin'))}:$PATH\n"
             "export QT_QPA_PLATFORM=offscreen\n"
-            f"marker_path=\"${{TMPDIR:-/tmp}}/omanixy-consumer-{helper}-$$\"\n"
-            f"log_path=\"${{TMPDIR:-/tmp}}/omanixy-consumer-{helper}-$$.log\"\n"
-            f"runtime_dir=\"${{TMPDIR:-/tmp}}/omanixy-runtime-{helper}-$$\"\n"
-            f"home_dir=\"${{TMPDIR:-/tmp}}/omanixy-home-{helper}-$$\"\n"
+            "marker_path=\"${TMPDIR:-/tmp}/omanixy-consumer-$probe_helper_name-$$\"\n"
+            "log_path=\"${TMPDIR:-/tmp}/omanixy-consumer-$probe_helper_name-$$.log\"\n"
+            "runtime_dir=\"${TMPDIR:-/tmp}/omanixy-runtime-$probe_helper_name-$$\"\n"
+            "home_dir=\"${TMPDIR:-/tmp}/omanixy-home-$probe_helper_name-$$\"\n"
             "mkdir -p \"$runtime_dir\" \"$home_dir/.cache\"\n"
             "chmod 700 \"$runtime_dir\"\n"
             + (
@@ -615,7 +615,7 @@ def main() -> int:
             "trap 'rm -f \"$marker_path\".* \"$log_path\"; rm -rf \"$runtime_dir\" \"$home_dir\"' EXIT\n"
             "export OMANIXY_CONSUMER_MARKER=\"$marker_path\"\n"
             f"export OMANIXY_PROBE_BACKEND_PATH={json.dumps(str(probe_bin))}\n"
-            f"export OMANIXY_PROBE_HELPER={json.dumps(helper)}\n"
+            "export OMANIXY_PROBE_HELPER=\"$probe_helper_name\"\n"
             "unset COMPAT_ADAPTER_NAME\n"
             "export XDG_RUNTIME_DIR=\"$runtime_dir\"\n"
             "export XDG_CONFIG_HOME=\"$home_dir/.config\"\n"
@@ -629,11 +629,11 @@ def main() -> int:
             "else\n"
             "  probe_status=$?\n"
             "fi\n"
-            f"if test \"$probe_status\" -eq 0 && grep -Fxq {json.dumps(helper)} \"$marker_path.{helper}\" 2>/dev/null; then\n"
-            f"  printf 'CONSUMER_REACHED\\t%s\\n' {json.dumps(helper)}\n"
+            "if test \"$probe_status\" -eq 0 && grep -Fxq \"$probe_helper_name\" \"$marker_path.$probe_helper_name\" 2>/dev/null; then\n"
+            "  printf 'CONSUMER_REACHED\\t%s\\n' \"$probe_helper_name\"\n"
             "else\n"
-            f"  printf 'dispatcher marker identity: expected {helper}, got:' >&2\n"
-            f"  cat \"$marker_path.{helper}\" >&2 2>/dev/null || :\n"
+            "  printf 'dispatcher marker identity: expected %s, got:' \"$probe_helper_name\" >&2\n"
+            "  cat \"$marker_path.$probe_helper_name\" >&2 2>/dev/null || :\n"
             "  cat \"$log_path\" >&2\n"
             "  if test \"$probe_status\" -eq 0; then exit 1; else exit \"$probe_status\"; fi\n"
             "fi\n",

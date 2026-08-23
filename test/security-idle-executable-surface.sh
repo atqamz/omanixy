@@ -11,8 +11,6 @@ export PYTHONPATH="$scripts_dir"
 fixture=$(mktemp -d)
 trap 'chmod -R u+w "$fixture"; rm -rf "$fixture"' EXIT
 
-# The real, final Service.qml has exactly the four allowed exact-argv
-# command bindings and zero exec/execDetached/run/startDetached calls.
 scan_output=$("$python_bin" "$scanner" "$service_file" 2>&1)
 printf '%s\n' "$scan_output" >&2
 grep -Fq '4 command binding(s) passed, 0 exec/execDetached/run/startDetached calls found' <<<"$scan_output"
@@ -43,7 +41,6 @@ assert_accepted_raw() {
   fi
 }
 
-# The three allowed exact-argv forms, individually and multiline.
 assert_accepted_raw "allowed-lock" 'Item { Process { command: ["omanixy-shell", "lock", "lock"] } }'
 assert_accepted_raw "allowed-probe" 'Item { Process { command: ["omanixy-idle-state", "probe"] } }'
 assert_accepted_raw "allowed-set-awake" 'Item { Process { command: ["omanixy-idle-state", "set", "awake"] } }'
@@ -86,10 +83,6 @@ assert_rejected_because "multiline-bad" "shell interpreter reachable" \
 assert_rejected_because "template-literal" "template literals are unsupported" \
   'Item { property string note: `no process here` }'
 
-# Comment/string false-positive safety: Process/command/exec/run-looking
-# text sitting inertly in a comment or string must not itself trip the
-# scanner, and a real unknown command after such fake text must still be
-# caught.
 assert_accepted_raw "comment-fake" 'Item {
   // Process { command: ["mystery-tool"] } exec(["x"]) runner.run(["y"])
   Process { command: ["omanixy-shell", "lock", "lock"] }
@@ -102,19 +95,11 @@ assert_rejected_because "fake-comment-then-real-bad" "not one of the allowed exa
   // command: ["fake-not-real"]
   Process { command: ["mystery-tool"] }
 }'
-# The array argument here is itself an allowlisted-looking argv - proving
-# that reaching a command through exec(...) is rejected even when the
-# array it names would otherwise be an allowed direct binding, not merely
-# when the array is also independently invalid.
 assert_rejected_because "fake-string-then-real-exec" "exec/execDetached call found" 'Item {
   property string note: "exec([\"fake\"])"
   function go() { Quickshell.exec(["omanixy-shell", "lock", "lock"]) }
 }'
 
-# startDetached() bypass matrix (Section 11/12): Process.startDetached()
-# launches the process's already-set command completely untracked - even
-# an otherwise-allowlisted argv reaching it is a real bypass, since a
-# tracked, bounded invocation would silently become an untracked one.
 assert_rejected_because "startdetached-allowed-lock-argv" "startDetached call found" 'Item {
   Process { id: p; command: ["omanixy-shell", "lock", "lock"]; Component.onCompleted: p.startDetached() }
 }'

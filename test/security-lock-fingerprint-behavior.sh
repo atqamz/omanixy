@@ -3,10 +3,6 @@ set -euo pipefail
 
 policy_file=${1:?FingerprintPolicy.js path required}
 
-# This drives the real FingerprintPolicy.js exports directly (via require),
-# not a disconnected reimplementation of its rules - a change to the real
-# state machine that breaks one of these sequences fails this test, not a
-# copy of it.
 node - "$policy_file" <<'NODE'
 const policy = require(process.argv[2]);
 

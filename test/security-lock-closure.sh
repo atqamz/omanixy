@@ -6,11 +6,6 @@ lock_closure_paths=${2:?lock-enabled closure store paths required}
 lock_compat_bin=${3:?lock-enabled compatibility bin required}
 disabled_compat_bin=${4:?lock-disabled compatibility bin required}
 
-# Focused security-lock closure check, separate from the presentation-feature
-# runtime-closure check: proves that turning on programs.omanixy.security.lock
-# pulls in exactly the stranded-lock helper and nothing from the fingerprint
-# stack, keeping the password-only structural invariant true at the closure
-# level, not just in the patched Service.qml source.
 grep -Fxq "$lock_runtime" "$lock_closure_paths"
 
 if grep -Ei 'fprintd' "$lock_closure_paths"; then

@@ -4,10 +4,6 @@ set -euo pipefail
 owned_service_file=${1:?enabled-only generated pam.d/omarchy-lock-password file required}
 adversarial_service_file=${2:?adversarial generated pam.d/omarchy-lock-password file required}
 
-# The core invariant: an unrelated, ordinary normal-priority module
-# definition of the same PAM service must not concatenate into the
-# Omanixy-owned service text. If ownership is atomic, the adversarial
-# build's generated file is byte-identical to the plain enabled build.
 if ! diff -u "$owned_service_file" "$adversarial_service_file"; then
   printf '%s\n' 'normal-priority module composition altered the omarchy-lock-password PAM service' >&2
   exit 1

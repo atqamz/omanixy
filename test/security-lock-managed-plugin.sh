@@ -6,18 +6,6 @@ lock_quickshell=${2:?lock-enabled quickshell executable required}
 disabled_compat_root=${3:?lock-disabled compatibility root required}
 disabled_quickshell=${4:?lock-disabled quickshell executable required}
 
-# Section 10: prove the Nix-managed PluginRegistry.qml override with actual
-# QML behavior against the real generated file, not a grep for the string
-# "omanixyManagedSecurityPlugins". Both harnesses instantiate PluginRegistry
-# directly with a hand-injected installedPlugins object (no filesystem
-# plugin scan) and drive isEnabled/setEnabled - this is defense against
-# contradictory/injected registry state, i.e. even if something upstream of
-# the registry ever handed it a hostile or self-contradictory
-# installedPlugins map, the managed override still wins. It does not by
-# itself prove that the real filesystem scan/merge cannot produce that
-# hostile map in the first place - the registry-scan harness below owns
-# that proof, by driving registry.rescan() against real first-party and
-# hostile third-party directories and inspecting the actual merge result.
 
 test_root=$(mktemp -d)
 trap 'rm -rf "$test_root"' EXIT
@@ -120,12 +108,6 @@ ShellRoot {
 run_harness enabled "$lock_compat_root" "$lock_quickshell" "$enabled_shell_qml" MANAGED_PLUGIN_PASS
 run_harness disabled "$disabled_compat_root" "$disabled_quickshell" "$disabled_shell_qml" MANAGED_PLUGIN_DISABLED_PASS
 
-# Section 9: drive the REAL PluginRegistry.qml scan-and-merge algorithm
-# (rescan() -> the bash find/cat scanner it spawns -> parseScanOutput()) with
-# real fixture directories, instead of asserting against a hand-rolled stand-in
-# for that algorithm. A hostile third-party plugin claims the reserved
-# "omarchy.lock" id; the real merge must reject it and keep the copy of the
-# actual first-party manifest as the winner.
 run_registry_scan_harness() {
   local compat_root=$1 quickshell=$2
   local dir="$test_root/registry-scan"
@@ -135,8 +117,6 @@ run_registry_scan_harness() {
   ln -s "$compat_root/shell" "$dir/qs"
   cp "$compat_root/shell/services/PluginRegistry.qml" "$dir/services/PluginRegistry.qml"
 
-  # The real first-party lock manifest and source tree, copied verbatim -
-  # not a hand-authored stand-in for it.
   cp -R "$compat_root/shell/plugins/lock" "$dir/firstparty/lock"
   chmod -R u+w "$dir/firstparty/lock"
 

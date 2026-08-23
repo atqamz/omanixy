@@ -11,20 +11,11 @@ enable_conflict_toplevel_forced=${7:?enable-conflict config.system.build.topleve
 strong_conflict_service_file=${8:?strong-conflict generated pam.d/omarchy-lock-fingerprint file required}
 strong_conflict_toplevel_forced=${9:?strong-conflict config.system.build.toplevel eval result required}
 
-# Capability truth: the plain-enabled resolved service is actually enabled
-# with the exact expected text, and forcing config.system.build.toplevel
-# (the only attribute that runs NixOS assertion checking) does not misfire.
 test "$owned_enable" = true
 test "$owned_toplevel_forced" = true
 
-# An ordinary normal-priority competing `text` definition must not trip the
-# capability-truth assertion - the composition test already proves the file
-# is byte-identical.
 test "$adversarial_toplevel_forced" = true
 
-# An ordinary normal-priority competing `enable = false` must not suppress
-# the service: Omanixy still owns the enabled state, and the generated file
-# is byte-identical to the plain enabled build.
 test "$enable_conflict_enable" = true
 test "$enable_conflict_toplevel_forced" = true
 if ! diff -u "$owned_service_file" "$enable_conflict_service_file"; then
@@ -34,11 +25,6 @@ fi
 non_blank_lines=$(grep -cve '^[[:space:]]*$' "$enable_conflict_service_file")
 test "$non_blank_lines" = 1
 
-# A strong, equal-priority conflict on `text` (another lib.mkForce) must
-# fail closed rather than silently compose - nixpkgs' `lines` type merges
-# same-priority definitions by concatenation instead of raising a conflict
-# on its own, so the Omanixy module's own assertion is what must fail
-# config.system.build.toplevel's evaluation here.
 test "$strong_conflict_toplevel_forced" = false
 if ! grep -q 'pam_permit_placeholder\.so' "$strong_conflict_service_file"; then
   printf '%s\n' 'expected the strong-conflict fixture to prove a silent lines-merge; found none' >&2

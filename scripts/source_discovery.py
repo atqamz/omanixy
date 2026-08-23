@@ -1,4 +1,3 @@
-"""Discover literal executable invocations from supported Quattro sources."""
 
 from __future__ import annotations
 
@@ -106,23 +105,10 @@ def _is_literal_command_word(word: str) -> bool:
 
 _REDIRECTION_WORD_RE = re.compile(r"^(?:\{[A-Za-z_][A-Za-z0-9_]*\}|[0-9]*)(?:>>?|<>?|>&|<&)")
 
-# The only SHELL_BUILTINS members that introduce a following simple command
-# rather than being one themselves. Everything else in SHELL_BUILTINS (read,
-# echo, export, if, for, ...) is either a terminal builtin invocation or a
-# reserved word that opens a compound construct - in both cases its own
-# trailing words are its arguments or a test expression, never a further
-# command to resolve, so _next_command must stop there rather than treat the
-# next word (e.g. `read -ra name`'s `name`) as if it were the invocation.
 _COMMAND_INTRODUCER_WORDS = {"!", "time", "do", "then", "else"}
 
 
 def _next_command(words: list[str], start: int) -> list[str]:
-    """Return the next command-head word: a literal name, or DYNAMIC_EXECUTABLE
-    if the first non-flag, non-assignment, non-introducer, non-redirection
-    word is not a literal shape. Never skips past a dynamic word looking for
-    a literal one - a bare redirection (`exec {fd}>file`, `2>&1`) performs no
-    execution at all, so it is the only shape safe to skip past
-    unconditionally."""
 
     for word in words[start:]:
         if word.startswith("-"):
@@ -142,7 +128,6 @@ def _next_command(words: list[str], start: int) -> list[str]:
 
 
 def shell_executables(value: str) -> list[str]:
-    """Return literal command names from a shell command string."""
 
     value = _strip_shell_comment(value)
     if not value.strip() or value.lstrip().startswith("#!"):
@@ -264,10 +249,6 @@ def shell_executables(value: str) -> list[str]:
             value_part = first.split("=", 1)[1]
             if value_part.count("(") <= value_part.count(")"):
                 commands.extend(_next_command(words, 1))
-            # else: this word is only the leading fragment of a $(...) value
-            # containing unquoted whitespace - shlex split it into further
-            # words that are its own arguments, not a following command, and
-            # COMMAND_SUBSHELL_RE already scanned its real content above.
         elif first.startswith("$"):
             commands.append(DYNAMIC_EXECUTABLE)
         elif (
@@ -281,25 +262,10 @@ def shell_executables(value: str) -> list[str]:
 
 
 class UnsafeSource(ValueError):
-    """A QML/JS backtick template literal (or a `${...}` interpolation
-    inside one) is not closed before the source ends.
-
-    This lexical masker treats a backtick literal as the only construct
-    that can legitimately span multiple lines, so an actually-unterminated
-    one could otherwise silently absorb the rest of the file as inert
-    string content - hiding whatever real code follows rather than merely
-    misreading the malformed literal itself. Callers that need a hermetic,
-    fail-closed guarantee (the lock executable-surface scanner) must treat
-    this as unverifiable input and reject the file outright.
-    """
+    pass
 
 
 def _find_string_end(text: str, start: int, quote: str) -> int:
-    """`start` is just past an opening '"'/"'" at `quote`. Return the index
-    just past the matching unescaped closing quote, or -1 if the string is
-    not closed before a literal newline or the end of text - a "..."/'...'
-    string cannot legally contain an unescaped newline, so this masker
-    never treats one as spanning lines."""
 
     index = start
     length = len(text)
@@ -317,43 +283,11 @@ def _find_string_end(text: str, start: int, quote: str) -> int:
 
 
 def _blank(body: str) -> str:
-    """Replace every non-newline character with a space, preserving length
-    and every newline position so offsets into the result still line up
-    1:1 with offsets into `body`."""
 
     return "".join("\n" if char == "\n" else " " for char in body)
 
 
 def _consume_interpolation(text: str, start: int, mask: bool) -> tuple[int, str]:
-    """`start` is the index of the "$" opening a "${" inside a backtick
-    literal. Returns the index just past the matching unescaped "}" and the
-    interpolation's text (delimiters included).
-
-    `${...}` is treated as a live JS-like lexical region: identifiers,
-    operators, calls, assignments, array/object syntax, and nested
-    `${...}` expressions stay live so a command built through interpolation
-    remains visible to discovery. Everything else is inert and cannot
-    perturb that liveness:
-
-    - "//" and "/* */" comments are recognized and blanked to whitespace
-      (never deleted, unlike top-level `strip_comments` - the interpolation
-      walker relies on 1:1 index correspondence with `text` to track brace
-      depth, so shrinking the output here would desync the match) before
-      depth-counting sees them, so a "}" inside a comment can never
-      terminate the interpolation early and comment-only text can never
-      satisfy command discovery.
-    - Quoted string bodies are masked exactly like `mask_string_literals`
-      does at top level: verbatim when `mask` is False (Stage 1 preserves
-      string content), blanked when `mask` is True (Stage 2 hides
-      string-only content from discovery), with the delimiting quotes kept
-      either way so downstream span matching still sees a well-formed
-      string shape.
-    - Nested backtick literals recurse through `_consume_backtick`, so
-      their static text stays inert while any further nested `${...}`
-      inside them stays live.
-
-    Braces inside any of the above are consumed as part of that region and
-    never reach the depth counter, so they cannot desync the match."""
 
     length = len(text)
     index = start + 2
@@ -401,12 +335,6 @@ def _consume_interpolation(text: str, start: int, mask: bool) -> tuple[int, str]
 
 
 def _consume_backtick(text: str, start: int, mask: bool) -> tuple[int, str]:
-    """`start` is just past an opening backtick. Returns the index just past
-    the matching unescaped closing backtick and the literal's content
-    (excluding delimiters) - verbatim when `mask` is False, with static text
-    blanked when `mask` is True. `${...}` interpolation is always recursed
-    into as live code (see `_consume_interpolation`) rather than being
-    blanked as static text, regardless of `mask`."""
 
     length = len(text)
     index = start
@@ -431,37 +359,6 @@ def _consume_backtick(text: str, start: int, mask: bool) -> tuple[int, str]:
 
 
 def strip_comments(text: str, shell: bool = False) -> str:
-    """Lexically mask comments for line-oriented scanning.
-
-    This is a lexical masker, not a parser: it recognizes comments, quoted
-    strings, and (QML/JS only) backtick template literals with `${...}`
-    interpolation well enough that a comment marker sitting inside a
-    properly quoted string or template literal cannot hide the real code
-    that follows it, without attempting to understand QML/JS grammar
-    beyond that.
-
-    Shell has no block-comment or template-literal syntax, so treating "/*"
-    as a QML/JS block comment opener would eat glob patterns like
-    "image/*)" in a case arm, and a backtick is just a command-substitution
-    delimiter, not a multiline string. Shell scripts strip only unquoted
-    "#" to end of line and never span a comment or quote across lines.
-
-    String and template-literal CONTENT is preserved (only comments are
-    removed) so contract discovery that reads literal values out of quoted
-    text (e.g. `Quickshell.env("HOME")`) keeps working unchanged. Use
-    `mask_string_literals` on the result when literal-looking text inside a
-    string must not itself satisfy command discovery.
-
-    A `${...}` interpolation is live code, not a string: comments inside
-    one are still removed, but - unlike top-level comments, which are
-    deleted and collapse to a bare newline - they are blanked to
-    whitespace in place. `_consume_interpolation` tracks brace depth by
-    walking `text` index-for-index, so shrinking its output here would
-    desync that walk; blanking keeps every offset aligned.
-
-    Raises UnsafeSource (QML/JS only) if a backtick template literal or a
-    `${...}` interpolation inside one is not closed before the source ends.
-    """
 
     if shell:
         return _strip_shell_comments(text)
@@ -539,24 +436,6 @@ def _strip_qml_comments(text: str) -> str:
 
 
 def mask_string_literals(text: str) -> str:
-    """Blank the CONTENT of quoted strings and backtick template literals in
-    already comment-stripped QML/JS-like text (see `strip_comments`),
-    preserving length and every newline position so a regex match found in
-    the result has the identical span in `text` - callers use this to
-    locate genuine command bindings (a "command:" keyword inside a masked
-    string can no longer match) and then re-read the real string content
-    for the matched span directly out of `text`, rather than out of this
-    masked copy.
-
-    `${...}` interpolation inside a template literal is walked as live
-    code (see `_consume_interpolation`) rather than blanked as static
-    text, so a command built through interpolation stays visible to
-    further discovery instead of silently disappearing into blanked
-    template text. Quoted strings and comments inside the interpolation
-    are still inert and get blanked/masked the same as everywhere else.
-
-    Raises UnsafeSource under the same conditions as `strip_comments`.
-    """
 
     out: list[str] = []
     index = 0
@@ -606,7 +485,6 @@ def _strip_shell_comment(value: str) -> str:
 
 
 def source_executables(path: str, text: str, pinned_text: str = "") -> list[dict[str, object]]:
-    """Discover command names and source-line identity from a supported file."""
 
     references: list[dict[str, object]] = []
     dynamic_name = DYNAMIC_EXECUTABLE

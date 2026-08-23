@@ -4,9 +4,6 @@ set -euo pipefail
 owned_service_file=${1:?enabled-only generated pam.d/omarchy-lock-fingerprint file required}
 adversarial_service_file=${2:?adversarial generated pam.d/omarchy-lock-fingerprint file required}
 
-# The core invariant, mirrored from security-pam-composition.sh: an
-# unrelated, ordinary normal-priority module definition of the same PAM
-# service must not concatenate into the Omanixy-owned service text.
 if ! diff -u "$owned_service_file" "$adversarial_service_file"; then
   printf '%s\n' 'normal-priority module composition altered the omarchy-lock-fingerprint PAM service' >&2
   exit 1

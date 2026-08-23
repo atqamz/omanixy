@@ -38,30 +38,15 @@ let
   };
   lockEnabled = security != null && (security.lock or false);
   fingerprintEnabled = lockEnabled && security != null && (security.fingerprint or false);
-  # The NixOS module registers fingerprint PAM/daemon capability against
-  # config.services.fprintd.package; this must be the exact same package
-  # identity the runtime's fprintd-list client resolves, or PAM and the
-  # readiness adapter can silently disagree about which fprintd is real.
   fingerprintPackage = if fingerprintEnabled then (security.fingerprintPackage or null) else null;
   fingerprintPackageValid = lib.assertMsg
     (!fingerprintEnabled || fingerprintPackage != null)
     "omanixy fingerprint security requires security.fingerprintPackage to be the NixOS-selected services.fprintd.package";
-  # Independent of lock/fingerprint entirely - polkit-agent selection never
-  # implies or requires the native lock.
   polkitAgentEnabled = security != null && (security.polkitAgent or false);
-  # Unlike polkit, idle DOES require the native lock: Layer 6 owns no lock
-  # provider of its own, only bounded orchestration of the already-audited
-  # Layer-3 lock IPC. Home Manager's own assertion already prevents an
-  # idle-without-lock configuration from evaluating, but this package-level
-  # invariant closes the gap for any hypothetical caller that builds this
-  # derivation directly with a hand-constructed security attrset.
   idleEnabled = security != null && (security.idle or false);
   idleRequiresLockValid = lib.assertMsg
     (!idleEnabled || lockEnabled)
     "omanixy idle security requires security.lock to also be true - Layer 6 owns no lock provider of its own";
-  # Independent of lock/fingerprint/polkit/idle entirely - claiming the
-  # session org.freedesktop.Notifications name never implies or requires any
-  # of them, and none of them imply or require it.
   notificationDaemonEnabled = security != null && (security.notificationDaemon or false);
   managedEnabledSecurityPlugins = lib.optionals lockEnabled [ "omarchy.lock" ]
     ++ lib.optionals polkitAgentEnabled [ "omarchy.polkit" ]
@@ -368,16 +353,6 @@ let
     ++ lib.optional fingerprintEnabled fingerprintPackage
   );
 
-  # The declared runtime package inputs themselves (store paths of the exact
-  # derivations named in runtimeInputs above), as opposed to the full
-  # transitive closure: selectedCapabilities - and therefore runtimeInputs -
-  # is derived purely from `features`, never from `security`, with one
-  # narrow, deliberate exception: fingerprintPackage (the NixOS-selected
-  # services.fprintd.package, never an independently-chosen pkgs.fprintd) is
-  # added only when fingerprintEnabled, so this list is provably identical
-  # for a given feature set across every security state except that one. The
-  # Layer 4 closure test proves the widening happens exactly when
-  # fingerprintEnabled flips, and only then.
   declaredRuntimeInputs = builtins.toJSON (builtins.sort (a: b: a < b) (map (p: "${p}") runtimeInputs));
 
   allCompatibilityHelpers = [
@@ -613,10 +588,6 @@ pkgs.symlinkJoin {
   '';
   passthru = {
     inherit omarchyRevision quickshellRevision nixpkgsRevision omarchySource omarchyCompatibilityRoot compatibilityBin compatibilityProbes quickshell theme supportedSystems safeMenu safeShellConfig selectedFeatures selectedCapabilities compatibilityHelpers runtimeBlockedPlugins adapterSources adapterSourceHash featureSurface lockEnabled fingerprintEnabled polkitAgentEnabled idleEnabled notificationDaemonEnabled managedEnabledSecurityPlugins declaredRuntimeInputs;
-    # Exposed only so closure-independence tests can name the exact set of
-    # Omanixy-owned derivations expected to change identity when the
-    # compatibility root's contents change (e.g. a security capability
-    # adding plugin files), as opposed to filtering by package-name pattern.
     inherit ipc compatAdapter runtime;
     buildProvenance = {
       inherit omarchyRevision quickshellRevision nixpkgsRevision;

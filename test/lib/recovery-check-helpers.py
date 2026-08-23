@@ -1,42 +1,3 @@
-# Shared `CHECK <name> PASS|FAIL ...` line parser/assertion for the Layer 8
-# (security-recovery) NixOS VM test scripts. Spliced verbatim into each VM
-# test's Python `testScript` via `builtins.readFile` (a plain source read, not
-# an import-from-derivation, so it never breaks `nix flake check --no-build`).
-#
-# This exists because "no CHECK line said FAIL" is not sufficient evidence
-# that a scenario actually exercised what it claims: a driver script that
-# silently skips a step never emits its CHECK line at all, and the old
-# absence-of-FAIL-only assertion would still pass. `assert_checks` instead
-# requires the exact named set of PASS checks a scenario is supposed to
-# produce - a missing name is as much a failure as an explicit FAIL line.
-#
-# RECOVERY_CHECKS below is the one canonical registry of named recovery
-# scenarios shared by three otherwise-independent places that would
-# otherwise drift apart silently:
-#   - each VM test's `assert_scenario(out, scenario_id)` call, which resolves
-#     this registry's own exact "checks" set for that scenario id - a caller
-#     can never substitute an arbitrary subset;
-#   - upstream/security-recovery-matrix.yaml's `check:` field, which names a
-#     scenario id (or a list of them) from this registry instead of free
-#     prose a typo could silently corrupt, and which must itself appear in
-#     that scenario's own "matrix_cases" set below - a scenario id shared by
-#     coincidence (same owner, same evidence file) can never stand in for a
-#     matrix case it does not actually own;
-#   - test/security-recovery-contract.sh (via recovery-contract-helpers.py),
-#     which rejects any matrix `check:` entry that is not a real key here, or
-#     whose registered owner/evidence/matrix_cases membership does not match
-#     the matrix case's own surface/evidence/id.
-#
-# Each entry's "evidence" names the one VM test file whose driver script
-# actually emits that scenario's CHECK lines ("none" for an implemented=False
-# placeholder, which emits none at all). "matrix_cases" is the exact,
-# closed set of upstream/security-recovery-matrix.yaml row ids this scenario
-# is legitimate evidence for - never merely "some case with the same owner",
-# since two scenarios can share both an owner and an evidence file while
-# meaning entirely different things.
-#
-# See test/lib/recovery-check-helpers-selftest.py for the adversarial tests
-# that pin this behavior.
 
 
 class CheckAssertionError(AssertionError):
@@ -58,16 +19,7 @@ POLKIT_VM = "test/security-recovery-polkit-vm.nix"
 NOTIFICATIONS_VM = "test/security-recovery-notifications-vm.nix"
 CROSS_FEATURE_VM = "test/security-recovery-cross-feature-vm.nix"
 
-# Every entry below is either:
-#   - implemented=True: a real VM scenario that emits `CHECK <name> PASS|FAIL`
-#     lines for every name in "checks", validated live against a real
-#     backend by an `assert_scenario` call in the owning .nix test; or
-#   - implemented=False: a documented placeholder for a scenario that would
-#     need real hardware/environment/scale this flake cannot provide today
-#     (no "checks" are ever emitted for these, "evidence" is "none", and a
-#     "passed" matrix row may never cite one).
 RECOVERY_CHECKS = {
-    # --- security.pam-password (test/security-recovery-pam-vm.nix, `machine`) ---
     "pam-password.live-conversation": _scenario(
         "security.pam-password",
         {"correct-password-success", "wrong-password-failure"},
@@ -106,7 +58,6 @@ RECOVERY_CHECKS = {
         {"recovery.pam-missing-service"},
     ),
 
-    # --- security.pam-fingerprint (test/security-recovery-pam-vm.nix, `fingerprintMachine`) ---
     "fingerprint.no-device": _scenario(
         "security.pam-fingerprint",
         {
@@ -147,16 +98,6 @@ RECOVERY_CHECKS = {
         PAM_VM,
         {"recovery.pam-fingerprint-backend-recovery"},
     ),
-    # Section 2 remediation: "stress-log-quiescent" used to check only that
-    # no Quickshell harness process remained, which is a process-count fact,
-    # not log/journal quiescence. It is replaced by two real signals: a real
-    # fprintd.service journal event count bounded proportionally to the
-    # 20-attempt stimulus (stress-backend-log-bound), and that same count
-    # re-measured after a short no-stimulus window and required to be
-    # unchanged (stress-backend-log-quiescent) - genuine quiescence, measured
-    # against the real backend's own journal, not inferred from process
-    # absence. stress-no-quickshell-process and stress-no-fprintd-process
-    # keep the process-level facts as their own, separately named, checks.
     "fingerprint.backend-stress": _scenario(
         "security.pam-fingerprint",
         {
@@ -181,7 +122,6 @@ RECOVERY_CHECKS = {
         {"recovery.pam-fingerprint-tod-driver"}, implemented=False,
     ),
 
-    # --- security.recovery: shell service crash-loop bound (pam-vm.nix, `machine`) ---
     "shell-restart.crash-loop-bound": _scenario(
         "security.recovery",
         {
@@ -195,7 +135,6 @@ RECOVERY_CHECKS = {
         {"recovery.systemd-restart-bound"},
     ),
 
-    # --- security.polkit-agent (test/security-recovery-polkit-vm.nix) ---
     "polkit.register": _scenario(
         "security.polkit-agent",
         {"rival-absent", "polkitd-active", "registered", "single-registration-event", "harness-alive"},
@@ -279,10 +218,6 @@ RECOVERY_CHECKS = {
         POLKIT_VM,
         {"recovery.polkit-daemon-restart"},
     ),
-    # Section 5 remediation: real evidence already proved a finite 20-cycle
-    # stress bounded and non-growing (polkit.stress above); a larger-scale
-    # (hundreds-of-cycles) repeat remains an explicit, machine-tracked
-    # required-before-supported gap rather than untracked prose.
     "polkit.stress-large-scale": _scenario(
         "security.polkit-agent", set(), "none",
         {"recovery.polkit-stress-large-scale"}, implemented=False,
@@ -291,12 +226,6 @@ RECOVERY_CHECKS = {
         "security.polkit-agent", set(), "none",
         {"recovery.polkit-nested-compositor"}, implemented=False,
     ),
-    # Same underlying scenario as "cross-feature.crash" below (both are
-    # produced by one assert_checks call in
-    # test/security-recovery-cross-feature-vm.nix's `crash` scenario); this
-    # id names only the polkit-owned subset of that scenario's checks, for
-    # recovery.polkit-crash-midauth, whose surface is security.polkit-agent
-    # rather than security.recovery.
     "polkit.crash-midauth": _scenario(
         "security.polkit-agent",
         {
@@ -309,7 +238,6 @@ RECOVERY_CHECKS = {
         {"recovery.polkit-crash-midauth"},
     ),
 
-    # --- security.notification-daemon (test/security-recovery-notifications-vm.nix) ---
     "notifications.ownership-delivery": _scenario(
         "security.notification-daemon", {"ownership", "delivery"},
         NOTIFICATIONS_VM, {"recovery.notifications-real-ownership"},
@@ -367,14 +295,6 @@ RECOVERY_CHECKS = {
         "security.notification-daemon", {"session-phase2-ownership", "session-phase2-delivery"},
         NOTIFICATIONS_VM, {"recovery.notifications-session-bus-lifecycle"},
     ),
-    # Section 1 remediation: "dunst-owns-name" now requires proving the real
-    # D-Bus unique owner's GetConnectionUnixProcessID result equals dunst's
-    # own PID (plus a /proc/<pid>/exe identity cross-check), not merely that
-    # some owner exists. "dunst-owns-name-pid-stable" and
-    # "quattro-reclaims-name-pid" are new, explicitly-named checks proving
-    # owner-PID identity is stable while Quattro runs alongside dunst, and
-    # that the post-reclaim owner is genuinely the Quattro harness PID (and
-    # not merely a different-looking owner string).
     "notifications.known-daemon-collision": _scenario(
         "security.notification-daemon",
         {
@@ -397,34 +317,21 @@ RECOVERY_CHECKS = {
         "security.notification-daemon", set(), "none",
         {"recovery.notifications-monitor-hotplug"}, implemented=False,
     ),
-    # Section 5 remediation: mako/swaync/fnott are wlr-layer-shell-only and
-    # remain blocked by the same live-Wayland-compositor unavailability as
-    # recovery.lock-nested-compositor, distinct from dunst's already-proved
-    # X11-backed collision above and from monitor-hotplug's own presentation
-    # gap - each now its own explicit, machine-tracked case rather than
-    # untracked prose.
     "notifications.named-daemon-breadth": _scenario(
         "security.notification-daemon", set(), "none",
         {"recovery.notifications-named-daemon-breadth"}, implemented=False,
     ),
 
-    # --- security.lock / security.idle nested-compositor placeholders ---
     "lock.nested-compositor": _scenario(
         "security.lock", set(), "none", {"recovery.lock-nested-compositor"}, implemented=False,
     ),
     "idle.nested-compositor": _scenario(
         "security.idle", set(), "none", {"recovery.idle-nested-compositor"}, implemented=False,
     ),
-    # Section 5 remediation: a real declarative idle-owner conflict
-    # (hypridle/swayidle actually running) is blocked by the same live
-    # Wayland connection Quickshell's own IdleMonitor cannot reach in this
-    # environment, distinct from the already-proven Home Manager assertion
-    # matrix (a build-time, non-live proof) and now its own explicit case.
     "idle.real-external-owner": _scenario(
         "security.idle", set(), "none", {"recovery.idle-real-external-owner"}, implemented=False,
     ),
 
-    # --- security.recovery: cross-feature + hardware placeholders ---
     "cross-feature.boot": _scenario(
         "security.recovery",
         {
@@ -468,14 +375,6 @@ RECOVERY_CHECKS = {
 
 
 def parse_checks(output):
-    """Return {name: [states...]} for every `CHECK <name> <state> ...` line.
-
-    Only lines that start with "CHECK " are considered; anything else
-    (including "DIAG ..." lines) is ignored. Malformed lines (missing a
-    name/state, or a state other than PASS/FAIL) are recorded under the
-    sentinel key "" so callers can detect and reject them explicitly rather
-    than silently dropping them.
-    """
     seen = {}
     for line in output.splitlines():
         if not line.startswith("CHECK "):
@@ -490,24 +389,6 @@ def parse_checks(output):
 
 
 def assert_checks(output, required):
-    """Fail closed unless `output` contains exactly one PASS for every name
-    in `required`, and nothing else: no FAIL, no malformed line, no
-    duplicate/contradictory report for any name, and no unexpected extra
-    check name (an unrequested CHECK name is exactly as much a sign the
-    scenario drifted from what this call documents as a missing one).
-
-    `required` must itself be a subset of some RECOVERY_CHECKS entry's
-    "checks" set - a caller passing a name that was never registered (a
-    typo, or a check invented ad hoc at the call site instead of in the
-    shared registry) is rejected the same way a missing or failed check is,
-    so the registry cannot silently drift from what call sites actually
-    require.
-
-    Low-level and testable on its own, but production VM call sites use
-    `assert_scenario` instead, which binds this call to one exact,
-    registered scenario identity rather than letting a caller assemble an
-    arbitrary subset of registered names.
-    """
     required = set(required)
     registered_names = set()
     for scenario in RECOVERY_CHECKS.values():
@@ -549,18 +430,6 @@ def assert_checks(output, required):
 
 
 def assert_scenario(output, scenario_id):
-    """Fail closed unless `scenario_id` names a real, implemented
-    RECOVERY_CHECKS entry, then assert `output` against exactly that
-    scenario's own registered "checks" set.
-
-    This is the only entry point production VM call sites may use: unlike
-    `assert_checks`, a caller cannot assemble or narrow an arbitrary subset
-    of registered names - it names one scenario identity and gets that
-    scenario's exact, full required set back, resolved from the registry
-    itself. An unknown scenario id, or one whose registry entry is
-    `implemented=False` (a documented placeholder with no real evidence),
-    is rejected before any output is even parsed.
-    """
     scenario = RECOVERY_CHECKS.get(scenario_id)
     if scenario is None:
         raise CheckAssertionError(f"unknown RECOVERY_CHECKS scenario id: {scenario_id!r}")

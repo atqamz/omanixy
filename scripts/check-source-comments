@@ -1,0 +1,4230 @@
+#!/usr/bin/env python3
+import ast
+import io
+import os
+import re
+import sys
+import tokenize
+from dataclasses import dataclass
+from pathlib import Path
+
+EXCLUDED_DIR_NAMES = {".git", ".jj", "__pycache__"}
+EXCLUDED_ROOT_DIR_NAMES = {".superpowers"}
+EXCLUDED_FILENAMES = {".git", ".gitignore", "LICENSE", "codedb.snapshot", "flake.lock"}
+EXTENSION_LANGUAGE = {
+    ".py": "python",
+    ".nix": "nix",
+    ".sh": "shell",
+    ".bash": "shell",
+    ".js": "js",
+    ".mjs": "js",
+    ".cjs": "js",
+    ".qml": "qml",
+    ".yaml": "yaml",
+    ".yml": "yaml",
+    ".toml": "toml",
+    ".jsonc": "jsonc",
+}
+SHEBANG_LANGUAGE = {
+    "#!/usr/bin/env python3": "python",
+    "#!/usr/bin/env bash": "shell",
+    "#!/bin/sh": "shell",
+}
+NON_SOURCE_SUFFIXES = {".md", ".json", ".lock"}
+
+
+@dataclass(frozen=True)
+class Violation:
+    path: Path
+    line: int
+    col: int
+    kind: str
+    text: str
+
+
+SHELLCHECK_DISABLE_PATTERN = re.compile(
+    r"^# shellcheck disable=(?:SC1090|SC1091|SC2016|SC2034|SC2154|SC2329)(?:,(?:SC1090|SC1091|SC2016|SC2034|SC2154|SC2329))*$"
+)
+
+DIRECTIVE_GRAMMARS = {
+    "shell": [SHELLCHECK_DISABLE_PATTERN],
+    "python": [],
+    "nix": [],
+    "js": [],
+    "qml": [],
+    "yaml": [],
+    "toml": [],
+    "jsonc": [],
+}
+
+
+def is_shebang_line(language, line_number, col, text):
+    return (
+        line_number == 1
+        and col == 0
+        and SHEBANG_LANGUAGE.get(text) == language
+    )
+
+
+def match_directive(language, comment_text):
+    return any(p.match(comment_text) for p in DIRECTIVE_GRAMMARS.get(language, []))
+
+
+def classify_language(path, root):
+    rel = path.relative_to(root)
+    if rel.name in EXCLUDED_FILENAMES:
+        return None
+    if rel.suffix in NON_SOURCE_SUFFIXES:
+        return None
+    if rel.name == "justfile":
+        return "shell"
+    if rel.suffix in EXTENSION_LANGUAGE:
+        return EXTENSION_LANGUAGE[rel.suffix]
+    if rel.suffix:
+        return "unsupported"
+    try:
+        with path.open("rb") as handle:
+            first_line = handle.readline()
+    except OSError:
+        return None
+    if not first_line.startswith(b"#!"):
+        return "unsupported"
+    interpreter_line = first_line.decode("utf-8", "replace").rstrip("\r\n")
+    return SHEBANG_LANGUAGE.get(interpreter_line, "unsupported")
+
+
+class SourceDiscoveryError(Exception):
+    pass
+
+
+def _is_root_store_result(path, root):
+    if path != root / "result" or not path.is_symlink():
+        return False
+    try:
+        target = path.resolve(strict=False)
+    except OSError as error:
+        raise SourceDiscoveryError(f"{path}: cannot resolve symlink: {error}") from error
+    return str(target).startswith("/nix/store/")
+
+
+def discover_source_files(root):
+    root = Path(root).resolve()
+    found = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        current = Path(dirpath)
+        kept_dirnames = []
+        for dirname in dirnames:
+            candidate = current / dirname
+            if current == root and dirname in EXCLUDED_ROOT_DIR_NAMES:
+                continue
+            if dirname in EXCLUDED_DIR_NAMES:
+                continue
+            if candidate.is_symlink():
+                if _is_root_store_result(candidate, root):
+                    continue
+                raise SourceDiscoveryError(f"{candidate}: maintained source symlink is not allowed")
+            kept_dirnames.append(dirname)
+        dirnames[:] = kept_dirnames
+        for filename in filenames:
+            candidate = current / filename
+            if candidate.is_symlink():
+                if _is_root_store_result(candidate, root):
+                    continue
+                raise SourceDiscoveryError(f"{candidate}: maintained source symlink is not allowed")
+            found.append(candidate)
+    return sorted(found)
+
+
+def scan_python(path, text, root=None):
+    violations = []
+    tokens = tokenize.generate_tokens(io.StringIO(text).readline)
+    for token in tokens:
+        if token.type != tokenize.COMMENT:
+            continue
+        line_number, col = token.start
+        if is_shebang_line("python", line_number, col, token.string):
+            continue
+        if match_directive("python", token.string):
+            continue
+        violations.append(Violation(path, line_number, col, "narrative-comment", token.string))
+    tree = ast.parse(text, filename=str(path))
+    for node in _docstring_owning_nodes(tree):
+        doc_node = _leading_string_expr(node)
+        if doc_node is not None:
+            violations.append(
+                Violation(path, doc_node.lineno, doc_node.col_offset, "docstring", "")
+            )
+    violations.extend(_scan_python_embedded_assignments(path, text, tree, root))
+    return violations
+
+
+def _docstring_owning_nodes(tree):
+    yield tree
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            yield node
+
+
+def _leading_string_expr(node):
+    body = getattr(node, "body", None)
+    if not body:
+        return None
+    first = body[0]
+    if (
+        isinstance(first, ast.Expr)
+        and isinstance(first.value, ast.Constant)
+        and isinstance(first.value.value, str)
+    ):
+        return first
+    return None
+
+
+class PythonEmbeddedStringError(Exception):
+    pass
+
+
+PYTHON_PATCHER_FUNCTION_LANGUAGES = {
+    "scripts/patch-app-library": {"main": "qml"},
+    "scripts/patch-idle-service": {"apply_qml": "qml", "apply_js": "js", "main": "qml"},
+    "scripts/patch-lock-service": {"apply_shared": "qml", "apply_fingerprint_disabled": "qml", "apply_fingerprint_enabled": "qml", "main": "qml"},
+    "scripts/patch-menu-font-provider": {"main": "qml"},
+    "scripts/patch-menu-power-provider": {"main": "qml"},
+    "scripts/patch-menu-terminal-provider": {"main": "qml"},
+    "scripts/patch-notification-service": {"apply_qml": "qml", "apply_js": "js", "main": "qml"},
+    "scripts/patch-polkit-agent": {"apply_qml": "qml", "apply_js": "js", "main": "qml"},
+    "scripts/patch-transparent-foreground-process": {"main": "qml"},
+}
+PYTHON_PATCHER_FILES = set(PYTHON_PATCHER_FUNCTION_LANGUAGES)
+PYTHON_EMBEDDED_QML_ASSIGNMENTS = {
+    ("scripts/generate-postpatch-runtime-surface", "HEADLESS_KEYBOARD_PANEL"): "qml",
+}
+PYTHON_PINNED_DATA_ASSIGNMENTS = {
+    ("scripts/generate-postpatch-runtime-surface", "HEADLESS_SOURCE_PATCHES"): "data",
+    ("scripts/generate-postpatch-runtime-surface", "HEADLESS_TEXT_PATCHES"): "data",
+}
+PYTHON_EMBEDDED_ASSIGNMENT_FILES = {
+    rel_path
+    for rel_path, _ in list(PYTHON_EMBEDDED_QML_ASSIGNMENTS)
+    + list(PYTHON_PINNED_DATA_ASSIGNMENTS)
+}
+
+
+def _top_level_string_assignments(tree):
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
+            continue
+        yield node.targets[0].id, node
+
+
+def _is_triple_quoted(text, string_node):
+    segment = ast.get_source_segment(text, string_node)
+    return segment is not None and segment.startswith(('"""', "'''"))
+
+
+def _looks_like_source_code(value):
+    return (
+        re.search(
+            r"^\s*(?:import\s+\w.*\n|from\s+\w.*\n|function\s+\w\s*\(|module\.exports\s*=)",
+            value,
+            re.MULTILINE,
+        ) is not None
+        or value.lstrip().startswith("#!")
+        or any(line.lstrip().startswith(("//", "/*", "#")) for line in value.splitlines())
+    )
+
+
+def _scan_embedded_python_string(path, string_node, scanner):
+    violations = []
+    for v in scanner(path, string_node.value):
+        line = string_node.lineno + v.line - 1
+        col = v.col + string_node.col_offset + 3 if v.line == 1 else v.col
+        violations.append(Violation(path, line, col, v.kind, v.text))
+    return violations
+
+
+def _python_relative_path(path, root):
+    if root is None:
+        return None
+    try:
+        return Path(path).relative_to(root).as_posix()
+    except ValueError:
+        return None
+
+
+def _python_function_nodes(tree):
+    return [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    ]
+
+
+def _python_function_for(node, functions):
+    candidates = [
+        function
+        for function in functions
+        if function.lineno <= node.lineno <= getattr(function, "end_lineno", node.lineno)
+    ]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda function: function.lineno)
+
+
+def _python_assignment_targets(node):
+    if isinstance(node, ast.Assign):
+        return node.targets, node.value
+    if isinstance(node, ast.AnnAssign) and node.value is not None:
+        return [node.target], node.value
+    return [], None
+
+
+def _python_target_names(targets):
+    return {
+        target.id
+        for target in targets
+        if isinstance(target, ast.Name)
+    }
+
+
+def _python_path_like_expression(node):
+    if isinstance(node, ast.Name):
+        return True
+    if isinstance(node, ast.Attribute):
+        return _python_path_like_expression(node.value)
+    return (
+        isinstance(node, ast.BinOp)
+        and isinstance(node.op, ast.Div)
+        and _python_path_like_expression(node.left)
+        and isinstance(node.right, ast.Constant)
+        and isinstance(node.right.value, str)
+    )
+
+
+def _python_proven_serialized_data(node):
+    if not (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "json"
+        and node.func.attr == "dumps"
+        and len(node.args) == 1
+        and not node.keywords
+    ):
+        return False
+    value = node.args[0]
+    if not (
+        isinstance(value, ast.Call)
+        and isinstance(value.func, ast.Name)
+        and value.func.id == "str"
+        and len(value.args) == 1
+        and not value.keywords
+    ):
+        return False
+    return _python_path_like_expression(value.args[0])
+
+
+def _python_proven_generated_source_lookup(node):
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "CONSUMER_TRIGGERS"
+        and node.func.attr == "get"
+        and len(node.args) == 1
+        and not node.keywords
+    )
+
+
+def _python_proven_generated_source_replacement(node):
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "replace"
+        and len(node.args) == 2
+        and not node.keywords
+        and isinstance(node.args[0], ast.Constant)
+        and isinstance(node.args[0].value, str)
+        and _python_proven_serialized_data(node.args[1])
+    )
+
+
+def _python_assignments(scope, module):
+    def collect(owner):
+        assignments = {}
+        paths = {}
+
+        def visit(node, path):
+            paths[node] = path
+            if node is not owner and isinstance(
+                node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)
+            ):
+                return
+            targets, value = _python_assignment_targets(node)
+            for name in _python_target_names(targets):
+                assignments.setdefault(name, []).append((node.lineno, value, path))
+            if isinstance(node, ast.If):
+                visit(node.test, path)
+                for child in node.body:
+                    visit(child, path + ((node, "body"),))
+                for child in node.orelse:
+                    visit(child, path + ((node, "orelse"),))
+                return
+            if isinstance(node, (ast.For, ast.AsyncFor, ast.While)):
+                if isinstance(node, (ast.For, ast.AsyncFor)):
+                    visit(node.target, path)
+                    visit(node.iter, path)
+                else:
+                    visit(node.test, path)
+                for child in node.body:
+                    visit(child, path + ((node, "body"),))
+                for child in node.orelse:
+                    visit(child, path + ((node, "orelse"),))
+                return
+            if isinstance(node, (ast.With, ast.AsyncWith)):
+                for child in node.items:
+                    visit(child, path)
+                for child in node.body:
+                    visit(child, path + ((node, "body"),))
+                return
+            if isinstance(node, ast.Try):
+                for child in node.body:
+                    visit(child, path + ((node, "body"),))
+                for handler_index, child in enumerate(node.handlers):
+                    visit(child, path + ((node, f"handler-{handler_index}"),))
+                for child in node.orelse:
+                    visit(child, path + ((node, "orelse"),))
+                for child in node.finalbody:
+                    visit(child, path + ((node, "finalbody"),))
+                return
+            if isinstance(node, ast.ExceptHandler):
+                if node.type is not None:
+                    visit(node.type, path)
+                for child in node.body:
+                    visit(child, path)
+                return
+            if isinstance(node, ast.Match):
+                visit(node.subject, path)
+                for case_index, case in enumerate(node.cases):
+                    visit(case, path + ((node, f"case-{case_index}"),))
+                return
+            if isinstance(node, ast.match_case):
+                visit(node.pattern, path)
+                if node.guard is not None:
+                    visit(node.guard, path)
+                for child in node.body:
+                    visit(child, path)
+                return
+            for child in ast.iter_child_nodes(node):
+                visit(child, path)
+
+        for statement in owner.body:
+            visit(statement, ())
+        return assignments, paths
+
+    owner = module if scope is None else scope
+    local_assignments, local_paths = collect(owner)
+    module_assignments, module_paths = collect(module)
+    if scope is None:
+        return local_assignments, local_paths
+    assignments = {}
+    for name, candidates in local_assignments.items():
+        assignments[name] = candidates
+    for name, candidates in module_assignments.items():
+        if name not in assignments:
+            assignments[name] = candidates
+    paths = dict(module_paths)
+    paths.update(local_paths)
+    return assignments, paths
+
+
+class _PythonStringResolver:
+    def __init__(self, scope, module, allow_proven_data=False):
+        self.assignments, self.paths = _python_assignments(scope, module)
+        self.allow_proven_data = allow_proven_data
+        self.generated_source_assignments = {
+            name
+            for name, assignment in _top_level_string_assignments(module)
+            if name == "CONSUMER_TRIGGERS" and isinstance(assignment.value, ast.Dict)
+        }
+
+    def _is_proven_generated_source_value(self, node, stack=None):
+        stack = [] if stack is None else stack
+        if (
+            _python_proven_generated_source_lookup(node)
+            and "CONSUMER_TRIGGERS" in self.generated_source_assignments
+        ):
+            return True
+        if not _python_proven_generated_source_replacement(node):
+            return False
+        receiver = node.func.value
+        if not isinstance(receiver, ast.Name):
+            return False
+        candidates = self.assignments.get(receiver.id, [])
+        return bool(candidates) and all(
+            candidate[1] is node
+            or (
+                candidate[0] <= node.lineno
+                and self._is_proven_generated_source_value(
+                    candidate[1], stack + [receiver.id]
+                )
+            )
+            for candidate in candidates
+        )
+
+    def resolve(self, node, stack=None):
+        stack = [] if stack is None else stack
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return node.value, {node}
+        if isinstance(node, ast.JoinedStr):
+            parts = []
+            nodes = {node}
+            for part in node.values:
+                if isinstance(part, ast.Constant) and isinstance(part.value, str):
+                    parts.append(part.value)
+                    nodes.add(part)
+                    continue
+                if isinstance(part, ast.FormattedValue):
+                    try:
+                        value, value_nodes = self.resolve(part.value, stack)
+                    except PythonEmbeddedStringError:
+                        if not self.allow_proven_data or not _python_proven_serialized_data(part.value):
+                            raise
+                        value = '""'
+                        value_nodes = {part}
+                    parts.append(value)
+                    nodes.update(value_nodes)
+                    nodes.add(part)
+                    continue
+                raise PythonEmbeddedStringError(
+                    f"unresolved Python embedded string expression at line {getattr(node, 'lineno', '?')}"
+                )
+            return "".join(parts), nodes
+        if isinstance(node, ast.IfExp):
+            body, body_nodes = self.resolve(node.body, stack)
+            fallback, fallback_nodes = self.resolve(node.orelse, stack)
+            return body + fallback, body_nodes | fallback_nodes | {node}
+        if isinstance(node, ast.Name):
+            if node.id in stack:
+                raise PythonEmbeddedStringError(f"cyclic Python string binding: {node.id}")
+            use_path = self.paths.get(node, ())
+            candidates = self.assignments.get(node.id, [])
+            if self.allow_proven_data and candidates and all(
+                candidate[0] <= node.lineno
+                and self._is_proven_generated_source_value(candidate[1], [node.id])
+                for candidate in candidates
+            ):
+                return "", {node}
+            active = [
+                candidate
+                for candidate in candidates
+                if candidate[2] == ()
+                or use_path[:len(candidate[2])] == candidate[2]
+            ]
+            inactive = [candidate for candidate in candidates if candidate not in active]
+            if inactive or len(active) != 1 or active[0][0] > node.lineno:
+                raise PythonEmbeddedStringError(f"unresolved Python string binding: {node.id}")
+            _, value, _ = active[0]
+            if self.allow_proven_data and _python_proven_generated_source_lookup(value):
+                return "", {node}
+            return self.resolve(value, stack + [node.id])
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "block"
+            and len(node.args) == 1
+            and isinstance(node.args[0], (ast.List, ast.Tuple))
+            and not node.keywords
+        ):
+            values = []
+            nodes = {node}
+            for item in node.args[0].elts:
+                value, item_nodes = self.resolve(item, stack)
+                values.append(value)
+                nodes.update(item_nodes)
+            return "\n".join(values) + "\n", nodes
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+            left, left_nodes = self.resolve(node.left, stack)
+            right, right_nodes = self.resolve(node.right, stack)
+            return left + right, left_nodes | right_nodes | {node}
+        raise PythonEmbeddedStringError(
+            f"unresolved Python embedded string expression at line {getattr(node, 'lineno', '?')}"
+        )
+
+
+def _python_string_nodes(node):
+    return {
+        child
+        for child in ast.walk(node)
+        if isinstance(child, ast.Constant) and isinstance(child.value, str)
+    }
+
+
+def _python_source_scanner(language):
+    scanner = EMBEDDED_LANGUAGE_SCANNERS.get(language)
+    if scanner is None:
+        raise PythonEmbeddedStringError(f"no embedded scanner for Python target language: {language}")
+    return scanner
+
+
+def _python_language_for_call(rel_path, function):
+    function_name = function.name if function is not None else "module"
+    language = PYTHON_PATCHER_FUNCTION_LANGUAGES.get(rel_path, {}).get(function_name)
+    if language is None:
+        languages = set(PYTHON_PATCHER_FUNCTION_LANGUAGES.get(rel_path, {}).values())
+        if len(languages) == 1:
+            return languages.pop()
+    if language is None:
+        raise PythonEmbeddedStringError(
+            f"{rel_path}: unregistered generated-source function {function_name!r}"
+        )
+    return language
+
+
+def _mark_python_nodes(roles, nodes, role):
+    for node in nodes:
+        roles.setdefault(node, set()).add(role)
+
+
+def _scan_python_generated_value(path, value, language):
+    return [
+        Violation(path, violation.line, violation.col, violation.kind, violation.text)
+        for violation in _python_source_scanner(language)(path, value)
+    ]
+
+
+def _process_python_replacement_call(
+    path, rel_path, tree, call, resolver, roles, violations, functions, operand_start
+):
+    function = _python_function_for(call, functions)
+    language = _python_language_for_call(rel_path, function)
+    if len(call.args) < operand_start + 2:
+        raise PythonEmbeddedStringError(f"{path}: replacement call lacks both operands")
+    old_value, old_nodes = resolver.resolve(call.args[operand_start])
+    new_value, new_nodes = resolver.resolve(call.args[operand_start + 1])
+    _mark_python_nodes(roles, old_nodes, "pinned-data")
+    _mark_python_nodes(roles, new_nodes, "generated-source")
+    if new_value:
+        violations.extend(_scan_python_generated_value(path, new_value, language))
+
+
+def _mark_generator_assignment(name, value, roles, violations, path):
+    if name in {"HEADLESS_KEYBOARD_PANEL", "CONSUMER_TRIGGERS"}:
+        nodes = _python_string_nodes(value)
+        _mark_python_nodes(roles, nodes, "generated-source")
+        for node in nodes:
+            violations.extend(_scan_python_generated_value(path, node.value, "qml"))
+        return
+    if name not in {"HEADLESS_SOURCE_PATCHES", "HEADLESS_TEXT_PATCHES"}:
+        return
+    if not isinstance(value, ast.Dict):
+        raise PythonEmbeddedStringError(f"{path}: generated patch table is not a literal dictionary")
+    for item in value.values:
+        if not isinstance(item, ast.Tuple) or len(item.elts) != 2:
+            raise PythonEmbeddedStringError(f"{path}: generated patch table entry is not a pair")
+        old_nodes = _python_string_nodes(item.elts[0])
+        new_nodes = _python_string_nodes(item.elts[1])
+        _mark_python_nodes(roles, old_nodes, "pinned-data")
+        _mark_python_nodes(roles, new_nodes, "generated-source")
+        for node in new_nodes:
+            violations.extend(_scan_python_generated_value(path, node.value, "qml"))
+
+
+def _write_text_source_language(call):
+    receiver = call.func.value if isinstance(call.func, ast.Attribute) else None
+    receiver_name = receiver.id if isinstance(receiver, ast.Name) else None
+    constants = [
+        child.value
+        for child in ast.walk(call.args[0])
+        if isinstance(child, ast.Constant) and isinstance(child.value, str)
+    ] if call.args else []
+    joined = "\n".join(constants)
+    if receiver_name in {"harness_path", "keyboard_panel"}:
+        return "qml"
+    if receiver_name in {"probe_path", "backend_path", "shell_path", "target"}:
+        return "shell"
+    if "#!/bin/sh" in joined:
+        return "shell"
+    if "import QtQuick" in joined or "ShellRoot {" in joined:
+        return "qml"
+    return None
+
+
+def _scan_python_registered_file(path, rel_path, text, tree):
+    violations = []
+    roles = {}
+    functions = _python_function_nodes(tree)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "replace_once":
+            function = _python_function_for(node, functions)
+            resolver = _PythonStringResolver(function, tree)
+            _process_python_replacement_call(
+                path, rel_path, tree, node, resolver, roles, violations, functions, 1
+            )
+        elif (
+            rel_path in PYTHON_PATCHER_FILES
+            and isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "replace"
+            and len(node.args) >= 2
+            and rel_path != "scripts/generate-postpatch-runtime-surface"
+        ):
+            function = _python_function_for(node, functions)
+            if function is not None and function.name == "replace_once":
+                continue
+            resolver = _PythonStringResolver(function, tree)
+            _process_python_replacement_call(
+                path, rel_path, tree, node, resolver, roles, violations, functions, 0
+            )
+    for name, assignment in _top_level_string_assignments(tree):
+        _mark_generator_assignment(name, assignment.value, roles, violations, path)
+    if rel_path == "scripts/generate-postpatch-runtime-surface":
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "write_text"
+                and node.args
+            ):
+                language = _write_text_source_language(node)
+                if language is None:
+                    continue
+                function = _python_function_for(node, functions)
+                resolver = _PythonStringResolver(function, tree, allow_proven_data=True)
+                value, string_nodes = resolver.resolve(node.args[0])
+                _mark_python_nodes(roles, string_nodes, "generated-source")
+                violations.extend(_scan_python_generated_value(path, value, language))
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Constant) and isinstance(node.value, str)):
+            continue
+        if roles.get(node):
+            continue
+        if _looks_like_source_code(node.value):
+            raise PythonEmbeddedStringError(
+                f"{path}: unclassified embedded code-shaped string at line {node.lineno}"
+            )
+    return violations
+
+
+def _scan_python_embedded_assignments(path, text, tree, root):
+    rel_path = _python_relative_path(path, root)
+    if rel_path is None:
+        return []
+    if rel_path not in PYTHON_PATCHER_FILES and rel_path != "scripts/generate-postpatch-runtime-surface":
+        return []
+    return _scan_python_registered_file(path, rel_path, text, tree)
+
+
+class ShellLexError(Exception):
+    pass
+
+
+class _ShellLexer:
+    COMMENT_RECOGNIZING = {"NORMAL", "CMDSUB", "BACKTICK"}
+
+    def __init__(self, path, text):
+        self.path = path
+        self.text = text
+        self.pos = 0
+        self.line = 1
+        self.col = 0
+        self.stack = ["NORMAL"]
+        self.pending_heredocs = []
+        self.heredoc_delimiter = None
+        self.heredoc_strip_tabs = False
+        self.cmdsub_depth = []
+        self.cmdsub_case = []
+        self.violations = []
+
+    def peek(self, offset=0):
+        index = self.pos + offset
+        return self.text[index] if index < len(self.text) else ""
+
+    def advance(self):
+        char = self.text[self.pos]
+        self.pos += 1
+        if char == "\n":
+            self.line += 1
+            self.col = 0
+        else:
+            self.col += 1
+        return char
+
+    def at_word_boundary(self):
+        if self.pos == 0:
+            return True
+        prev = self.text[self.pos - 1]
+        return prev in " \t\n;&|()<>`" or prev == ""
+
+    def _match_keyword(self, word):
+        end = self.pos + len(word)
+        if self.text[self.pos:end] != word:
+            return False
+        next_char = self.text[end] if end < len(self.text) else ""
+        return next_char == "" or next_char in " \t\n;&|()<>`"
+
+    def run(self):
+        while self.pos < len(self.text):
+            self._step()
+        if len(self.stack) != 1 or self.stack[0] != "NORMAL":
+            raise ShellLexError(f"{self.path}: unterminated {self.stack[-1]} at EOF")
+        return self.violations
+
+    def _step(self):
+        top = self.stack[-1]
+        if top in self.COMMENT_RECOGNIZING:
+            self._step_normal()
+        elif top == "SQUOTE":
+            self._step_squote()
+        elif top == "DQUOTE":
+            self._step_dquote()
+        elif top == "DOLLAR_SQUOTE":
+            self._step_dollar_squote()
+        elif top == "ARITH":
+            self._step_arith()
+        elif top == "PARAMEXP":
+            self._step_paramexp()
+        elif top == "HEREDOC":
+            self._step_heredoc()
+
+    def context_at(self, offset):
+        if offset < 0 or offset > len(self.text):
+            raise ShellLexError(f"{self.path}: invalid shell context offset")
+        probe = _ShellLexer(self.path, self.text[:offset])
+        while probe.pos < len(probe.text):
+            probe._step()
+        backslashes = 0
+        for char in reversed(probe.text):
+            if char != "\\":
+                break
+            backslashes += 1
+        if backslashes % 2 and probe.stack[-1] != "SQUOTE":
+            raise ShellLexError(f"{self.path}: escaped shell interpolation context")
+        if probe.stack[-1] in {"SQUOTE", "DQUOTE", "DOLLAR_SQUOTE", "HEREDOC"}:
+            return True
+        if probe.stack[-1] in {"NORMAL", "CMDSUB", "BACKTICK", "ARITH", "PARAMEXP"}:
+            return False
+        raise ShellLexError(f"{self.path}: unknown shell interpolation context")
+
+    def _step_normal(self):
+        char = self.peek()
+        if char == "\\":
+            self.advance()
+            if self.pos < len(self.text):
+                self.advance()
+            return
+        if char == "'":
+            self.advance()
+            self.stack.append("SQUOTE")
+            return
+        if char == '"':
+            self.advance()
+            self.stack.append("DQUOTE")
+            return
+        if char == "$" and self.peek(1) == "'":
+            self.advance()
+            self.advance()
+            self.stack.append("DOLLAR_SQUOTE")
+            return
+        if char == "`":
+            self.advance()
+            if self.stack[-1] == "BACKTICK":
+                self.stack.pop()
+            else:
+                self.stack.append("BACKTICK")
+            return
+        if char == "$" and self.peek(1) == "(" and self.peek(2) == "(":
+            self.advance()
+            self.advance()
+            self.advance()
+            self.stack.append("ARITH")
+            return
+        if char == "$" and self.peek(1) == "(":
+            self.advance()
+            self.advance()
+            self.stack.append("CMDSUB")
+            self.cmdsub_depth.append(0)
+            self.cmdsub_case.append(0)
+            return
+        if char == "$" and self.peek(1) == "{":
+            self.advance()
+            self.advance()
+            self.stack.append("PARAMEXP")
+            return
+        if self.stack[-1] == "CMDSUB" and self.at_word_boundary() and self._match_keyword("case"):
+            self.cmdsub_case[-1] += 1
+            for _ in range(4):
+                self.advance()
+            return
+        if self.stack[-1] == "CMDSUB" and self.at_word_boundary() and self._match_keyword("esac"):
+            if self.cmdsub_case[-1] > 0:
+                self.cmdsub_case[-1] -= 1
+            for _ in range(4):
+                self.advance()
+            return
+        if char == "(" and self.stack[-1] == "CMDSUB":
+            self.advance()
+            if self.cmdsub_case[-1] > 0:
+                return
+            self.cmdsub_depth[-1] += 1
+            return
+        if char == ")" and self.stack[-1] == "CMDSUB":
+            self.advance()
+            if self.cmdsub_case[-1] > 0:
+                return
+            if self.cmdsub_depth[-1] > 0:
+                self.cmdsub_depth[-1] -= 1
+            else:
+                self.stack.pop()
+                self.cmdsub_depth.pop()
+                self.cmdsub_case.pop()
+            return
+        if char == "<" and self.peek(1) == "<":
+            self._consume_heredoc_operator()
+            return
+        if char == "#" and self.at_word_boundary():
+            self._consume_comment()
+            return
+        if char == "\n":
+            self.advance()
+            self._consume_pending_heredocs()
+            return
+        self.advance()
+
+    def _consume_comment(self):
+        start_line, start_col = self.line, self.col
+        start = self.pos
+        while self.pos < len(self.text) and self.text[self.pos] != "\n":
+            self.advance()
+        comment_text = self.text[start:self.pos]
+        self.violations.append((start_line, start_col, comment_text))
+
+    def _consume_heredoc_operator(self):
+        self.advance()
+        self.advance()
+        strip_tabs = False
+        if self.peek() == "-":
+            self.advance()
+            strip_tabs = True
+        while self.peek() in (" ", "\t"):
+            self.advance()
+        delimiter_chars = []
+        if self.peek() in ("'", '"'):
+            quote_char = self.advance()
+            while self.pos < len(self.text) and self.peek() != quote_char:
+                delimiter_chars.append(self.advance())
+            if self.pos < len(self.text):
+                self.advance()
+        else:
+            while self.pos < len(self.text) and self.peek() not in " \t\n;&|()<>":
+                if self.peek() == "\\" and self.pos + 1 < len(self.text):
+                    self.advance()
+                delimiter_chars.append(self.advance())
+        delimiter = "".join(delimiter_chars)
+        if delimiter:
+            self.pending_heredocs.append((delimiter, strip_tabs))
+
+    def _consume_pending_heredocs(self):
+        if not self.pending_heredocs:
+            return
+        delimiter, strip_tabs = self.pending_heredocs.pop(0)
+        self.heredoc_delimiter = delimiter
+        self.heredoc_strip_tabs = strip_tabs
+        self.stack.append("HEREDOC")
+
+    def _step_heredoc(self):
+        start = self.pos
+        while self.pos < len(self.text) and self.text[self.pos] != "\n":
+            self.advance()
+        line = self.text[start:self.pos]
+        if self.pos < len(self.text):
+            self.advance()
+        candidate = line.lstrip("\t") if self.heredoc_strip_tabs else line
+        if candidate == self.heredoc_delimiter:
+            self.stack.pop()
+            if self.pending_heredocs:
+                delimiter, strip_tabs = self.pending_heredocs.pop(0)
+                self.heredoc_delimiter = delimiter
+                self.heredoc_strip_tabs = strip_tabs
+                self.stack.append("HEREDOC")
+
+    def _step_squote(self):
+        char = self.advance()
+        if char == "'":
+            self.stack.pop()
+
+    def _step_dollar_squote(self):
+        char = self.advance()
+        if char == "\\":
+            if self.pos < len(self.text):
+                self.advance()
+            return
+        if char == "'":
+            self.stack.pop()
+
+    def _step_dquote(self):
+        char = self.peek()
+        if char == "\\":
+            self.advance()
+            if self.pos < len(self.text):
+                self.advance()
+            return
+        if char == '"':
+            self.advance()
+            self.stack.pop()
+            return
+        if char == "$" and self.peek(1) == "(" and self.peek(2) == "(":
+            self.advance()
+            self.advance()
+            self.advance()
+            self.stack.append("ARITH")
+            return
+        if char == "$" and self.peek(1) == "(":
+            self.advance()
+            self.advance()
+            self.stack.append("CMDSUB")
+            self.cmdsub_depth.append(0)
+            self.cmdsub_case.append(0)
+            return
+        if char == "$" and self.peek(1) == "{":
+            self.advance()
+            self.advance()
+            self.stack.append("PARAMEXP")
+            return
+        if char == "`":
+            self.advance()
+            self.stack.append("BACKTICK")
+            return
+        self.advance()
+
+    def _step_paramexp(self):
+        char = self.peek()
+        if char == "\\":
+            self.advance()
+            if self.pos < len(self.text):
+                self.advance()
+            return
+        if char == "}":
+            self.advance()
+            self.stack.pop()
+            return
+        if char == "'":
+            self.advance()
+            self.stack.append("SQUOTE")
+            return
+        if char == '"':
+            self.advance()
+            self.stack.append("DQUOTE")
+            return
+        if char == "$" and self.peek(1) == "{":
+            self.advance()
+            self.advance()
+            self.stack.append("PARAMEXP")
+            return
+        if char == "$" and self.peek(1) == "(" and self.peek(2) == "(":
+            self.advance()
+            self.advance()
+            self.advance()
+            self.stack.append("ARITH")
+            return
+        if char == "$" and self.peek(1) == "(":
+            self.advance()
+            self.advance()
+            self.stack.append("CMDSUB")
+            self.cmdsub_depth.append(0)
+            self.cmdsub_case.append(0)
+            return
+        self.advance()
+
+    def _step_arith(self):
+        char = self.peek()
+        if char == ")" and self.peek(1) == ")":
+            self.advance()
+            self.advance()
+            self.stack.pop()
+            return
+        self.advance()
+
+
+def scan_shell(path, text, root=None):
+    violations = []
+    for line_number, col, comment_text in _ShellLexer(path, text).run():
+        if is_shebang_line("shell", line_number, col, comment_text):
+            continue
+        if match_directive("shell", comment_text):
+            continue
+        violations.append(Violation(path, line_number, col, "narrative-comment", comment_text))
+    return violations
+
+
+class NixLexError(Exception):
+    pass
+
+
+def _line_col(text, pos):
+    line = text.count("\n", 0, pos) + 1
+    last_newline = text.rfind("\n", 0, pos)
+    col = pos - last_newline - 1 if last_newline != -1 else pos
+    return line, col
+
+
+BINDING_NAME_PATTERN = re.compile(r"([A-Za-z_][A-Za-z0-9_'-]*)\s*=\s*$")
+CALL_HEAD_PATTERN = re.compile(
+    r"(writeShellScript|writeShellScriptBin|writeShellApplication|runCommandLocal|runCommand|mkDerivation|writeText|writeTextDir)\b"
+)
+WRITETEXT_NAME_PATTERN = re.compile(r'writeText(?:Dir)?\s+"([^"]+)"\s*$')
+SHELL_APPLICATION_TEXT_CONTEXT_PATTERN = re.compile(
+    r"(writeShellApplication|writeShellScriptBin)\b"
+)
+PRIORITY_WRAPPER_PATTERN = re.compile(r"lib\.(?:mkForce|mkDefault|mkOverride\s+\d+)\s*$")
+PAM_SERVICE_TEXT_BINDING_PATTERN = re.compile(
+    r'(?<![A-Za-z0-9_.\'-])security\.pam\.services\.(?:"[^"]*"|[A-Za-z_][A-Za-z0-9_\'-]*)\.text\s*=\s*$'
+)
+NIX_ACTIVATION_BINDING_PATTERN = re.compile(
+    r"\b(?:home|config\.home)\.activation\.[A-Za-z_][A-Za-z0-9_'-]*\s*="
+)
+NIX_POLKIT_SOURCE_BINDING_PATTERN = re.compile(
+    r"\bsecurity\.polkit\.extraConfig\s*="
+)
+NIX_PINNED_DATA_BINDING_NAMES = {"consumerFeatureOverrides"}
+
+EMBEDDED_CODE_BINDING_NAMES = {
+    "buildPhase": "shell",
+    "installPhase": "shell",
+    "configurePhase": "shell",
+    "checkPhase": "shell",
+    "unpackPhase": "shell",
+    "patchPhase": "shell",
+    "fixupPhase": "shell",
+    "installCheckPhase": "shell",
+    "preBuild": "shell",
+    "postBuild": "shell",
+    "preInstall": "shell",
+    "postInstall": "shell",
+    "preConfigure": "shell",
+    "postConfigure": "shell",
+    "preCheck": "shell",
+    "postCheck": "shell",
+    "prePatch": "shell",
+    "postPatch": "shell",
+    "preFixup": "shell",
+    "postFixup": "shell",
+    "shellHook": "shell",
+    "extraInstallCommands": "shell",
+    "testScript": "python",
+}
+AMBIGUOUS_CODE_SHAPED_BINDING_NAMES = {"text"}
+EMBEDDED_CODE_CALL_HEADS = {
+    "writeShellScript": "shell",
+    "writeShellScriptBin": "shell",
+    "writeShellApplication": "shell",
+    "runCommandLocal": "shell",
+    "runCommand": "shell",
+}
+
+
+def _lookback_context(text, string_start_pos):
+    window = text[max(0, string_start_pos - 200):string_start_pos]
+    binding_window = window.rstrip()
+    wrapper_match = PRIORITY_WRAPPER_PATTERN.search(binding_window)
+    if wrapper_match:
+        binding_window = binding_window[:wrapper_match.start()].rstrip()
+    if PAM_SERVICE_TEXT_BINDING_PATTERN.search(binding_window):
+        return "pam-service-data", "text"
+    binding_match = BINDING_NAME_PATTERN.search(binding_window)
+    if binding_match:
+        return "binding", binding_match.group(1)
+    call_matches = list(CALL_HEAD_PATTERN.finditer(window))
+    if call_matches:
+        return "call", call_matches[-1].group(1)
+    return None, None
+
+
+def _is_nix_code_shaped_context(context_kind, context_name):
+    if context_kind == "pam-service-data":
+        return False
+    if context_kind == "binding":
+        return context_name in EMBEDDED_CODE_BINDING_NAMES or context_name in AMBIGUOUS_CODE_SHAPED_BINDING_NAMES
+    if context_kind == "call":
+        return context_name in EMBEDDED_CODE_CALL_HEADS
+    return False
+
+
+def classify_nix_string_binding(context_kind, context_name, text=None, string_start_pos=None):
+    if context_kind == "binding" and context_name in EMBEDDED_CODE_BINDING_NAMES:
+        return EMBEDDED_CODE_BINDING_NAMES[context_name]
+    if context_kind == "binding" and context_name in AMBIGUOUS_CODE_SHAPED_BINDING_NAMES:
+        if text is None or string_start_pos is None:
+            return None
+        window = text[max(0, string_start_pos - 500):string_start_pos]
+        if SHELL_APPLICATION_TEXT_CONTEXT_PATTERN.search(window):
+            return "shell"
+        return None
+    if context_kind == "call" and context_name in EMBEDDED_CODE_CALL_HEADS:
+        return EMBEDDED_CODE_CALL_HEADS[context_name]
+    return None
+
+
+def classify_write_text_by_name(text, string_start_pos):
+    window = text[max(0, string_start_pos - 200):string_start_pos]
+    match = WRITETEXT_NAME_PATTERN.search(window)
+    if not match:
+        return None
+    return EXTENSION_LANGUAGE.get(Path(match.group(1)).suffix)
+
+
+@dataclass(frozen=True)
+class NixToken:
+    kind: str
+    value: str
+    start: int
+    end: int
+
+
+@dataclass(frozen=True)
+class NixBinding:
+    name: str
+    value_index: int | None
+    value_end: int
+    start: int
+    end: int
+    scope_id: int
+    kind: str = "assignment"
+
+
+@dataclass(frozen=True)
+class NixScope:
+    scope_id: int
+    kind: str
+    start: int
+    end: int
+
+
+class NixBindings(list):
+    def __init__(self, bindings, scopes, token_indices, source_path=None, root=None):
+        super().__init__(bindings)
+        self.scopes = scopes
+        self.token_indices = token_indices
+        self.source_path = None if source_path is None else Path(source_path).resolve()
+        self.root = None if root is None else Path(root).resolve()
+
+    def scope_chain(self, index):
+        containing = [
+            scope
+            for scope in self.scopes
+            if scope.start <= index < scope.end
+        ]
+        return tuple(
+            scope.scope_id
+            for scope in sorted(
+                containing,
+                key=lambda scope: (
+                    scope.end - scope.start,
+                    scope.kind == "root",
+                    -scope.start,
+                ),
+            )
+        )
+
+    def token_index_for_position(self, position):
+        try:
+            return self.token_indices[position]
+        except KeyError as error:
+            raise NixLexError(f"missing Nix token position: {position}") from error
+
+
+def _decode_nix_double_quoted(value):
+    decoded = []
+    pos = 0
+    escapes = {
+        "n": "\n",
+        "r": "\r",
+        "t": "\t",
+        '"': '"',
+        "\\": "\\",
+        "$": "$",
+    }
+    while pos < len(value):
+        if value[pos] == "\\" and pos + 1 < len(value):
+            decoded.append(escapes.get(value[pos + 1], value[pos + 1]))
+            pos += 2
+            continue
+        decoded.append(value[pos])
+        pos += 1
+    return "".join(decoded)
+
+
+def _skip_nix_interpolation(path, text, pos):
+    depth = 0
+    while pos < len(text):
+        if text[pos] == "#":
+            newline = text.find("\n", pos)
+            pos = len(text) if newline == -1 else newline
+            continue
+        if text.startswith("/*", pos):
+            end = text.find("*/", pos + 2)
+            if end == -1:
+                raise NixLexError(f"{path}: unterminated block comment")
+            pos = end + 2
+            continue
+        if text[pos] == '"':
+            pos, _ = _parse_nix_double_string(path, text, pos)
+            continue
+        if text.startswith("''", pos):
+            pos, _ = _parse_nix_indented_string(path, text, pos)
+            continue
+        if text[pos] == "{":
+            depth += 1
+        elif text[pos] == "}":
+            if depth == 0:
+                return pos + 1
+            depth -= 1
+        pos += 1
+    raise NixLexError(f"{path}: unterminated interpolation")
+
+
+def _parse_nix_double_string(path, text, start):
+    pos = start + 1
+    segment_start = pos
+    parts = []
+    while pos < len(text):
+        if text[pos] == "\\":
+            pos += 2
+            continue
+        if text.startswith("${", pos):
+            parts.append(text[segment_start:pos])
+            end = _skip_nix_interpolation(path, text, pos + 2)
+            parts.append(" " * (end - pos))
+            pos = end
+            segment_start = pos
+            continue
+        if text[pos] == '"':
+            parts.append(text[segment_start:pos])
+            return pos + 1, _decode_nix_double_quoted("".join(parts))
+        pos += 1
+    raise NixLexError(f"{path}: unterminated double-quoted string")
+
+
+def _parse_nix_indented_string(path, text, start):
+    pos = start + 2
+    segment_start = pos
+    parts = []
+    while pos < len(text):
+        if text.startswith("''\\", pos):
+            parts.append(text[segment_start:pos] + "    ")
+            pos += 4
+            segment_start = pos
+            continue
+        if text.startswith("'''", pos):
+            parts.append(text[segment_start:pos] + "   ")
+            pos += 3
+            segment_start = pos
+            continue
+        if text.startswith("''${", pos):
+            parts.append(text[segment_start:pos] + "    ")
+            pos += 4
+            segment_start = pos
+            continue
+        if text.startswith("${", pos):
+            parts.append(text[segment_start:pos])
+            end = _skip_nix_interpolation(path, text, pos + 2)
+            parts.append(" " * (end - pos))
+            pos = end
+            segment_start = pos
+            continue
+        if text.startswith("''", pos):
+            parts.append(text[segment_start:pos])
+            return pos + 2, _dedent_nix_indented_string("".join(parts))
+        pos += 1
+    raise NixLexError(f"{path}: unterminated indented string")
+
+
+def _lex_nix_tokens(path, text):
+    tokens = []
+    pos = 0
+    length = len(text)
+    while pos < length:
+        char = text[pos]
+        if char.isspace():
+            pos += 1
+            continue
+        if char == "#":
+            newline = text.find("\n", pos)
+            pos = length if newline == -1 else newline
+            continue
+        if text.startswith("/*", pos):
+            end = text.find("*/", pos + 2)
+            if end == -1:
+                raise NixLexError(f"{path}: unterminated block comment")
+            pos = end + 2
+            continue
+        if char == '"':
+            end, value = _parse_nix_double_string(path, text, pos)
+            tokens.append(NixToken("string", value, pos, end))
+            pos = end
+            continue
+        if text.startswith("''", pos):
+            end, value = _parse_nix_indented_string(path, text, pos)
+            tokens.append(NixToken("string", value, pos, end))
+            pos = end
+            continue
+        if char.isalpha() or char == "_":
+            start = pos
+            pos += 1
+            while pos < length and (text[pos].isalnum() or text[pos] in "_'-"):
+                pos += 1
+            tokens.append(NixToken("identifier", text[start:pos], start, pos))
+            continue
+        tokens.append(NixToken("punctuation", char, pos, pos + 1))
+        pos += 1
+    return tokens
+
+
+def _dedent_nix_indented_string(body):
+    lines = body.split("\n")
+    indents = [len(line) - len(line.lstrip(" ")) for line in lines if line.strip(" ") != ""]
+    min_indent = min(indents) if indents else 0
+    return "\n".join(line[min_indent:] for line in lines)
+
+
+def _nix_balanced_end(tokens, start):
+    pairs = {"{": "}", "(": ")", "[": "]"}
+    stack = []
+    for index in range(start, len(tokens)):
+        value = tokens[index].value
+        if value in pairs:
+            stack.append(pairs[value])
+        elif stack and value == stack[-1]:
+            stack.pop()
+            if not stack:
+                return index + 1
+    raise NixLexError("unterminated Nix grouping")
+
+
+def _nix_expression_end(tokens, start):
+    if start >= len(tokens):
+        return start
+    token = tokens[start]
+    if token.value in {"{", "(", "["}:
+        return _nix_balanced_end(tokens, start)
+    if token.kind in {"string", "identifier"}:
+        return start + 1
+    index = start
+    depth = 0
+    while index < len(tokens):
+        value = tokens[index].value
+        if value in {"{", "(", "["}:
+            depth += 1
+        elif value in {"}", ")", "]"}:
+            if depth == 0:
+                break
+            depth -= 1
+        elif depth == 0 and value in {";", ",", "in"}:
+            break
+        index += 1
+    return index
+
+
+def _nix_expression_boundary(tokens, start):
+    delimiter_stack = []
+    let_depth = 0
+    pairs = {"{": "}", "(": ")", "[": "]"}
+    for index in range(start, len(tokens)):
+        value = tokens[index].value
+        if value in pairs:
+            delimiter_stack.append(pairs[value])
+            continue
+        if delimiter_stack and value == delimiter_stack[-1]:
+            delimiter_stack.pop()
+            continue
+        if tokens[index].kind == "identifier" and value == "let":
+            let_depth += 1
+            continue
+        if tokens[index].kind == "identifier" and value == "in" and let_depth:
+            let_depth -= 1
+            continue
+        if not delimiter_stack and not let_depth and value in {";", ","}:
+            return index
+    return len(tokens)
+
+
+def _nix_scopes(tokens):
+    scopes = [NixScope(0, "root", 0, len(tokens))]
+    delimiters = []
+    pairs = {"{": "}", "(": ")", "[": "]"}
+    matching_close = {}
+    for index, token in enumerate(tokens):
+        if token.value in pairs:
+            delimiters.append((index, pairs[token.value]))
+            continue
+        if delimiters and token.value == delimiters[-1][1]:
+            open_index, _ = delimiters.pop()
+            matching_close[open_index] = index
+    for index, token in enumerate(tokens):
+        if token.value == "{" and index in matching_close:
+            kind = "rec-attrset" if index > 0 and tokens[index - 1].value == "rec" else "attrset"
+            scopes.append(NixScope(len(scopes), kind, index + 1, matching_close[index]))
+    for index, token in enumerate(tokens):
+        if token.value != "let":
+            continue
+        depth = 1
+        body_start = None
+        for candidate in range(index + 1, len(tokens)):
+            value = tokens[candidate].value
+            if tokens[candidate].kind == "identifier" and value == "let":
+                depth += 1
+            elif tokens[candidate].kind == "identifier" and value == "in":
+                depth -= 1
+                if depth == 0:
+                    body_start = candidate + 1
+                    break
+        if body_start is None:
+            raise NixLexError("unterminated Nix let expression")
+        scopes.append(
+            NixScope(
+                len(scopes),
+                "let",
+                index,
+                _nix_expression_boundary(tokens, body_start),
+            )
+        )
+    for index, token in enumerate(tokens):
+        if token.value != ":":
+            continue
+        body_start = index + 1
+        scopes.append(
+            NixScope(
+                len(scopes),
+                "function",
+                body_start,
+                _nix_expression_boundary(tokens, body_start),
+            )
+        )
+    return tuple(scopes)
+
+
+def _nix_innermost_scope(scopes, index):
+    containing = [
+        scope
+        for scope in scopes
+        if scope.start <= index < scope.end
+    ]
+    if not containing:
+        raise NixLexError(f"Nix token is outside lexical scopes: {index}")
+    return min(
+        containing,
+        key=lambda scope: (
+            scope.end - scope.start,
+            scope.kind == "root",
+            -scope.start,
+        ),
+    )
+
+
+def _nix_scalar_token(token):
+    return (
+        token.kind == "string"
+        or token.value in {"true", "false", "null"}
+        or token.value.isdigit()
+    )
+
+
+def _nix_simple_expression_end(tokens, start):
+    if start >= len(tokens):
+        return None
+    if _nix_scalar_token(tokens[start]):
+        return start + 1
+    if tokens[start].kind == "identifier":
+        index = start + 1
+        while (
+            index + 1 < len(tokens)
+            and tokens[index].value == "."
+            and tokens[index + 1].kind == "identifier"
+        ):
+            index += 2
+        return index
+    if (
+        tokens[start].value == "."
+        and start + 1 < len(tokens)
+        and tokens[start + 1].value == "/"
+    ):
+        index = start + 2
+        while index < len(tokens) and tokens[index].value not in {";", ",", "]", "}"}:
+            index += 1
+        return index
+    return None
+
+
+def _nix_bindings(tokens, source_path=None, root=None):
+    scopes = _nix_scopes(tokens)
+    token_indices = {token.start: index for index, token in enumerate(tokens)}
+    bindings = []
+    for index, token in enumerate(tokens[:-1]):
+        if token.kind != "identifier" or tokens[index + 1].value != "=":
+            continue
+        if index > 0 and tokens[index - 1].value == ".":
+            continue
+        value_index = index + 2
+        end = _nix_expression_boundary(tokens, value_index)
+        direct = value_index if value_index < len(tokens) else None
+        scope = _nix_innermost_scope(scopes, index)
+        bindings.append(
+            NixBinding(
+                token.value,
+                direct,
+                end,
+                token.start,
+                tokens[end - 1].end if end > value_index else token.end,
+                scope.scope_id,
+            )
+        )
+    function_scopes = {
+        scope.start - 1: scope
+        for scope in scopes
+        if scope.kind == "function"
+    }
+    for index, token in enumerate(tokens):
+        if token.value != ":" or index == 0:
+            continue
+        parameter = tokens[index - 1]
+        scope = function_scopes.get(index)
+        if scope is None:
+            continue
+        parameter_names = []
+        if parameter.kind == "identifier":
+            parameter_names.append(parameter)
+        elif parameter.value == "}":
+            depth = 1
+            opening = None
+            for candidate in range(index - 2, -1, -1):
+                if tokens[candidate].value == "}":
+                    depth += 1
+                elif tokens[candidate].value == "{":
+                    depth -= 1
+                    if depth == 0:
+                        opening = candidate
+                        break
+            if opening is None:
+                raise NixLexError("unterminated Nix function parameter set")
+            parameter_names.extend(
+                current
+                for offset, current in enumerate(tokens[opening + 1:index - 1], opening + 1)
+                if current.kind == "identifier"
+                and (offset == opening + 1 or tokens[offset - 1].value != ".")
+            )
+        for parameter in parameter_names:
+            bindings.append(
+                NixBinding(
+                    parameter.value,
+                    None,
+                    index,
+                    parameter.start,
+                    parameter.end,
+                    scope.scope_id,
+                    "parameter",
+                )
+            )
+    return NixBindings(bindings, scopes, token_indices, source_path, root)
+
+
+def _nix_binding_for(bindings, name, position):
+    reference_index = bindings.token_index_for_position(position)
+    scope_chain = bindings.scope_chain(reference_index)
+    for scope_id in scope_chain:
+        scope = bindings.scopes[scope_id]
+        if scope.kind == "attrset":
+            continue
+        candidates = [
+            binding
+            for binding in bindings
+            if binding.name == name
+            and binding.scope_id == scope_id
+            and (scope.kind == "let" or binding.start < position)
+        ]
+        if len(candidates) > 1:
+            raise NixLexError(f"ambiguous Nix source binding: {name}")
+        if candidates:
+            return candidates[0]
+    if not scope_chain:
+        raise NixLexError(f"unresolved Nix source binding: {name}")
+    raise NixLexError(f"unresolved Nix source binding: {name}")
+
+
+def _nix_function_return_index(tokens, bindings, name, position):
+    binding = _nix_binding_for(bindings, name, position)
+    binding_index = next(
+        index for index, token in enumerate(tokens) if token.start == binding.start
+    )
+    value_index = binding_index + 2
+    if value_index >= len(tokens):
+        raise NixLexError(f"dynamic Nix function return: {name}")
+    if tokens[value_index].value in {"{", "(", "["}:
+        parameter_end = _nix_balanced_end(tokens, value_index)
+    elif tokens[value_index].kind == "identifier":
+        parameter_end = value_index + 1
+    else:
+        raise NixLexError(f"dynamic Nix function return: {name}")
+    if parameter_end >= len(tokens) or tokens[parameter_end].value != ":":
+        raise NixLexError(f"dynamic Nix function return: {name}")
+    result_index = parameter_end + 1
+    if result_index >= len(tokens) or tokens[result_index].kind != "string":
+        raise NixLexError(f"dynamic Nix function return: {name}")
+    return result_index
+
+
+def _resolve_nix_string(tokens, bindings, index, stack=None):
+    stack = [] if stack is None else stack
+    token = tokens[index]
+    if token.kind == "string":
+        return index
+    if token.value == "(":
+        close = _nix_balanced_end(tokens, index)
+        if index + 1 < close and tokens[index + 1].kind == "identifier":
+            return _nix_function_return_index(
+                tokens, bindings, tokens[index + 1].value, token.start
+            )
+        raise NixLexError(f"dynamic Nix executable-source expression at {token.start}")
+    if token.kind != "identifier":
+        raise NixLexError(f"dynamic Nix executable-source expression at {token.start}")
+    if token.value in stack:
+        raise NixLexError(f"cyclic Nix source binding: {token.value}")
+    binding = _nix_binding_for(bindings, token.value, token.start)
+    if binding.value_index is None:
+        raise NixLexError(f"dynamic Nix executable-source binding: {token.value}")
+    return _resolve_nix_string(tokens, bindings, binding.value_index, stack + [token.value])
+
+
+def _looks_like_nix_code(value):
+    if value.lstrip().startswith("#!"):
+        return True
+    lines = value.splitlines()
+    if any(line.lstrip().startswith(("//", "/*")) for line in lines):
+        return True
+    if len(lines) > 1 and any(line.lstrip().startswith("#") for line in lines):
+        if any(line.strip() and not line.lstrip().startswith("#") for line in lines):
+            return True
+    return re.search(
+        r"\b(?:echo|touch|mkdir|export|function|import|property|Process|Item|ShellRoot|machine\.)\b",
+        value,
+    ) is not None
+
+
+def _mark_nix_position(positions, token, language):
+    existing = positions.get(token.start, ())
+    if isinstance(existing, str):
+        languages = {existing}
+    else:
+        languages = set(existing)
+    languages.add(language)
+    positions[token.start] = frozenset(languages)
+
+
+def _nix_source_languages(value):
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        return (value,)
+    return tuple(value)
+
+
+def _mark_nix_source(tokens, bindings, index, language, positions):
+    _nix_mark_source_expression(
+        tokens,
+        bindings,
+        index,
+        language,
+        positions,
+        set(),
+    )
+
+
+def _mark_nix_data(tokens, bindings, index, data_positions):
+    try:
+        resolved = _resolve_nix_string(tokens, bindings, index)
+    except NixLexError:
+        return
+    data_positions.add(tokens[resolved].start)
+
+
+def _mark_nix_data_range(tokens, start, end, data_positions):
+    for token in tokens[start:end]:
+        if token.kind == "string":
+            data_positions.add(token.start)
+
+
+def _nix_call_attrset_end(tokens, index):
+    if index < len(tokens) and tokens[index].value == "rec":
+        index += 1
+    if index >= len(tokens) or tokens[index].value != "{":
+        raise NixLexError("dynamic Nix builder attribute set")
+    return index, _nix_balanced_end(tokens, index)
+
+
+def _is_nix_read_file_expression(tokens, index):
+    return (
+        index + 3 < len(tokens)
+        and tokens[index].kind == "identifier"
+        and tokens[index].value == "builtins"
+        and tokens[index + 1].value == "."
+        and tokens[index + 2].kind == "identifier"
+        and tokens[index + 2].value == "readFile"
+        and tokens[index + 3].value in {".", "/"}
+    )
+
+
+def _nix_expression_end_until(tokens, start, stop_values):
+    delimiter_stack = []
+    pairs = {"{": "}", "(": ")", "[": "]"}
+    for index in range(start, len(tokens)):
+        value = tokens[index].value
+        if not delimiter_stack and value in stop_values:
+            return index
+        if value in pairs:
+            delimiter_stack.append(pairs[value])
+            continue
+        if delimiter_stack and value == delimiter_stack[-1]:
+            delimiter_stack.pop()
+            continue
+    return len(tokens)
+
+
+def _nix_static_path_end(tokens, start):
+    return _nix_expression_end_until(tokens, start, {";", ",", "]", ")", "}"})
+
+
+def _nix_validate_source_file_path(bindings, raw_path, language=None):
+    if bindings.source_path is None or bindings.root is None:
+        raise NixLexError("Nix readFile source has no repository provenance")
+    if not raw_path.startswith(("./", "../")):
+        raise NixLexError(f"Nix readFile source is not repository-relative: {raw_path}")
+    candidate = bindings.source_path.parent / raw_path
+    current = candidate
+    while current != bindings.root and current != current.parent:
+        if current.is_symlink():
+            raise NixLexError(f"Nix readFile source is a symlink: {candidate}")
+        current = current.parent
+    try:
+        target = candidate.resolve(strict=True)
+    except OSError as error:
+        raise NixLexError(f"Nix readFile source cannot be resolved: {raw_path}") from error
+    try:
+        target.relative_to(bindings.root)
+    except ValueError as error:
+        raise NixLexError(f"Nix readFile source escapes repository: {raw_path}") from error
+    if target.is_symlink() or not target.is_file():
+        raise NixLexError(f"Nix readFile source is not a maintained file: {raw_path}")
+    target_language = classify_language(target, bindings.root)
+    if target_language in {None, "unsupported"}:
+        raise NixLexError(f"Nix readFile source is not maintained source: {raw_path}")
+    if language is not None and target_language != language:
+        raise NixLexError(f"Nix readFile source language mismatch: {raw_path}")
+    return target
+
+
+def _nix_read_file_path(tokens, index):
+    if not _is_nix_read_file_expression(tokens, index):
+        raise NixLexError("expected Nix readFile expression")
+    end = _nix_static_path_end(tokens, index + 3)
+    raw_path = "".join(token.value for token in tokens[index + 3:end])
+    if not raw_path:
+        raise NixLexError("empty Nix readFile path")
+    return raw_path, end
+
+
+def _nix_list_end(tokens, index):
+    if index >= len(tokens) or tokens[index].value != "[":
+        raise NixLexError("expected Nix list")
+    return _nix_balanced_end(tokens, index)
+
+
+def _nix_map_read_file_end(tokens, index, bindings, stack, language):
+    if index >= len(tokens) or tokens[index].value != "(":
+        return None
+    close = _nix_balanced_end(tokens, index)
+    if (
+        index + 4 >= close
+        or tokens[index + 1].value != "map"
+        or tokens[index + 2].value != "builtins"
+        or tokens[index + 3].value != "."
+        or tokens[index + 4].value != "readFile"
+    ):
+        return None
+    source_list = index + 5
+    if tokens[source_list].value == "(":
+        source_list_end = _nix_balanced_end(tokens, source_list)
+    else:
+        source_list_end = _nix_expression_end_until(tokens, source_list, {")", ";", ","})
+    _nix_validate_read_file_sources(
+        tokens,
+        bindings,
+        source_list,
+        source_list_end,
+        stack,
+        language,
+    )
+    if source_list_end != close - 1:
+        raise NixLexError("unsupported Nix readFile map expression")
+    return close
+
+
+def _nix_path_expression_end(tokens, start, end):
+    if start >= end or tokens[start].value != ".":
+        raise NixLexError(f"expected relative Nix path at {tokens[start].start}")
+    index = start + 1
+    if index < end and tokens[index].value == ".":
+        index += 1
+    if index >= end or tokens[index].value != "/":
+        raise NixLexError(f"expected relative Nix path at {tokens[start].start}")
+    index += 1
+    while index < end:
+        if tokens[index].value == "." and index + 1 < end and tokens[index + 1].value in {".", "/"}:
+            break
+        if tokens[index].value in {",", "]", ")", "}"}:
+            break
+        index += 1
+    return index
+
+
+def _nix_validate_read_file_sources(tokens, bindings, start, end, stack, language):
+    if start >= end:
+        raise NixLexError("empty Nix readFile source list")
+    if tokens[start].value == "(":
+        close = _nix_balanced_end(tokens, start)
+        if close != end:
+            raise NixLexError("unsupported grouped Nix readFile source list")
+        return _nix_validate_read_file_sources(
+            tokens,
+            bindings,
+            start + 1,
+            close - 1,
+            stack,
+            language,
+        )
+    if tokens[start].value == "[":
+        close = _nix_balanced_end(tokens, start)
+        if close != end:
+            raise NixLexError("unsupported Nix readFile source list")
+        index = start + 1
+        while index < close - 1:
+            if tokens[index].value == ",":
+                index += 1
+                continue
+            item_end = _nix_path_expression_end(tokens, index, close - 1)
+            raw_path = "".join(token.value for token in tokens[index:item_end])
+            _nix_validate_source_file_path(bindings, raw_path, language)
+            index = item_end
+        return
+    if tokens[start].kind != "identifier":
+        raise NixLexError(f"dynamic Nix readFile source list at {tokens[start].start}")
+    if tokens[start].value in stack:
+        raise NixLexError(f"cyclic Nix readFile source list: {tokens[start].value}")
+    binding = _nix_binding_for(bindings, tokens[start].value, tokens[start].start)
+    if binding.value_index is None or tokens[binding.value_index].value not in {"[", "("}:
+        raise NixLexError(f"dynamic Nix readFile source list: {tokens[start].value}")
+    _nix_validate_read_file_sources(
+        tokens,
+        bindings,
+        binding.value_index,
+        binding.value_end,
+        stack + [tokens[start].value],
+        language,
+    )
+
+
+def _nix_mark_data_expression(tokens, bindings, index, data_positions, stack=None):
+    stack = [] if stack is None else stack
+    if index >= len(tokens):
+        raise NixLexError("missing Nix data expression")
+    token = tokens[index]
+    if token.value == "(":
+        close = _nix_balanced_end(tokens, index)
+        inner_end = _nix_mark_data_expression(
+            tokens, bindings, index + 1, data_positions, stack
+        )
+        if inner_end != close - 1:
+            raise NixLexError("unsupported grouped Nix data expression")
+        return close
+    if _nix_scalar_token(token):
+        if token.kind == "string":
+            data_positions.add(token.start)
+        return index + 1
+    simple_end = _nix_simple_expression_end(tokens, index)
+    if token.kind == "identifier" and simple_end is not None and simple_end > index + 1:
+        _nix_prove_data_expression(tokens, bindings, index, simple_end, stack)
+        return simple_end
+    if token.kind != "identifier":
+        raise NixLexError(f"dynamic Nix data expression at {token.start}")
+    if token.value in stack:
+        raise NixLexError(f"cyclic Nix data binding: {token.value}")
+    binding = _nix_binding_for(bindings, token.value, token.start)
+    if binding.value_index is None:
+        raise NixLexError(f"dynamic Nix data binding: {token.value}")
+    _nix_mark_data_expression(
+        tokens,
+        bindings,
+        binding.value_index,
+        data_positions,
+        stack + [token.value],
+    )
+    return index + 1
+
+
+def _nix_mark_source_expression(
+    tokens,
+    bindings,
+    index,
+    language,
+    source_positions,
+    data_positions,
+    stack=None,
+):
+    stack = [] if stack is None else stack
+    if index >= len(tokens):
+        raise NixLexError("missing Nix executable-source expression")
+    token = tokens[index]
+    if token.value == "(":
+        close = _nix_balanced_end(tokens, index)
+        if index + 2 < close - 1 and tokens[index + 1].kind == "identifier":
+            try:
+                result_index = _nix_function_return_index(
+                    tokens,
+                    bindings,
+                    tokens[index + 1].value,
+                    token.start,
+                )
+            except NixLexError:
+                pass
+            else:
+                _mark_nix_position(source_positions, tokens[result_index], language)
+                return close
+        inner_end = _nix_mark_source_expression(
+            tokens,
+            bindings,
+            index + 1,
+            language,
+            source_positions,
+            data_positions,
+            stack,
+        )
+        if inner_end != close - 1:
+            raise NixLexError("unsupported grouped Nix executable-source expression")
+        return close
+    if token.kind == "string":
+        _mark_nix_position(source_positions, token, language)
+        return index + 1
+    if _is_nix_read_file_expression(tokens, index):
+        raw_path, end = _nix_read_file_path(tokens, index)
+        _nix_validate_source_file_path(bindings, raw_path, language)
+        return end
+    if (
+        index + 2 < len(tokens)
+        and token.kind == "identifier"
+        and token.value == "builtins"
+        and tokens[index + 1].value == "."
+        and tokens[index + 2].kind == "identifier"
+    ):
+        function_name = tokens[index + 2].value
+        if function_name == "concatStringsSep":
+            separator_start = index + 3
+            separator_end = _nix_expression_end(tokens, separator_start)
+            try:
+                _nix_prove_data_expression(
+                    tokens,
+                    bindings,
+                    separator_start,
+                    separator_end,
+                    stack,
+                )
+            except NixLexError:
+                _nix_mark_source_expression(
+                    tokens,
+                    bindings,
+                    separator_start,
+                    language,
+                    source_positions,
+                    data_positions,
+                    stack,
+                )
+            mapped_end = _nix_map_read_file_end(
+                tokens, separator_end, bindings, stack, language
+            )
+            list_end = mapped_end if mapped_end is not None else _nix_list_end(tokens, separator_end)
+            if mapped_end is not None:
+                return list_end
+            component = separator_end + 1
+            while component < list_end - 1:
+                if tokens[component].value == ",":
+                    component += 1
+                    continue
+                try:
+                    _nix_prove_data_expression(
+                        tokens,
+                        bindings,
+                        component,
+                        _nix_expression_end_until(tokens, component, {",", "]"}),
+                        stack,
+                    )
+                    component = _nix_expression_end_until(tokens, component, {",", "]"})
+                except NixLexError:
+                    component = _nix_mark_source_expression(
+                        tokens,
+                        bindings,
+                        component,
+                        language,
+                        source_positions,
+                        data_positions,
+                        stack,
+                    )
+            return list_end
+        if function_name == "replaceStrings":
+            old_end = _nix_list_end(tokens, index + 3)
+            new_end = _nix_list_end(tokens, old_end)
+            component = index + 4
+            while component < old_end - 1:
+                if tokens[component].value == ",":
+                    component += 1
+                    continue
+                component = _nix_mark_data_expression(
+                    tokens, bindings, component, data_positions, stack
+                )
+            component = old_end + 1
+            while component < new_end - 1:
+                if tokens[component].value == ",":
+                    component += 1
+                    continue
+                component_end = _nix_expression_end_until(tokens, component, {",", "]"})
+                try:
+                    _nix_prove_data_expression(
+                        tokens,
+                        bindings,
+                        component,
+                        component_end,
+                        stack,
+                    )
+                    component = component_end
+                except NixLexError:
+                    component = _nix_mark_source_expression(
+                        tokens,
+                        bindings,
+                        component,
+                        language,
+                        source_positions,
+                        data_positions,
+                        stack,
+                    )
+            return _nix_mark_source_expression(
+                tokens,
+                bindings,
+                new_end,
+                language,
+                source_positions,
+                data_positions,
+                stack,
+            )
+        raise NixLexError(f"unsupported Nix source function: {function_name}")
+    if token.kind != "identifier":
+        raise NixLexError(f"dynamic Nix executable-source expression at {token.start}")
+    simple_end = _nix_simple_expression_end(tokens, index)
+    if simple_end is not None and simple_end > index + 1:
+        raise NixLexError(f"unresolved Nix executable-source path at {token.start}")
+    if token.value in stack:
+        raise NixLexError(f"cyclic Nix source binding: {token.value}")
+    binding = _nix_binding_for(bindings, token.value, token.start)
+    if binding.value_index is None:
+        raise NixLexError(f"dynamic Nix executable-source binding: {token.value}")
+    _nix_mark_source_expression(
+        tokens,
+        bindings,
+        binding.value_index,
+        language,
+        source_positions,
+        data_positions,
+        stack + [token.value],
+    )
+    return index + 1
+
+
+def _is_nix_activation_data_expression(tokens, index):
+    window = tokens[index:index + 100]
+    return any(
+        current.value == "activation"
+        and dot_before_name.value == "."
+        and name.kind == "identifier"
+        and dot_before_data.value == "."
+        and data_token.value == "data"
+        for current, dot_before_name, name, dot_before_data, data_token in zip(
+            window, window[1:], window[2:], window[3:], window[4:]
+        )
+    )
+
+
+def _is_nix_to_json_expression(tokens, index):
+    return (
+        index < len(tokens)
+        and tokens[index].value == "("
+        and index + 3 < len(tokens)
+        and tokens[index + 1].kind == "identifier"
+        and tokens[index + 1].value == "builtins"
+        and tokens[index + 2].value == "."
+        and tokens[index + 3].kind == "identifier"
+        and tokens[index + 3].value == "toJSON"
+    )
+
+
+def _nix_interpolation_expressions(raw):
+    position = 0
+    while position < len(raw):
+        start = raw.find("${", position)
+        if start == -1:
+            return
+        if (start > 0 and raw[start - 1] == "\\") or raw[max(0, start - 2):start] == "''":
+            position = start + 2
+            continue
+        depth = 1
+        cursor = start + 2
+        while cursor < len(raw) and depth:
+            if raw.startswith("''", cursor):
+                cursor += 2
+                while cursor < len(raw):
+                    if raw.startswith("''\\", cursor):
+                        cursor += 4
+                        continue
+                    if raw.startswith("'''", cursor):
+                        cursor += 3
+                        continue
+                    if raw.startswith("''${", cursor):
+                        cursor += 4
+                        continue
+                    if raw.startswith("''", cursor):
+                        cursor += 2
+                        break
+                    cursor += 1
+                continue
+            if raw[cursor] == '"':
+                cursor += 1
+                while cursor < len(raw):
+                    if raw[cursor] == "\\":
+                        cursor += 2
+                        continue
+                    if raw[cursor] == '"':
+                        cursor += 1
+                        break
+                    cursor += 1
+                continue
+            if raw.startswith("${", cursor):
+                depth += 1
+                cursor += 2
+                continue
+            if raw[cursor] == "}":
+                depth -= 1
+            cursor += 1
+        if depth:
+            raise NixLexError("unterminated Nix interpolation")
+        yield raw[start + 2:cursor - 1], start
+        position = cursor
+
+
+def _nix_indented_context_prefix(body):
+    result = []
+    position = 0
+    while position < len(body):
+        if body.startswith("''\\", position):
+            result.append("    ")
+            position += 4
+            continue
+        if body.startswith("'''", position):
+            result.append("   ")
+            position += 3
+            continue
+        if body.startswith("''${", position):
+            result.append("    ")
+            position += 4
+            continue
+        result.append(body[position])
+        position += 1
+    return "".join(result)
+
+
+def _nix_target_context_prefix(raw, interpolation_start):
+    prefix = raw[:interpolation_start]
+    ignored = list(prefix)
+    for expression, start in _nix_interpolation_expressions(prefix):
+        end = start + len(expression) + 3
+        for index in range(start, min(end, len(ignored))):
+            if ignored[index] != "\n":
+                ignored[index] = " "
+    body_start = 2 if raw.startswith("''") else 1 if raw.startswith('"') else 0
+    body = "".join(ignored[body_start:])
+    if raw.startswith("''"):
+        return _nix_indented_context_prefix(body)
+    if raw.startswith('"'):
+        return _decode_nix_double_quoted(body)
+    return body
+
+
+def _python_target_string_context(text):
+    frames = [("code", False, 0)]
+    position = 0
+    while position < len(text):
+        frame = frames[-1]
+        if frame[0] == "string":
+            quote, triple, formatted = frame[1:]
+            if triple and text.startswith(quote * 3, position):
+                frames.pop()
+                position += 3
+                continue
+            if not triple and text[position] == quote:
+                frames.pop()
+                position += 1
+                continue
+            if text[position] == "\\":
+                position += 2
+                continue
+            if formatted and text.startswith("{{", position):
+                position += 2
+                continue
+            if formatted and text.startswith("}}", position):
+                position += 2
+                continue
+            if formatted and text[position] == "{":
+                frames.append(("code", True, 0))
+                position += 1
+                continue
+            position += 1
+            continue
+        if frame[1] and text[position] == "}":
+            if frame[2] == 0:
+                frames.pop()
+                position += 1
+                continue
+            frames[-1] = ("code", True, frame[2] - 1)
+            position += 1
+            continue
+        if frame[1] and text[position] == "{":
+            frames[-1] = ("code", True, frame[2] + 1)
+            position += 1
+            continue
+        if text[position] == "#":
+            newline = text.find("\n", position)
+            position = len(text) if newline == -1 else newline + 1
+            continue
+        if text.startswith("'''", position) or text.startswith('"""', position):
+            prefix_start = position
+            while prefix_start > 0 and text[prefix_start - 1] in "rRuUbBfF":
+                prefix_start -= 1
+            string_prefix = text[prefix_start:position].lower()
+            formatted = "f" in string_prefix and len(string_prefix) <= 3
+            frames.append(("string", text[position], True, formatted))
+            position += 3
+            continue
+        if text[position] in {"'", '"'}:
+            prefix_start = position
+            while prefix_start > 0 and text[prefix_start - 1] in "rRuUbBfF":
+                prefix_start -= 1
+            string_prefix = text[prefix_start:position].lower()
+            formatted = "f" in string_prefix and len(string_prefix) <= 3
+            frames.append(("string", text[position], False, formatted))
+            position += 1
+            continue
+        position += 1
+    return frames[-1][0] == "string"
+
+
+def _js_target_string_context(text):
+    def parse_code(position, in_template_expression=False, brace_depth=0):
+        last_significant = None
+        while position < len(text):
+            if text.startswith("//", position):
+                newline = text.find("\n", position + 2)
+                position = len(text) if newline == -1 else newline
+                continue
+            if text.startswith("/*", position):
+                end = text.find("*/", position + 2)
+                if end == -1:
+                    return "code", len(text)
+                position = end + 2
+                continue
+            char = text[position]
+            if char in {"'", '"'}:
+                quote = char
+                position += 1
+                while position < len(text):
+                    if text[position] == "\\":
+                        position += 2
+                        continue
+                    if text[position] == quote:
+                        position += 1
+                        break
+                    position += 1
+                else:
+                    return "data", len(text)
+                last_significant = "value"
+                continue
+            if char == "`":
+                result, position = parse_template(position + 1)
+                if result != "closed":
+                    return result, position
+                last_significant = "value"
+                continue
+            if char == "/" and _regex_allowed(last_significant):
+                try:
+                    position = _skip_js_regex_literal("<target>", text, position)
+                except JsLexError:
+                    return "code", len(text)
+                last_significant = "value"
+                continue
+            if in_template_expression and char == "{":
+                brace_depth += 1
+                last_significant = "operator"
+                position += 1
+                continue
+            if in_template_expression and char == "}":
+                if brace_depth == 0:
+                    return "closed", position + 1
+                brace_depth -= 1
+                last_significant = "value"
+                position += 1
+                continue
+            if char == ".":
+                last_significant = "dot"
+                position += 1
+                continue
+            if char.isalnum() or char in "_$":
+                start = position
+                while position < len(text) and (text[position].isalnum() or text[position] in "_$"):
+                    position += 1
+                word = text[start:position]
+                if last_significant == "dot":
+                    last_significant = "value"
+                elif word in JS_VALUE_ENDING_KEYWORDS:
+                    last_significant = "value"
+                elif word in JS_REGEX_PRECEDING_KEYWORDS:
+                    last_significant = "keyword"
+                else:
+                    last_significant = "value"
+                continue
+            if not char.isspace():
+                last_significant = "operator"
+            position += 1
+        return "code", position
+
+    def parse_template(position):
+        while position < len(text):
+            if text[position] == "\\":
+                position += 2
+                continue
+            if text[position] == "`":
+                return "closed", position + 1
+            if text.startswith("${", position):
+                result, position = parse_code(position + 2, True)
+                if result != "closed":
+                    return result, position
+                continue
+            position += 1
+        return "data", position
+
+    result, _ = parse_code(0)
+    return result == "data"
+
+
+def _yaml_target_string_context(text):
+    lines = text.split("\n")
+    in_block_scalar = False
+    block_scalar_indent = None
+    pending_dquote = False
+    pending_squote = False
+    for line in lines:
+        if in_block_scalar:
+            indent = len(line) - len(line.lstrip(" "))
+            if line.strip() == "" or indent > block_scalar_indent:
+                continue
+            in_block_scalar = False
+        if pending_dquote or pending_squote:
+            pos, pending_dquote, pending_squote = _yaml_consume_quote_continuation(
+                line, pending_dquote, pending_squote
+            )
+            if pending_dquote or pending_squote:
+                return True
+        else:
+            pos = 0
+        while pos < len(line):
+            char = line[pos]
+            if char == "#" and (pos == 0 or line[pos - 1] in " \t"):
+                return False
+            if char == '"' and _yaml_quote_can_open(line, pos):
+                pos, pending_dquote = _yaml_skip_or_continue_quote(line, pos, '"')
+                if pending_dquote:
+                    return True
+                continue
+            if char == "'" and _yaml_quote_can_open(line, pos):
+                pos, pending_squote = _yaml_skip_or_continue_quote(line, pos, "'")
+                if pending_squote:
+                    return True
+                continue
+            pos += 1
+        if BLOCK_SCALAR_HEADER.search(line):
+            in_block_scalar = True
+            block_scalar_indent = len(line) - len(line.lstrip(" "))
+    return in_block_scalar or pending_dquote or pending_squote
+
+
+def _toml_target_string_context(text):
+    position = 0
+    delimiter = None
+    while position < len(text):
+        if delimiter is not None:
+            if len(delimiter) == 3 and text.startswith(delimiter, position):
+                position += 3
+                delimiter = None
+                continue
+            if len(delimiter) == 1 and text[position] == delimiter:
+                position += 1
+                delimiter = None
+                continue
+            if delimiter == '"' and text[position] == "\\":
+                position += 2
+                continue
+            position += 1
+            continue
+        if text.startswith('"""', position):
+            delimiter = '"""'
+            position += 3
+            continue
+        if text.startswith("'''", position):
+            delimiter = "'''"
+            position += 3
+            continue
+        if text[position] in {'"', "'"}:
+            delimiter = text[position]
+            position += 1
+            continue
+        position += 1
+    return delimiter is not None
+
+
+def _jsonc_target_string_context(text):
+    position = 0
+    in_string = False
+    while position < len(text):
+        if in_string:
+            if text[position] == "\\":
+                position += 2
+                continue
+            if text[position] == '"':
+                in_string = False
+            position += 1
+            continue
+        if text[position] == '"':
+            in_string = True
+            position += 1
+            continue
+        if text.startswith("//", position):
+            newline = text.find("\n", position + 2)
+            position = len(text) if newline == -1 else newline
+            continue
+        if text.startswith("/*", position):
+            end = text.find("*/", position + 2)
+            if end == -1:
+                return False
+            position = end + 2
+            continue
+        position += 1
+    return in_string
+
+
+def _nix_target_string_context(raw, interpolation_start, language):
+    prefix = _nix_target_context_prefix(raw, interpolation_start)
+    if language == "shell":
+        return _ShellLexer("<target>", prefix).context_at(len(prefix))
+    if language == "python":
+        return _python_target_string_context(prefix)
+    if language in {"qml", "js"}:
+        return _js_target_string_context(prefix)
+    if language == "yaml":
+        return _yaml_target_string_context(prefix)
+    if language == "toml":
+        return _toml_target_string_context(prefix)
+    if language == "jsonc":
+        return _jsonc_target_string_context(prefix)
+    raise NixLexError(f"unknown target source language: {language}")
+
+
+def _infer_nix_embedded_language(value):
+    if value.lstrip().startswith("#!") or re.search(
+        r"\b(?:echo|mkdir|export|set -[eu]|case|esac)\b", value
+    ):
+        return "shell"
+    if any(marker in value for marker in ("import QtQuick", "ShellRoot {", "PolkitAgent {", "PamContext {")):
+        return "qml"
+    if "polkit.addRule" in value or "module.exports" in value:
+        return "js"
+    if re.search(r"^\s*(?:import|from)\s+\w+", value, re.MULTILINE) and re.search(
+        r"^\s*def\s+\w+", value, re.MULTILINE
+    ):
+        return "python"
+    return None
+
+
+def _nix_interpolation_is_data_expression(expression):
+    expression = expression.strip()
+    return (
+        expression.isdigit()
+        or expression in {"true", "false", "null"}
+        or re.fullmatch(r"(?:\.\.?/)+[A-Za-z0-9_./-]+", expression)
+    )
+
+
+def _nix_interpolation_source_candidate(value):
+    return _infer_nix_embedded_language(value) is not None or any(
+        line.lstrip().startswith(("#", "//", "/*"))
+        for line in value.splitlines()
+    )
+
+
+def _nix_validate_raw_read_file(expression, bindings, language):
+    match = re.fullmatch(r"(?:builtins\.)?readFile\s+(\.\.?/[^\s)]+)", expression)
+    if match is None:
+        raise NixLexError("unsupported Nix readFile interpolation source")
+    _nix_validate_source_file_path(bindings, match.group(1), language)
+
+
+NIX_PROVEN_DATA_PARAMETER_NAMES = {
+    "config",
+    "home-manager",
+    "dbusPath",
+    "ipcTarget",
+    "lib",
+    "nixpkgs",
+    "omarchy",
+    "osConfig",
+    "pkgs",
+    "quickshell",
+    "scenario",
+    "self",
+    "system",
+}
+NIX_OPAQUE_DATA_CALL_HEADS = {
+    "featureSelection.resolveCapabilities",
+    "featureSelection.select",
+    "forEachSystem",
+    "homeConfigurationFor",
+    "homeManagerConfiguration",
+    "nixosSystem",
+    "nixpkgs.lib.genAttrs",
+    "nixpkgs.lib.nixosSystem",
+    "omanixyRuntimeFor",
+    "pkgs.makeFontsConf",
+    "runtimeFor",
+    "runtimeForSecurity",
+    "home-manager.lib.homeManagerConfiguration",
+    "mkDerivation",
+}
+NIX_DATA_CALL_ARITIES = {
+    "builtins.attrNames": 1,
+    "builtins.elem": 2,
+    "builtins.hasAttr": 2,
+    "lib.attrNames": 1,
+    "lib.concatLists": 1,
+    "lib.filter": 2,
+    "lib.filterAttrs": 2,
+    "lib.findFirst": 3,
+    "lib.getAttrs": 2,
+    "lib.hasInfix": 2,
+    "lib.hasSuffix": 2,
+    "lib.mapAttrs": 2,
+    "lib.optionalAttrs": 2,
+    "lib.optionals": 2,
+    "lib.subtractLists": 2,
+    "lib.unique": 1,
+    "map": 2,
+    "throw": 1,
+}
+NIX_DATA_PREDICATE_CALL_HEADS = {
+    "builtins.elem",
+    "builtins.hasAttr",
+    "lib.hasInfix",
+    "lib.hasSuffix",
+}
+
+
+def _nix_identifier_path_end(tokens, start, end):
+    index = start
+    if index >= end or tokens[index].kind != "identifier":
+        return None
+    index += 1
+    while (
+        index + 1 < end
+        and tokens[index].value == "."
+        and tokens[index + 1].kind == "identifier"
+    ):
+        index += 2
+    return index
+
+
+def _nix_top_level_binary(tokens, start, end):
+    pairs = {"&&": ("&", "&"), "||": ("|", "|"), "++": ("+", "+"),
+        "==": ("=", "="), "!=": ("!", "="), "<=": ("<", "="),
+        ">=": (">", "=")}
+    delimiters = []
+    closing = {"{": "}", "(": ")", "[": "]"}
+    for index in range(start, end):
+        value = tokens[index].value
+        if value in closing:
+            delimiters.append(closing[value])
+            continue
+        if delimiters and value == delimiters[-1]:
+            delimiters.pop()
+            continue
+        if delimiters:
+            continue
+        if tokens[index].kind == "identifier" and value == "or":
+            return index, index + 1
+        for operator, (left, right) in pairs.items():
+            if value == left and index + 1 < end and tokens[index + 1].value == right:
+                return index, index + 2
+    return None
+
+
+def _nix_data_argument_end(tokens, start, end):
+    if start >= end:
+        raise NixLexError("missing Nix data call argument")
+    token = tokens[start]
+    if token.value in {"(", "[", "{"}:
+        close = _nix_balanced_end(tokens, start)
+        if close > end:
+            raise NixLexError(f"composite Nix data call argument at {token.start}")
+        return close
+    if token.kind == "string" or _nix_scalar_token(token):
+        return start + 1
+    if token.kind == "identifier":
+        path_end = _nix_identifier_path_end(tokens, start, end)
+        if path_end is not None:
+            return path_end
+        if token.value == "throw":
+            return _nix_data_argument_end(tokens, start + 1, end)
+    if token.value == ".":
+        return _nix_path_expression_end(tokens, start, end)
+    raise NixLexError(f"unsupported Nix data call argument at {token.start}")
+
+
+def _nix_top_level_colon(tokens, start, end):
+    delimiters = []
+    closing = {"{": "}", "(": ")", "[": "]"}
+    for index in range(start, end):
+        value = tokens[index].value
+        if value in closing:
+            delimiters.append(closing[value])
+            continue
+        if delimiters and value == delimiters[-1]:
+            delimiters.pop()
+            continue
+        if not delimiters and value == ":":
+            return index
+    return None
+
+
+def _nix_prove_data_path(tokens, bindings, start, end, stack, allow_parameters):
+    root = tokens[start]
+    if root.kind != "identifier":
+        raise NixLexError(f"invalid Nix data path at {root.start}")
+    if root.value in {"pkgs", "nixpkgs", "self"}:
+        return
+    binding = _nix_binding_for(bindings, root.value, root.start)
+    if binding.kind == "parameter":
+        if not allow_parameters and binding.name not in NIX_PROVEN_DATA_PARAMETER_NAMES:
+            raise NixLexError(f"untyped Nix function parameter: {binding.name}")
+        return
+    if binding.value_index is None:
+        raise NixLexError(f"dynamic Nix data path: {root.value}")
+    if root.value in stack:
+        raise NixLexError(f"cyclic Nix data path: {root.value}")
+    _nix_prove_data_expression(
+        tokens,
+        bindings,
+        binding.value_index,
+        binding.value_end,
+        stack + [root.value],
+        allow_parameters,
+    )
+
+
+def _nix_prove_data_lambda(tokens, bindings, start, end, stack, allow_parameters=False):
+    colon = _nix_top_level_colon(tokens, start, end)
+    if colon is None:
+        _nix_prove_data_expression(
+            tokens,
+            bindings,
+            start,
+            end,
+            stack,
+            allow_parameters,
+        )
+        return
+    if colon + 1 >= end:
+        raise NixLexError(f"empty Nix data lambda at {tokens[colon].start}")
+    _nix_prove_data_expression(
+        tokens,
+        bindings,
+        colon + 1,
+        end,
+        stack,
+        allow_parameters=True,
+    )
+
+
+def _nix_prove_data_expression(
+    tokens,
+    bindings,
+    start,
+    end,
+    stack=None,
+    allow_parameters=False,
+):
+    stack = [] if stack is None else stack
+    if start >= end:
+        raise NixLexError("empty Nix data expression")
+    token = tokens[start]
+    binary = _nix_top_level_binary(tokens, start, end)
+    if binary is not None and token.value != "if":
+        operator_start, operator_end = binary
+        _nix_prove_data_expression(
+            tokens,
+            bindings,
+            start,
+            operator_start,
+            stack,
+            allow_parameters=True,
+        )
+        _nix_prove_data_expression(
+            tokens,
+            bindings,
+            operator_end,
+            end,
+            stack,
+            allow_parameters=True,
+        )
+        return
+    if token.value == "(":
+        close = _nix_balanced_end(tokens, start)
+        if close != end:
+            raise NixLexError(f"composite Nix grouping at {token.start}")
+        _nix_prove_data_lambda(
+            tokens,
+            bindings,
+            start + 1,
+            close - 1,
+            stack,
+            allow_parameters,
+        )
+        return
+    if token.kind == "string":
+        if _nix_interpolation_source_candidate(token.value):
+            raise NixLexError(f"source-shaped Nix data string at {token.start}")
+        if start + 1 != end:
+            raise NixLexError(f"composite Nix data string at {token.start}")
+        return
+    if _nix_scalar_token(token):
+        if start + 1 != end:
+            raise NixLexError(f"composite Nix scalar at {token.start}")
+        return
+    if token.value == "[":
+        close = _nix_balanced_end(tokens, start)
+        if close != end:
+            raise NixLexError(f"composite Nix list at {token.start}")
+        index = start + 1
+        while index < close - 1:
+            if tokens[index].value == ",":
+                index += 1
+                continue
+            item_end = _nix_simple_expression_end(tokens, index)
+            if item_end is None or item_end > close - 1:
+                if tokens[index].value in {"[", "{", "("}:
+                    item_end = _nix_balanced_end(tokens, index)
+                else:
+                    item_end = _nix_expression_end_until(tokens, index, {",", "]"})
+            _nix_prove_data_expression(tokens, bindings, index, item_end, stack, allow_parameters)
+            index = item_end
+        return
+    if token.value == "{":
+        close = _nix_balanced_end(tokens, start)
+        if close != end:
+            raise NixLexError(f"composite Nix attrset at {token.start}")
+        index = start + 1
+        while index < close - 1:
+            if tokens[index].value == "inherit":
+                index += 1
+                while index < close - 1 and tokens[index].value != ";":
+                    if tokens[index].kind != "identifier":
+                        raise NixLexError(f"unsupported Nix inherit data at {tokens[index].start}")
+                    binding = _nix_binding_for(bindings, tokens[index].value, tokens[index].start)
+                    if binding.value_index is None:
+                        raise NixLexError(f"dynamic Nix inherited data: {tokens[index].value}")
+                    _nix_prove_data_expression(
+                        tokens,
+                        bindings,
+                        binding.value_index,
+                        binding.value_end,
+                        stack + [tokens[index].value],
+                        allow_parameters,
+                    )
+                    index += 1
+                index += 1
+                continue
+            if tokens[index].kind != "identifier" or index + 1 >= close or tokens[index + 1].value != "=":
+                raise NixLexError(f"unsupported Nix attrset data at {tokens[index].start}")
+            value_start = index + 2
+            value_end = _nix_expression_end_until(
+                tokens,
+                value_start,
+                {";", "}", ")", "]"},
+            )
+            _nix_prove_data_expression(
+                tokens,
+                bindings,
+                value_start,
+                value_end,
+                stack,
+                allow_parameters,
+            )
+            index = value_end + 1
+        return
+    if token.kind == "identifier" and token.value == "if":
+        then_index = next(
+            (
+                index
+                for index in range(start + 1, end)
+                if tokens[index].kind == "identifier" and tokens[index].value == "then"
+            ),
+            None,
+        )
+        else_index = next(
+            (
+                index
+                for index in range((then_index or start) + 1, end)
+                if tokens[index].kind == "identifier" and tokens[index].value == "else"
+            ),
+            None,
+        )
+        if then_index is None or else_index is None:
+            raise NixLexError(f"dynamic Nix conditional at {token.start}")
+        _nix_prove_data_expression(
+            tokens,
+            bindings,
+            start + 1,
+            then_index,
+            stack,
+            allow_parameters=True,
+        )
+        _nix_prove_data_expression(
+            tokens,
+            bindings,
+            then_index + 1,
+            else_index,
+            stack,
+            allow_parameters,
+        )
+        _nix_prove_data_expression(
+            tokens,
+            bindings,
+            else_index + 1,
+            end,
+            stack,
+            allow_parameters,
+        )
+        return
+    if (
+        token.kind == "identifier"
+        and start + 1 < end
+        and tokens[start + 1].value == ":"
+    ):
+        _nix_prove_data_lambda(tokens, bindings, start, end, stack, allow_parameters)
+        return
+    path_end = _nix_identifier_path_end(tokens, start, end)
+    if path_end == end and path_end > start + 1:
+        _nix_prove_data_path(tokens, bindings, start, end, stack, allow_parameters)
+        return
+    if all(
+        current.kind == "identifier"
+        or current.value in {".", "/", "-", "$", "{", "}"}
+        for current in tokens[start:end]
+    ) and any(current.value in {".", "/", "$"} for current in tokens[start:end]):
+        return
+    if token.kind != "identifier":
+        raise NixLexError(f"dynamic Nix data expression at {token.start}")
+    if token.value in stack:
+        raise NixLexError(f"cyclic Nix data expression: {token.value}")
+    head_end = _nix_identifier_path_end(tokens, start, end)
+    head = ".".join(
+        current.value
+        for current in tokens[start:head_end]
+        if current.kind == "identifier"
+    ) if head_end is not None else token.value
+    if head in NIX_OPAQUE_DATA_CALL_HEADS or head.endswith(".mkDerivation"):
+        return
+    if head in NIX_DATA_CALL_ARITIES:
+        cursor = head_end
+        for argument_index in range(NIX_DATA_CALL_ARITIES[head]):
+            argument_end = _nix_data_argument_end(tokens, cursor, end)
+            if argument_end > end:
+                raise NixLexError(f"composite Nix data call at {token.start}")
+            if tokens[cursor].value == "(" and _nix_top_level_colon(tokens, cursor + 1, argument_end - 1) is not None:
+                _nix_prove_data_lambda(
+                    tokens,
+                    bindings,
+                    cursor + 1,
+                    argument_end - 1,
+                    stack,
+                    allow_parameters,
+                )
+            else:
+                _nix_prove_data_expression(
+                    tokens,
+                    bindings,
+                    cursor,
+                    argument_end,
+                    stack,
+                    allow_parameters or head in NIX_DATA_PREDICATE_CALL_HEADS or (
+                        head == "lib.optionals" and argument_index == 0
+                    ),
+                )
+            cursor = argument_end
+        if cursor != end:
+            raise NixLexError(f"composite Nix data call at {token.start}")
+        return
+    if head in {"builtins.readFile", "readFile"}:
+        raise NixLexError(f"Nix readFile is an executable-source expression at {token.start}")
+    if head in {"builtins.toJSON", "builtins.fromJSON", "toString", "lib.escapeShellArg"}:
+        argument_start = head_end
+        argument_end = _nix_expression_end_until(tokens, argument_start, {";", ",", ")", "]", "}"})
+        if argument_end != end:
+            argument_end = end
+        _nix_prove_data_expression(
+            tokens,
+            bindings,
+            argument_start,
+            argument_end,
+            stack,
+            allow_parameters,
+        )
+        return
+    if head in {"builtins.removeAttrs"}:
+        first_start = head_end
+        first_end = _nix_expression_end_until(tokens, first_start, {"["})
+        _nix_prove_data_expression(
+            tokens,
+            bindings,
+            first_start,
+            first_end,
+            stack,
+            allow_parameters,
+        )
+        list_end = _nix_list_end(tokens, first_end)
+        if list_end != end:
+            raise NixLexError(f"composite Nix removeAttrs expression at {token.start}")
+        _nix_prove_data_expression(
+            tokens,
+            bindings,
+            first_end,
+            list_end,
+            stack,
+            allow_parameters,
+        )
+        return
+    if head in {"builtins.concatStringsSep", "lib.concatStringsSep", "nixpkgs.lib.concatStringsSep"}:
+        separator_start = head_end
+        separator_end = _nix_expression_end(tokens, separator_start)
+        _nix_prove_data_expression(
+            tokens,
+            bindings,
+            separator_start,
+            separator_end,
+            stack,
+            allow_parameters,
+        )
+        list_start = separator_end
+        list_end = _nix_list_end(tokens, list_start)
+        if list_end != end:
+            raise NixLexError(f"composite Nix concatStringsSep expression at {token.start}")
+        _nix_prove_data_expression(
+            tokens,
+            bindings,
+            list_start,
+            list_end,
+            stack,
+            allow_parameters,
+        )
+        return
+    if head.endswith(".mkDerivation"):
+        return
+    if head.startswith(("pkgs.", "nixpkgs.")):
+        if any(
+            head.endswith(suffix)
+            for suffix in (
+                ".writeShellScript",
+                ".writeShellScriptBin",
+                ".writeShellApplication",
+                ".runCommand",
+                ".runCommandLocal",
+                ".writeText",
+                ".writeTextDir",
+                ".withPackages",
+                ".overrideAttrs",
+            )
+        ):
+            return
+        raise NixLexError(f"unproven Nix package call at {token.start}")
+    binding = _nix_binding_for(bindings, token.value, token.start)
+    if binding.kind == "parameter":
+        if not allow_parameters and binding.name not in NIX_PROVEN_DATA_PARAMETER_NAMES:
+            raise NixLexError(f"untyped Nix function parameter: {binding.name}")
+        if start + 1 != end:
+            raise NixLexError(f"composite Nix function parameter: {binding.name}")
+        return
+    if binding.value_index is None:
+        raise NixLexError(f"dynamic Nix data binding: {token.value}")
+    _nix_prove_data_expression(
+        tokens,
+        bindings,
+        binding.value_index,
+        binding.value_end,
+        stack + [token.value],
+    )
+
+
+def _nix_classify_interpolation_value(
+    tokens,
+    bindings,
+    index,
+    language,
+    source_positions,
+    data_positions,
+    stack,
+):
+    if index is None or index >= len(tokens):
+        raise NixLexError("unresolved Nix interpolation source")
+    token = tokens[index]
+    if token.kind == "string":
+        _mark_nix_position(source_positions, token, language)
+        return
+    if _nix_scalar_token(token):
+        return
+    simple_end = _nix_simple_expression_end(tokens, index)
+    if token.kind == "identifier" and simple_end is not None and simple_end > index + 1:
+        _nix_prove_data_expression(tokens, bindings, index, simple_end)
+        return
+    if token.kind != "identifier":
+        raise NixLexError(f"unresolved Nix interpolation source at {token.start}")
+    if token.value in stack:
+        raise NixLexError(f"cyclic Nix interpolation source: {token.value}")
+    binding = _nix_binding_for(bindings, token.value, token.start)
+    if binding.kind == "parameter":
+        if binding.name not in NIX_PROVEN_DATA_PARAMETER_NAMES:
+            raise NixLexError(f"untyped Nix interpolation parameter: {binding.name}")
+        return
+    if binding.value_index is None:
+        raise NixLexError(f"dynamic Nix interpolation source: {token.value}")
+    if binding.value_end > binding.value_index + 1:
+        try:
+            _nix_prove_data_expression(
+                tokens,
+                bindings,
+                binding.value_index,
+                binding.value_end,
+                stack + [token.value],
+            )
+        except NixLexError:
+            _nix_mark_source_expression(
+                tokens,
+                bindings,
+                binding.value_index,
+                language,
+                source_positions,
+                data_positions,
+                stack + [token.value],
+            )
+        return
+    _nix_classify_interpolation_value(
+        tokens,
+        bindings,
+        binding.value_index,
+        language,
+        source_positions,
+        data_positions,
+        stack + [token.value],
+    )
+
+
+def _nix_outer_parentheses(expression):
+    expression = expression.strip()
+    while expression.startswith("(") and expression.endswith(")"):
+        depth = 0
+        enclosed = True
+        for index, char in enumerate(expression):
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+                if depth == 0 and index != len(expression) - 1:
+                    enclosed = False
+                    break
+        if not enclosed or depth != 0:
+            break
+        expression = expression[1:-1].strip()
+    return expression
+
+
+def _nix_classify_raw_interpolation(
+    expression,
+    tokens,
+    bindings,
+    reference_position,
+    language,
+    source_positions,
+    data_positions,
+    expression_start=None,
+    target_string_context=False,
+):
+    expression = _nix_outer_parentheses(expression)
+    if not expression:
+        raise NixLexError("empty Nix interpolation")
+    nested = list(_nix_interpolation_expressions(expression))
+    if nested:
+        for child, child_start in nested:
+            _nix_classify_raw_interpolation(
+                child,
+                tokens,
+                bindings,
+                reference_position,
+                language,
+                source_positions,
+                data_positions,
+                None if expression_start is None else expression_start + child_start + 2,
+                target_string_context,
+            )
+        expression = re.sub(r"\$\{[^{}]*\}", "path", expression)
+    if _nix_interpolation_is_data_expression(expression):
+        return
+    dotted = re.fullmatch(
+        r"([A-Za-z_][A-Za-z0-9_'-]*)(?:\.[A-Za-z_][A-Za-z0-9_'-]*)+",
+        expression,
+    )
+    if dotted:
+        root_name = dotted.group(1)
+        if root_name in {"pkgs", "nixpkgs", "self"}:
+            return
+        binding = _nix_binding_for(bindings, root_name, reference_position)
+        if binding.kind == "parameter":
+            if binding.name not in NIX_PROVEN_DATA_PARAMETER_NAMES:
+                raise NixLexError(f"untyped Nix interpolation parameter: {binding.name}")
+            return
+        if binding.value_index is None:
+            raise NixLexError(f"dynamic Nix dotted interpolation: {root_name}")
+        _nix_prove_data_expression(
+            tokens,
+            bindings,
+            binding.value_index,
+            binding.value_end,
+            [root_name],
+        )
+        return
+    if re.fullmatch(r"\"(?:[^\"\\]|\\.)*\"", expression, re.DOTALL):
+        value = _decode_nix_double_quoted(expression[1:-1])
+        if _nix_interpolation_source_candidate(value):
+            raise NixLexError("source-shaped literal Nix interpolation")
+        return
+    if expression.startswith("''") and expression.endswith("''"):
+        value = expression[2:-2]
+        if _nix_interpolation_source_candidate(value):
+            raise NixLexError("source-shaped literal Nix interpolation")
+        return
+    if re.fullmatch(r"(?:builtins\.)?readFile\s+\.\.?/[^\s)]+", expression):
+        _nix_validate_raw_read_file(expression, bindings, language)
+        return
+    conditional = re.match(r"^if\b.*?\bthen\s+(.+?)\s+else\s+(.+)$", expression, re.DOTALL)
+    if conditional:
+        for branch in conditional.groups():
+            _nix_classify_raw_interpolation(
+                branch,
+                tokens,
+                bindings,
+                reference_position,
+                language,
+                source_positions,
+                data_positions,
+            )
+        return
+    optional_string = re.match(r"^lib\.optionalString\s+(.+?)\s+(''.*)$", expression, re.DOTALL)
+    if optional_string:
+        fragment = optional_string.group(2)
+        if not fragment.endswith("''") or len(fragment) < 4:
+            raise NixLexError("unterminated optional Nix source fragment")
+        fragment_start = expression.find("''", len("lib.optionalString"))
+        if expression_start is not None and fragment_start != -1:
+            fragment_position = expression_start + fragment_start
+            existing = source_positions.get(fragment_position, ())
+            source_positions[fragment_position] = frozenset(
+                set(_nix_source_languages(existing)) | {language}
+            )
+            for child, child_start in _nix_interpolation_expressions(fragment[2:-2]):
+                _nix_classify_raw_interpolation(
+                    child,
+                    tokens,
+                    bindings,
+                    reference_position,
+                    language,
+                    source_positions,
+                    data_positions,
+                    fragment_position + 2 + child_start + 2,
+                )
+        return
+    for prefix in (
+        "builtins.toJSON ",
+        "builtins.fromJSON ",
+        "toString ",
+        "lib.escapeShellArg ",
+    ):
+        if expression.startswith(prefix):
+            _nix_classify_raw_interpolation(
+                expression[len(prefix):],
+                tokens,
+                bindings,
+                reference_position,
+                language,
+                source_positions,
+                data_positions,
+            )
+            return
+    concat = re.match(
+        r"^(?:builtins\.concatStringsSep|lib\.concatStringsSep|nixpkgs\.lib\.concatStringsSep)\s+(\"(?:[^\"\\]|\\.)*\"|''.*'')\s+(.+)$",
+        expression,
+        re.DOTALL,
+    )
+    if concat:
+        _nix_classify_raw_interpolation(
+            concat.group(1),
+            tokens,
+            bindings,
+            reference_position,
+            language,
+            source_positions,
+            data_positions,
+        )
+        _nix_classify_raw_interpolation(
+            concat.group(2),
+            tokens,
+            bindings,
+            reference_position,
+            language,
+            source_positions,
+            data_positions,
+        )
+        return
+    call = re.match(r"^([A-Za-z_][A-Za-z0-9_'-]*)\s+(.+)$", expression, re.DOTALL)
+    if call:
+        name, argument = call.groups()
+        binding = _nix_binding_for(bindings, name, reference_position)
+        if binding.value_index is None:
+            raise NixLexError(f"dynamic Nix interpolation function: {name}")
+        try:
+            result_index = _nix_function_return_index(
+                tokens, bindings, name, reference_position
+            )
+        except NixLexError as error:
+            raise NixLexError(f"unresolved Nix interpolation source: {expression}") from error
+        if target_string_context:
+            data_positions.add(tokens[result_index].start)
+        else:
+            _mark_nix_position(source_positions, tokens[result_index], language)
+        return
+    if expression.startswith(("pkgs.", "nixpkgs.", "self.")):
+        if re.search(
+            r"\b(?:writeShellScript|writeShellScriptBin|writeShellApplication|runCommand|runCommandLocal|writeText|writeTextDir)\b",
+            expression,
+        ):
+            raise NixLexError("unresolved Nix executable builder interpolation")
+        if re.fullmatch(
+            r"(?:pkgs|nixpkgs|self)(?:\.[A-Za-z_][A-Za-z0-9_'-]*)+",
+            expression,
+        ):
+            return
+        if re.fullmatch(
+            r"(?:pkgs|nixpkgs|self)(?:\.[A-Za-z_][A-Za-z0-9_'-]*)+\s+.*",
+            expression,
+            re.DOTALL,
+        ) and re.search(r"\.(?:withPackages|overrideAttrs)\b", expression):
+            return
+        raise NixLexError("unproven Nix package interpolation")
+    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_'-]*", expression):
+        binding = _nix_binding_for(bindings, expression, reference_position)
+        if binding.kind == "parameter":
+            if binding.name not in NIX_PROVEN_DATA_PARAMETER_NAMES:
+                raise NixLexError(f"untyped Nix interpolation parameter: {binding.name}")
+            return
+        if binding.value_index is None:
+            raise NixLexError(f"dynamic Nix interpolation source: {expression}")
+        if binding.value_end > binding.value_index + 1:
+            try:
+                _nix_prove_data_expression(
+                    tokens,
+                    bindings,
+                    binding.value_index,
+                    binding.value_end,
+                    [expression],
+                )
+            except NixLexError:
+                _nix_mark_source_expression(
+                    tokens,
+                    bindings,
+                    binding.value_index,
+                    language,
+                    source_positions,
+                    data_positions,
+                    [expression],
+                )
+        else:
+            _nix_classify_interpolation_value(
+                tokens,
+                bindings,
+                binding.value_index,
+                language,
+                source_positions,
+                data_positions,
+                [expression],
+            )
+        return
+    raise NixLexError(f"unresolved Nix interpolation source: {expression}")
+
+
+def _scan_nix_interpolated_source_bindings(text, tokens, bindings, source_positions, data_positions):
+    pending = [
+        (token.start, language)
+        for token in tokens
+        if token.start in source_positions
+        for language in _nix_source_languages(source_positions[token.start])
+    ]
+    visited = set()
+    tokens_by_start = {token.start: token for token in tokens}
+    while pending:
+        start, language = pending.pop()
+        visit = (start, language)
+        if visit in visited:
+            continue
+        visited.add(visit)
+        token = tokens_by_start[start]
+        raw = text[token.start:token.end]
+        for expression, local_start in _nix_interpolation_expressions(raw):
+            before = {
+                position: set(_nix_source_languages(value))
+                for position, value in source_positions.items()
+            }
+            _nix_classify_raw_interpolation(
+                expression,
+                tokens,
+                bindings,
+                token.start,
+                language,
+                source_positions,
+                data_positions,
+                token.start + local_start + 2,
+                _nix_target_string_context(raw, local_start, language),
+            )
+            for position, value in source_positions.items():
+                if position not in tokens_by_start:
+                    continue
+                for new_language in set(_nix_source_languages(value)) - before.get(position, set()):
+                    pending.append((position, new_language))
+
+
+def _classify_nix_embedded_strings(path, text, root=None):
+    tokens = _lex_nix_tokens(path, text)
+    bindings = _nix_bindings(tokens, path, root)
+    source_positions = {}
+    data_positions = set()
+    for token in tokens:
+        context_kind, _ = _lookback_context(text, token.start)
+        if token.kind == "string" and context_kind == "pam-service-data":
+            data_positions.add(token.start)
+        if token.kind == "string":
+            window = text[max(0, token.start - 500):token.start]
+            if NIX_ACTIVATION_BINDING_PATTERN.search(window):
+                _mark_nix_position(source_positions, token, "shell")
+            if NIX_POLKIT_SOURCE_BINDING_PATTERN.search(window):
+                _mark_nix_position(source_positions, token, "js")
+    source_binding_names = set(EMBEDDED_CODE_BINDING_NAMES)
+    for binding in bindings:
+        if binding.name in NIX_PINNED_DATA_BINDING_NAMES:
+            binding_index = next(
+                index for index, token in enumerate(tokens) if token.start == binding.start
+            )
+            _mark_nix_data_range(
+                tokens,
+                binding_index + 2,
+                _nix_expression_end(tokens, binding_index + 2),
+                data_positions,
+            )
+            continue
+        if binding.name not in source_binding_names:
+            continue
+        if binding.value_index is None:
+            raise NixLexError(f"dynamic Nix executable-source binding: {binding.name}")
+        _mark_nix_source(
+            tokens,
+            bindings,
+            binding.value_index,
+            EMBEDDED_CODE_BINDING_NAMES[binding.name],
+            source_positions,
+        )
+    for index, token in enumerate(tokens):
+        if token.kind != "identifier":
+            continue
+        if token.value == "writeShellApplication":
+            attr_start, attr_end = _nix_call_attrset_end(tokens, index + 1)
+            for binding in bindings:
+                if (
+                    binding.name == "text"
+                    and tokens[attr_start].start < binding.start < tokens[attr_end - 1].end
+                ):
+                    if binding.value_index is None:
+                        raise NixLexError("dynamic writeShellApplication text")
+                    _nix_mark_source_expression(
+                        tokens,
+                        bindings,
+                        binding.value_index,
+                        "shell",
+                        source_positions,
+                        data_positions,
+                    )
+            continue
+        if token.value in {"writeShellScript", "writeShellScriptBin"}:
+            name_end = _nix_expression_end(tokens, index + 1)
+            if not _is_nix_activation_data_expression(tokens, name_end):
+                _mark_nix_source(tokens, bindings, name_end, "shell", source_positions)
+            continue
+        if token.value in {"runCommand", "runCommandLocal"}:
+            name_end = _nix_expression_end(tokens, index + 1)
+            attrs_end = _nix_expression_end(tokens, name_end)
+            _mark_nix_source(tokens, bindings, attrs_end, "shell", source_positions)
+            continue
+        if token.value == "mkDerivation":
+            attr_start, attr_end = _nix_call_attrset_end(tokens, index + 1)
+            for binding in bindings:
+                if (
+                    binding.name in source_binding_names
+                    and tokens[attr_start].start < binding.start < tokens[attr_end - 1].end
+                ):
+                    if binding.value_index is None:
+                        raise NixLexError(f"dynamic Nix executable-source binding: {binding.name}")
+                    _mark_nix_source(
+                        tokens,
+                        bindings,
+                        binding.value_index,
+                        EMBEDDED_CODE_BINDING_NAMES[binding.name],
+                        source_positions,
+                    )
+            continue
+        if token.value not in {"writeText", "writeTextDir"}:
+            continue
+        name_index = _resolve_nix_string(tokens, bindings, index + 1)
+        name_end = _nix_expression_end(tokens, index + 1)
+        body_index = name_end
+        body_end = _nix_expression_end(tokens, body_index)
+        language = EXTENSION_LANGUAGE.get(Path(tokens[name_index].value).suffix)
+        if language is None:
+            _mark_nix_data_range(tokens, body_index, body_end, data_positions)
+            _mark_nix_data(tokens, bindings, body_index, data_positions)
+        elif _is_nix_to_json_expression(tokens, body_index):
+            _mark_nix_data_range(tokens, body_index, body_end, data_positions)
+        else:
+            _mark_nix_source(tokens, bindings, body_index, language, source_positions)
+    _scan_nix_interpolated_source_bindings(
+        text,
+        tokens,
+        bindings,
+        source_positions,
+        data_positions,
+    )
+    if set(EXTENSION_LANGUAGE.values()) != set(EMBEDDED_LANGUAGE_SCANNERS):
+        raise NixLexError("classifiable embedded language has no scanner")
+    classified_positions = set(source_positions) | data_positions
+    for token in tokens:
+        if (
+            token.kind == "string"
+            and token.start not in classified_positions
+            and _looks_like_nix_code(token.value)
+        ):
+            line, col = _line_col(text, token.start)
+            raise NixLexError(
+                f"{path}: unclassified embedded code-shaped string at {line}:{col}"
+            )
+    return tokens, source_positions, data_positions
+
+
+def _scan_embedded_nix_string(path, literal_text, base_line, base_col, language, embedded_violations):
+    dedented = _dedent_nix_indented_string(literal_text)
+    for current_language in _nix_source_languages(language):
+        scanner = EMBEDDED_LANGUAGE_SCANNERS.get(current_language)
+        if scanner is None:
+            raise NixLexError(
+                f"{path}: no embedded scanner for Nix source language: {current_language}"
+            )
+        for v in scanner(path, dedented):
+            line = base_line + v.line - 1
+            col = v.col + base_col if v.line == 1 else v.col
+            embedded_violations.append(Violation(path, line, col, v.kind, v.text))
+
+
+def _consume_nix_line_comment(path, text, pos, violations):
+    start = pos
+    while pos < len(text) and text[pos] != "\n":
+        pos += 1
+    line, col = _line_col(text, start)
+    violations.append((line, col, text[start:pos]))
+    return pos
+
+
+def _consume_nix_block_comment(path, text, pos, violations):
+    start = pos
+    end = text.find("*/", pos + 2)
+    if end == -1:
+        raise NixLexError(f"{path}: unterminated block comment at {_line_col(text, pos)}")
+    end += 2
+    line, col = _line_col(text, start)
+    violations.append((line, col, text[start:end]))
+    return end
+
+
+def _skip_nix_double_quoted_string(
+    path,
+    text,
+    pos,
+    violations,
+    embedded_violations,
+    language=None,
+    classifications=None,
+):
+    body_start = pos + 1
+    pos = body_start
+    literal = [] if language is not None else None
+    segment_start = pos
+    while pos < len(text):
+        if text[pos] == "\\":
+            pos += 2
+            continue
+        if text.startswith("${", pos):
+            if literal is not None:
+                literal.append(text[segment_start:pos])
+            interpolation_start = pos
+            pos = _scan_nix_region(
+                path,
+                text,
+                pos + 2,
+                len(text),
+                violations,
+                embedded_violations,
+                in_interpolation=True,
+                classifications=classifications,
+            )
+            if literal is not None:
+                literal.append(
+                    "".join(
+                        char if char == "\n" else " "
+                        for char in text[interpolation_start:pos]
+                    )
+                )
+            segment_start = pos
+            continue
+        if text[pos] == '"':
+            if literal is not None:
+                literal.append(text[segment_start:pos])
+                base_line, base_col = _line_col(text, body_start)
+                _scan_embedded_nix_string(
+                    path,
+                    _decode_nix_double_quoted("".join(literal)),
+                    base_line,
+                    base_col,
+                    language,
+                    embedded_violations,
+                )
+            return pos + 1
+        pos += 1
+    raise NixLexError(f"{path}: unterminated double-quoted string")
+
+
+def _skip_nix_indented_string(
+    path,
+    text,
+    pos,
+    violations,
+    embedded_violations,
+    language=None,
+    classifications=None,
+):
+    pos += 2
+    body_start = pos
+    literal = [] if language is not None else None
+    segment_start = pos
+    while pos < len(text):
+        if text.startswith("''\\", pos):
+            if literal is not None:
+                literal.append(text[segment_start:pos] + "    ")
+            pos += 4
+            segment_start = pos
+            continue
+        if text.startswith("'''", pos):
+            if literal is not None:
+                literal.append(text[segment_start:pos] + "   ")
+            pos += 3
+            segment_start = pos
+            continue
+        if text.startswith("''${", pos):
+            if literal is not None:
+                literal.append(text[segment_start:pos] + "    ")
+            pos += 4
+            segment_start = pos
+            continue
+        if text.startswith("${", pos):
+            if literal is not None:
+                literal.append(text[segment_start:pos])
+            interp_start = pos
+            pos = _scan_nix_region(
+                path,
+                text,
+                pos + 2,
+                len(text),
+                violations,
+                embedded_violations,
+                in_interpolation=True,
+                classifications=classifications,
+            )
+            if literal is not None:
+                literal.append("".join(ch if ch == "\n" else " " for ch in text[interp_start:pos]))
+            segment_start = pos
+            continue
+        if text.startswith("''", pos):
+            if literal is not None:
+                literal.append(text[segment_start:pos])
+            end = pos + 2
+            if language is not None:
+                base_line, base_col = _line_col(text, body_start)
+                _scan_embedded_nix_string(path, "".join(literal), base_line, base_col, language, embedded_violations)
+            return end
+        pos += 1
+    raise NixLexError(f"{path}: unterminated indented string")
+
+
+def _scan_nix_region(
+    path,
+    text,
+    pos,
+    end,
+    violations,
+    embedded_violations,
+    in_interpolation,
+    classifications=None,
+):
+    depth = 0
+    while pos < end:
+        char = text[pos]
+        if char == "#":
+            pos = _consume_nix_line_comment(path, text, pos, violations)
+            continue
+        if text.startswith("/*", pos):
+            pos = _consume_nix_block_comment(path, text, pos, violations)
+            continue
+        if char == '"':
+            language = (classifications or {}).get(pos)
+            pos = _skip_nix_double_quoted_string(
+                path,
+                text,
+                pos,
+                violations,
+                embedded_violations,
+                language,
+                classifications,
+            )
+            continue
+        if text.startswith("''", pos):
+            language = (classifications or {}).get(pos)
+            if language is None and classifications is None:
+                context_kind, context_name = _lookback_context(text, pos)
+                language = classify_nix_string_binding(context_kind, context_name, text, pos)
+                if language is None and context_kind == "call" and context_name in ("writeText", "writeTextDir"):
+                    language = classify_write_text_by_name(text, pos)
+                code_shaped = _is_nix_code_shaped_context(context_kind, context_name)
+                if language is None and code_shaped:
+                    line, col = _line_col(text, pos)
+                    raise NixLexError(f"{path}: unclassified embedded code-shaped string at {line}:{col}")
+            pos = _skip_nix_indented_string(
+                path,
+                text,
+                pos,
+                violations,
+                embedded_violations,
+                language,
+                classifications,
+            )
+            continue
+        if in_interpolation and char == "{":
+            depth += 1
+            pos += 1
+            continue
+        if in_interpolation and char == "}":
+            if depth == 0:
+                return pos + 1
+            depth -= 1
+            pos += 1
+            continue
+        pos += 1
+    if in_interpolation:
+        raise NixLexError(f"{path}: unterminated interpolation")
+    return pos
+
+
+def scan_nix(path, text, root=None):
+    raw_violations = []
+    embedded_violations = []
+    _, classifications, _ = _classify_nix_embedded_strings(path, text, root)
+    _scan_nix_region(
+        path,
+        text,
+        0,
+        len(text),
+        raw_violations,
+        embedded_violations,
+        in_interpolation=False,
+        classifications=classifications,
+    )
+    violations = []
+    for line_number, col, comment_text in raw_violations:
+        if is_shebang_line("nix", line_number, col, comment_text):
+            continue
+        if match_directive("nix", comment_text):
+            continue
+        violations.append(Violation(path, line_number, col, "narrative-comment", comment_text))
+    violations.extend(embedded_violations)
+    return violations
+
+
+class JsLexError(Exception):
+    pass
+
+
+JS_VALUE_ENDING_KEYWORDS = {"this", "super", "true", "false", "null", "undefined"}
+JS_REGEX_PRECEDING_KEYWORDS = {
+    "return", "typeof", "instanceof", "in", "of", "new", "delete", "void",
+    "throw", "case", "do", "else", "yield", "await",
+}
+
+
+def _regex_allowed(last_significant):
+    return last_significant in (None, "operator", "keyword")
+
+
+def _skip_js_simple_string(path, text, pos, quote):
+    pos += 1
+    while pos < len(text):
+        if text[pos] == "\\":
+            pos += 2
+            continue
+        if text[pos] == quote:
+            return pos + 1
+        pos += 1
+    raise JsLexError(f"{path}: unterminated string literal")
+
+
+def _skip_js_regex_literal(path, text, pos):
+    pos += 1
+    in_class = False
+    while pos < len(text):
+        char = text[pos]
+        if char == "\\":
+            pos += 2
+            continue
+        if char == "[":
+            in_class = True
+        elif char == "]":
+            in_class = False
+        elif char == "/" and not in_class:
+            pos += 1
+            while pos < len(text) and text[pos].isalpha():
+                pos += 1
+            return pos
+        elif char == "\n":
+            raise JsLexError(f"{path}: unterminated regex literal")
+        pos += 1
+    raise JsLexError(f"{path}: unterminated regex literal")
+
+
+def _skip_js_template_literal(path, text, pos, violations):
+    pos += 1
+    while pos < len(text):
+        char = text[pos]
+        if char == "\\":
+            pos += 2
+            continue
+        if char == "`":
+            return pos + 1
+        if text.startswith("${", pos):
+            pos = _scan_js_region(path, text, pos + 2, len(text), violations, in_interpolation=True)
+            continue
+        pos += 1
+    raise JsLexError(f"{path}: unterminated template literal")
+
+
+def _scan_js_region(path, text, pos, end, violations, in_interpolation):
+    depth = 0
+    last_significant = None
+    while pos < end:
+        char = text[pos]
+        if text.startswith("//", pos):
+            start = pos
+            pos = text.find("\n", pos)
+            pos = end if pos == -1 else pos
+            line, col = _line_col(text, start)
+            violations.append((line, col, text[start:pos]))
+            continue
+        if text.startswith("/*", pos):
+            start = pos
+            close = text.find("*/", pos + 2)
+            if close == -1:
+                raise JsLexError(f"{path}: unterminated block comment")
+            pos = close + 2
+            line, col = _line_col(text, start)
+            violations.append((line, col, text[start:pos]))
+            continue
+        if char == "'":
+            pos = _skip_js_simple_string(path, text, pos, "'")
+            last_significant = "value"
+            continue
+        if char == '"':
+            pos = _skip_js_simple_string(path, text, pos, '"')
+            last_significant = "value"
+            continue
+        if char == "`":
+            pos = _skip_js_template_literal(path, text, pos, violations)
+            last_significant = "value"
+            continue
+        if char == "/" and _regex_allowed(last_significant):
+            pos = _skip_js_regex_literal(path, text, pos)
+            last_significant = "value"
+            continue
+        if char in ")]":
+            last_significant = "value"
+            pos += 1
+            continue
+        if in_interpolation and char == "{":
+            depth += 1
+            last_significant = "operator"
+            pos += 1
+            continue
+        if in_interpolation and char == "}":
+            if depth == 0:
+                return pos + 1
+            depth -= 1
+            last_significant = "value"
+            pos += 1
+            continue
+        if char == ".":
+            last_significant = "dot"
+            pos += 1
+            continue
+        if char.isalnum() or char == "_" or char == "$":
+            start = pos
+            while pos < end and (text[pos].isalnum() or text[pos] in "_$"):
+                pos += 1
+            word = text[start:pos]
+            if last_significant == "dot":
+                last_significant = "value"
+            elif word in JS_VALUE_ENDING_KEYWORDS:
+                last_significant = "value"
+            elif word in JS_REGEX_PRECEDING_KEYWORDS:
+                last_significant = "keyword"
+            else:
+                last_significant = "value"
+            continue
+        if not char.isspace():
+            last_significant = "operator"
+        pos += 1
+    if in_interpolation:
+        raise JsLexError(f"{path}: unterminated template interpolation")
+    return pos
+
+
+def scan_js(path, text, root=None):
+    violations = []
+    _scan_js_region(path, text, 0, len(text), violations, in_interpolation=False)
+    real_violations = []
+    for line, col, comment_text in violations:
+        if match_directive("js", comment_text):
+            continue
+        real_violations.append(Violation(path, line, col, "narrative-comment", comment_text))
+    return real_violations
+
+
+class YamlLexError(Exception):
+    pass
+
+
+BLOCK_SCALAR_HEADER = re.compile(r":\s*[|>][+-]?\s*$")
+YAML_QUOTE_OPEN_CONTEXT = re.compile(r"(^\s*|:\s*|(?:^|\s)-\s*|,\s*|\[\s*|\{\s*)$")
+
+
+def _yaml_quote_can_open(line, pos):
+    return bool(YAML_QUOTE_OPEN_CONTEXT.search(line[:pos]))
+
+
+def _yaml_scan_quoted(line, start, quote_char):
+    pos = start
+    length = len(line)
+    while pos < length:
+        char = line[pos]
+        if quote_char == '"':
+            if char == "\\":
+                if pos + 1 < length:
+                    pos += 2
+                    continue
+                return length, False
+            if char == '"':
+                return pos + 1, True
+            pos += 1
+        else:
+            if char == "'":
+                if pos + 1 < length and line[pos + 1] == "'":
+                    pos += 2
+                    continue
+                return pos + 1, True
+            pos += 1
+    return length, False
+
+
+def _yaml_skip_or_continue_quote(line, pos, quote_char):
+    resume_pos, closed = _yaml_scan_quoted(line, pos + 1, quote_char)
+    return resume_pos, not closed
+
+
+def _yaml_consume_quote_continuation(line, pending_dquote, pending_squote):
+    quote_char = '"' if pending_dquote else "'"
+    resume_pos, closed = _yaml_scan_quoted(line, 0, quote_char)
+    if closed:
+        return resume_pos, False, False
+    return resume_pos, pending_dquote, pending_squote
+
+
+def scan_yaml(path, text, root=None):
+    violations = []
+    lines = text.split("\n")
+    in_block_scalar = False
+    block_scalar_indent = None
+    pending_dquote = False
+    pending_squote = False
+    for line_number, line in enumerate(lines, start=1):
+        if in_block_scalar:
+            indent = len(line) - len(line.lstrip(" "))
+            if line.strip() == "" or indent > block_scalar_indent:
+                continue
+            in_block_scalar = False
+        if pending_dquote or pending_squote:
+            pos, pending_dquote, pending_squote = _yaml_consume_quote_continuation(
+                line, pending_dquote, pending_squote
+            )
+            if pending_dquote or pending_squote:
+                continue
+        else:
+            pos = 0
+        while pos < len(line):
+            char = line[pos]
+            if char == "#" and (pos == 0 or line[pos - 1] in " \t"):
+                comment_text = line[pos:]
+                if match_directive("yaml", comment_text):
+                    pos = len(line)
+                    continue
+                violations.append(Violation(path, line_number, pos, "narrative-comment", comment_text))
+                pos = len(line)
+                continue
+            if char == '"' and _yaml_quote_can_open(line, pos):
+                pos, pending_dquote = _yaml_skip_or_continue_quote(line, pos, '"')
+                continue
+            if char == "'" and _yaml_quote_can_open(line, pos):
+                pos, pending_squote = _yaml_skip_or_continue_quote(line, pos, "'")
+                continue
+            pos += 1
+        if BLOCK_SCALAR_HEADER.search(line):
+            in_block_scalar = True
+            block_scalar_indent = len(line) - len(line.lstrip(" "))
+    if pending_dquote or pending_squote:
+        raise YamlLexError(f"{path}: unterminated quoted scalar at EOF")
+    return violations
+
+
+class JsoncLexError(Exception):
+    pass
+
+
+def _skip_jsonc_string(path, text, pos):
+    pos += 1
+    while pos < len(text):
+        if text[pos] == "\\":
+            if pos + 1 >= len(text):
+                raise JsoncLexError(f"{path}: unterminated JSONC string")
+            pos += 2
+            continue
+        if text[pos] == '"':
+            return pos + 1
+        if text[pos] in "\r\n":
+            raise JsoncLexError(f"{path}: unterminated JSONC string")
+        pos += 1
+    raise JsoncLexError(f"{path}: unterminated JSONC string")
+
+
+def scan_jsonc(path, text, root=None):
+    violations = []
+    pos = 0
+    while pos < len(text):
+        if text[pos] == '"':
+            pos = _skip_jsonc_string(path, text, pos)
+            continue
+        if text.startswith("//", pos):
+            start = pos
+            newline = text.find("\n", pos)
+            pos = len(text) if newline == -1 else newline
+            line, col = _line_col(text, start)
+            violations.append(Violation(path, line, col, "narrative-comment", text[start:pos]))
+            continue
+        if text.startswith("/*", pos):
+            start = pos
+            end = text.find("*/", pos + 2)
+            if end == -1:
+                raise JsoncLexError(f"{path}: unterminated JSONC block comment")
+            pos = end + 2
+            line, col = _line_col(text, start)
+            violations.append(Violation(path, line, col, "narrative-comment", text[start:pos]))
+            continue
+        pos += 1
+    return violations
+
+
+class TomlLexError(Exception):
+    pass
+
+
+def _toml_skip_basic_string(path, text, pos):
+    pos += 1
+    while pos < len(text):
+        if text[pos] == "\\":
+            pos += 2
+            continue
+        if text[pos] == '"':
+            return pos + 1
+        pos += 1
+    raise TomlLexError(f"{path}: unterminated basic string")
+
+
+def _toml_skip_literal_string(path, text, pos):
+    pos += 1
+    while pos < len(text):
+        if text[pos] == "'":
+            return pos + 1
+        pos += 1
+    raise TomlLexError(f"{path}: unterminated literal string")
+
+
+def _toml_skip_multiline(path, text, pos, delimiter):
+    quote_char = delimiter[0]
+    escapes = delimiter == '"""'
+    pos += 3
+    length = len(text)
+    while pos < length:
+        if escapes and text[pos] == "\\":
+            pos += 2
+            continue
+        if text.startswith(delimiter, pos):
+            extra = 0
+            while extra < 2 and text[pos + 3 + extra:pos + 4 + extra] == quote_char:
+                extra += 1
+            return pos + 3 + extra
+        pos += 1
+    raise TomlLexError(f"{path}: unterminated multiline string {delimiter}")
+
+
+def scan_toml(path, text, root=None):
+    violations = []
+    pos = 0
+    length = len(text)
+    while pos < length:
+        char = text[pos]
+        if text.startswith('"""', pos):
+            pos = _toml_skip_multiline(path, text, pos, '"""')
+            continue
+        if text.startswith("'''", pos):
+            pos = _toml_skip_multiline(path, text, pos, "'''")
+            continue
+        if char == '"':
+            pos = _toml_skip_basic_string(path, text, pos)
+            continue
+        if char == "'":
+            pos = _toml_skip_literal_string(path, text, pos)
+            continue
+        if char == "#":
+            start = pos
+            newline = text.find("\n", pos)
+            pos = length if newline == -1 else newline
+            line, col = _line_col(text, start)
+            violations.append(Violation(path, line, col, "narrative-comment", text[start:pos]))
+            continue
+        pos += 1
+    return violations
+
+
+SCANNERS = {
+    "python": scan_python,
+    "shell": scan_shell,
+    "nix": scan_nix,
+    "js": scan_js,
+    "qml": scan_js,
+    "yaml": scan_yaml,
+    "jsonc": scan_jsonc,
+    "toml": scan_toml,
+}
+
+EMBEDDED_LANGUAGE_SCANNERS = {
+    "shell": scan_shell,
+    "python": scan_python,
+    "nix": scan_nix,
+    "yaml": scan_yaml,
+    "jsonc": scan_jsonc,
+    "toml": scan_toml,
+    "qml": scan_js,
+    "js": scan_js,
+}
+
+
+def main(argv):
+    root = Path(argv[1] if len(argv) > 1 else ".").resolve()
+    violations = []
+    unsupported = []
+    try:
+        source_paths = discover_source_files(root)
+        for path in source_paths:
+            language = classify_language(path, root)
+            if language is None:
+                continue
+            if language == "unsupported":
+                unsupported.append(path.relative_to(root))
+                continue
+            text = path.read_text(encoding="utf-8", errors="surrogateescape")
+            violations.extend(SCANNERS[language](path, text, root))
+    except (OSError, UnicodeError, SourceDiscoveryError, PythonEmbeddedStringError, ShellLexError, NixLexError, JsLexError, YamlLexError, JsoncLexError, TomlLexError) as error:
+        print(f"source-comment-policy: {error}")
+        return 1
+    for path in unsupported:
+        print(f"source-comment-policy: unsupported maintained source language: {path}")
+    for violation in violations:
+        print(f"{violation.path}:{violation.line}:{violation.col}: {violation.kind}: {violation.text}")
+    if unsupported or violations:
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))

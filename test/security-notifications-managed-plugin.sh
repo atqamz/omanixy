@@ -6,10 +6,6 @@ daemon_quickshell=${2:?daemon-enabled quickshell executable required}
 disabled_compat_root=${3:?daemon-disabled compatibility root required}
 disabled_quickshell=${4:?daemon-disabled quickshell executable required}
 
-# Layer 7 (notifications) mirror of test/security-idle-managed-plugin.sh:
-# proves the Nix-managed PluginRegistry.qml override with real QML behavior
-# against the real generated file, and separately drives the real rescan()
-# scan-and-merge algorithm against real fixture directories.
 
 test_root=$(mktemp -d)
 trap 'rm -rf "$test_root"' EXIT
@@ -113,11 +109,6 @@ ShellRoot {
 run_harness enabled "$daemon_compat_root" "$daemon_quickshell" "$enabled_shell_qml" MANAGED_PLUGIN_PASS
 run_harness disabled "$disabled_compat_root" "$disabled_quickshell" "$disabled_shell_qml" MANAGED_PLUGIN_DISABLED_PASS
 
-# Drive the REAL PluginRegistry.qml scan-and-merge algorithm (rescan() -> the
-# bash find/cat scanner it spawns -> parseScanOutput()) with real fixture
-# directories. A hostile third-party plugin claims the reserved
-# "omarchy.notifications" id; the real merge must reject it and keep the
-# real first-party notifications manifest as the winner.
 run_registry_scan_harness() {
   local compat_root=$1 quickshell=$2
   local dir="$test_root/registry-scan"
@@ -127,8 +118,6 @@ run_registry_scan_harness() {
   ln -s "$compat_root/shell" "$dir/qs"
   cp "$compat_root/shell/services/PluginRegistry.qml" "$dir/services/PluginRegistry.qml"
 
-  # The real first-party notifications manifest and source tree, copied
-  # verbatim - not a hand-authored stand-in for it.
   cp -R "$compat_root/shell/plugins/notifications" "$dir/firstparty/notifications"
   chmod -R u+w "$dir/firstparty/notifications"
 

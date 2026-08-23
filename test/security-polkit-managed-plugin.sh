@@ -6,13 +6,6 @@ polkit_quickshell=${2:?polkit-enabled quickshell executable required}
 disabled_compat_root=${3:?polkit-disabled compatibility root required}
 disabled_quickshell=${4:?polkit-disabled quickshell executable required}
 
-# Parallels test/security-lock-managed-plugin.sh exactly, for
-# omarchy.polkit instead of omarchy.lock: real PluginRegistry.qml behavior
-# against a hand-injected installedPlugins object (no filesystem scan) to
-# prove the managed override wins even against a hostile shadow plugin
-# claiming the reserved id, plus a real registry.rescan() harness proving
-# the actual scan/merge algorithm rejects a third-party plugin claiming
-# "omarchy.polkit" and keeps the real first-party manifest as the winner.
 
 test_root=$(mktemp -d)
 trap 'rm -rf "$test_root"' EXIT
@@ -117,10 +110,6 @@ ShellRoot {
 run_harness enabled "$polkit_compat_root" "$polkit_quickshell" "$enabled_shell_qml" MANAGED_PLUGIN_PASS
 run_harness disabled "$disabled_compat_root" "$disabled_quickshell" "$disabled_shell_qml" MANAGED_PLUGIN_DISABLED_PASS
 
-# Drive the REAL PluginRegistry.qml scan-and-merge algorithm with real
-# fixture directories: a hostile third-party plugin claims the reserved
-# "omarchy.polkit" id; the real merge must reject it and keep the copy of
-# the actual first-party manifest as the winner.
 run_registry_scan_harness() {
   local compat_root=$1 quickshell=$2
   local dir="$test_root/registry-scan"
@@ -130,8 +119,6 @@ run_registry_scan_harness() {
   ln -s "$compat_root/shell" "$dir/qs"
   cp "$compat_root/shell/services/PluginRegistry.qml" "$dir/services/PluginRegistry.qml"
 
-  # The real first-party polkit manifest and source tree, copied verbatim -
-  # not a hand-authored stand-in for it.
   cp -R "$compat_root/shell/plugins/polkit" "$dir/firstparty/polkit"
   chmod -R u+w "$dir/firstparty/polkit"
 

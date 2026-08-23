@@ -1,10 +1,4 @@
 #!/usr/bin/env bash
-# Drives the real, patched IdleModel.js directly (via require), not a
-# disconnected reimplementation. Proves the hardened lock-timeout parsing
-# matrix (section 16 of the Layer-6 spec, extended by the remediation pass's
-# section 13/14 pinned-backend upper bound) and that the dead eventParts/
-# screensaverWindowsAfter helpers are gone from both the module surface and
-# its exports.
 set -euo pipefail
 
 model_file=$1

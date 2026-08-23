@@ -1,13 +1,4 @@
 #!/usr/bin/env bash
-# Drives the real, patched NotificationLogic.js directly (via require), not a
-# disconnected reimplementation. Proves the exec role is structurally gone
-# from every schema this module produces (snapshot, history, popup,
-# replacement), that an incoming omarchy-exec hint can never survive into
-# persisted state under any name, that persistablePopup's copy descriptors
-# carry a role rather than a caller-facing destination path, and that the
-# untouched presentation/history logic (sanitization, history trimming,
-# malformed-entry skipping, replacement identity) still behaves exactly as
-# pinned.
 set -euo pipefail
 
 logic_file=$1

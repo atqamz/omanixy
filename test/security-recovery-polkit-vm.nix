@@ -1,49 +1,8 @@
-# Layer 8 (security-recovery) real-backend evidence for the security.polkit-agent
-# ledger entry's `required_before_promotion` list (upstream/porting-matrix.yaml).
-#
-# Layer 5 (programs.omanixy.security.polkit.system.enable /
-# programs.omanixy.security.polkit.agent.enable, modules/nixos/default.nix and
-# modules/home/default.nix) proved the declarative capability and the pinned
-# Quickshell PolkitAgent/AuthFlow ABI hermetically: offscreen QML against a
-# deterministic fake agent object (test/security-polkit-qml-behavior.sh) and a
-# real polkitd/D-Bus registration was never exercised. This file boots a real
-# NixOS VM with both options enabled, a real `polkitd`, and a minimal offscreen
-# Quickshell harness that instantiates the exact same, unmodified
-# `Quickshell.Services.Polkit.PolkitAgent { path: "/org/omarchy/PolkitAgent" }`
-# object the production, patched `PolkitAgent.qml` uses - built from the exact
-# same pinned `quickshell-omanixy` derivation
-# (`self.packages.<system>.omanixy-shell.passthru.quickshell`) production runs,
-# so this exercises the real ABI, not a reimplementation of it. No nested
-# Wayland/Hyprland session is needed: only the agent's own presentation UI (a
-# PanelWindow) requires one, and this harness never instantiates a PanelWindow.
-#
-# The harness is driven live via Quickshell's own IPC mechanism
-# (`quickshell ipc call -- polkit <function>`), the same real mechanism
-# `packages/omanixy-shell/ipc-wrapper.bash` uses in production, from inside a
-# genuine systemd-logind session for a disposable VM-only test user (obtained
-# via `systemd-run --uid=<user> -p PAMName=login`, the same session-registration
-# mechanism a real login/display-manager session uses) - required because the
-# pinned Quickshell polkit listener registers itself against
-# `polkit_unix_session_new_for_process(getpid())`, i.e. against whichever
-# logind session contains the agent's own process.
-#
-# Every scenario reports its evidence exclusively as `CHECK <name> PASS|FAIL
-# ...` lines, asserted in the outer NixOS test via
-# test/lib/recovery-check-helpers.py's `assert_scenario(output, scenario_id)`
-# against that scenario's own exact, registered required-check set - never
-# via "no line said FAIL", which a driver that silently skips a step would
-# still satisfy, and never against a caller-assembled subset. A missing
-# expected CHECK, an unexpected extra one, a duplicate, or a malformed
-# PASS/FAIL token is exactly as much a failure as an explicit FAIL.
 { pkgs, self, home-manager }:
 let
   lib = pkgs.lib;
   system = pkgs.stdenv.hostPlatform.system;
 
-  # The exact pinned quickshell-omanixy derivation production builds and runs
-  # (packages/omanixy-shell/default.nix's `quickshell` binding), reused as-is
-  # rather than refetched, so the harness runs under the identical ABI/module
-  # set production does.
   quickshellBin = self.packages.${system}.omanixy-shell.passthru.quickshell;
 
   testUser = "omanixy-recovery-test";
@@ -51,13 +10,6 @@ let
   wrongPassword = "omanixy-recovery-test-fixture-password-wrong";
   testActionId = "org.omanixy.test.security-recovery";
 
-  # A minimal, test-harness-only QML fixture: only the real, unmodified
-  # PolkitAgent object plus an IpcHandler used to drive it from the test
-  # script. Deliberately not the production compat root's patched
-  # PolkitAgent.qml (which additionally renders a PanelWindow presentation
-  # this scope does not need) - this is the "no nested compositor needed"
-  # minimal harness the layer 8 scope calls for, instantiating the exact same
-  # native Quickshell.Services.Polkit.PolkitAgent type production uses.
   mkAgentQml = { dbusPath, ipcTarget }: ''
     import QtQuick
     import Quickshell
@@ -136,40 +88,16 @@ let
     }
   '';
 
-  # The real Quattro-shaped agent under test, registering at the real
-  # /org/omarchy/PolkitAgent path production uses.
   harnessDir = pkgs.writeTextDir "shell.qml" (mkAgentQml {
     dbusPath = "/org/omarchy/PolkitAgent";
     ipcTarget = "polkit";
   });
 
-  # A trivial, genuinely-separate second D-Bus agent registration used only by
-  # the collision scenario - a real independent registration (not the
-  # declarative hyprpolkitagent/polkit-gnome conflict, which is already
-  # covered by test/security-polkit-hm.sh), never stopped/killed/masked by the
-  # harness under test.
-  # D-Bus object path segments only allow [A-Za-z0-9_] - no hyphens - so this
-  # deliberately does not reuse a hyphenated name; an earlier version of this
-  # fixture used "/org/omanixy-test-rival/Agent" and
-  # polkit_agent_listener_register_with_options rejected it via a
-  # g_variant_is_object_path assertion, which registerComplete never observed
-  # as an error, making the rival silently never really occupy the session's
-  # agent slot (a spurious "no collision" result, not a real one).
   rivalDir = pkgs.writeTextDir "shell.qml" (mkAgentQml {
     dbusPath = "/org/omanixy_test_rival/Agent";
     ipcTarget = "rival";
   });
 
-  # polkitd's backend refuses to check authorization for any action id that
-  # is not registered in its action pool (parsed from *.policy files under
-  # its --datadir, which on NixOS resolves to
-  # /run/current-system/sw/share/polkit-1/actions via
-  # environment.pathsToLink - see pkgs.polkit's mesonFlags): an unregistered
-  # action id fails immediately with "Action ... is not registered", before
-  # any JS rule or agent is ever consulted. security.polkit.extraConfig's
-  # addRule alone is therefore not sufficient; this test-only .policy file
-  # registers the action id security.polkit.extraConfig's rule keys on.
-  # Test-only: never installed by modules/ or packages/.
   testActionPolicy = pkgs.runCommand "omanixy-test-action-policy" { } ''
     mkdir -p "$out/share/polkit-1/actions"
     cat > "$out/share/polkit-1/actions/${testActionId}.policy" <<EOF
@@ -238,8 +166,6 @@ let
     case "$scenario" in
 
       register)
-        # Section 3: rival absent, real polkitd active, real registration,
-        # exactly one registration-success event, harness stays alive.
         rival_running=$(pgrep -fc 'qu[i]ckshell.*-p .*rival' 2>/dev/null || true)
         [ "''${rival_running:-0}" = "0" ] && check rival-absent yes || check rival-absent no "rival_running=$rival_running"
 
@@ -404,7 +330,6 @@ let
         ;;
 
       collision)
-        # Section 7, sequence A-H.
         "$QS" -n -p "$RIVAL_DIR" >rival.log 2>&1 &
         rpid=$!
         if wait_for "$RIVAL_DIR" rival '.isRegistered == true' 60; then
@@ -462,9 +387,6 @@ let
         ;;
 
       stress)
-        # Section 9: 20 wrong-password authentication cycles against the
-        # real backend, then a fresh correct-password authentication, with
-        # process/log bounds asserted rather than merely printed.
         "$QS" -n -p "$HARNESS_DIR" >harness.log 2>&1 &
         hpid=$!
         if ! wait_for "$HARNESS_DIR" polkit '.isRegistered == true' 60; then
@@ -485,13 +407,6 @@ let
           "$PKCHECK" -a "$ACTION_ID" -u -p $$ >"pkcheck-$n.log" 2>&1 &
           pn=$!
           cycle_failed_once=no
-          # A real pkcheck/agent-helper conversation reprompts internally
-          # (up to its own real bounded retry count) after a single wrong
-          # password rather than exiting immediately - proven already by
-          # the "auth" scenario's own reprompt-after-failure check - so this
-          # keeps answering wrong until the real backend itself ends the
-          # request, bounded to 6 internal attempts so a real cap higher
-          # than expected can never hang this loop.
           attempt=0
           while [ "$attempt" -lt 6 ] && wait_for "$HARNESS_DIR" polkit '.isResponseRequired == true' 20; do
             before_failed=$(qs_status "$HARNESS_DIR" polkit | "$JQ" -r '.failedCount')
@@ -501,9 +416,6 @@ let
               cycle_failed_once=yes
             fi
           done
-          # Bounded termination: if the real backend has not already ended
-          # this request within the 6-attempt budget above, end it here -
-          # a cycle "terminates" either way, never left to hang.
           kill "$pn" 2>/dev/null || true
           wait "$pn" 2>/dev/null
           [ "$cycle_failed_once" = "yes" ] && cycles_ok=$((cycles_ok + 1))
@@ -515,11 +427,6 @@ let
         [ "$procs" = "1" ] && check stress-single-harness-process yes || check stress-single-harness-process no "procs=$procs"
 
         events=$(grep -c '^HARNESS_EVENT' harness.log || true)
-        # Generous multiplier: up to 6 internal reprompt attempts per cycle
-        # (the bounded budget above) times 20 cycles, times a generous
-        # per-attempt event count, plus fixed registration overhead - finite
-        # and explicitly proportional to the 20-cycle stimulus, not an
-        # arbitrary tiny constant.
         max_events=$((20 * 6 * 10 + 50))
         [ "''${events:-0}" -le "$max_events" ] \
           && check stress-log-bound yes "events=$events max=$max_events" \
@@ -550,11 +457,6 @@ let
         ;;
 
       daemon-restart)
-        # Section 8: polkitd disappearance/recovery during an in-flight
-        # request, plus both the same-harness-reconnect and fresh-harness
-        # recovery paths (both are actually observed to work on the pinned
-        # ABI; both are asserted, not merely one printed and the other
-        # documented).
         "$QS" -n -p "$HARNESS_DIR" >harness.log 2>&1 &
         hpid=$!
         if ! wait_for "$HARNESS_DIR" polkit '.isRegistered == true' 60; then
@@ -633,11 +535,6 @@ let
         ;;
     esac
 
-    # Correctness/failure is reported exclusively via the CHECK lines above,
-    # never via this script's own exit code: the last command of a case
-    # branch is frequently a `wait` on a deliberately-killed background
-    # process, whose (128+signal) exit status must never leak out as this
-    # script's own.
     exit 0
   '';
 
@@ -657,11 +554,6 @@ pkgs.testers.runNixOSTest {
 
     programs.omanixy.security.polkit.system.enable = true;
 
-    # Test-only action definition: not installed by modules/ or packages/,
-    # lives entirely in this test file. AUTH_SELF requires authentication as
-    # the disposable VM-only test user itself (never a real user, never an
-    # admin/wheel identity), matching the ledger's "real polkit authentication
-    # success/wrong-password against the real backend" evidence requirement.
     security.polkit.extraConfig = ''
       polkit.addRule(function(action, subject) {
         if (action.id == "${testActionId}") {

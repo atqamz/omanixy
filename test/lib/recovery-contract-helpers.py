@@ -1,18 +1,8 @@
-# Pure validation logic for upstream/security-recovery-matrix.yaml against
-# upstream/porting-matrix.yaml's security.* ledger entries, shared by
-# test/security-recovery-contract.sh (real files) and
-# test/lib/recovery-contract-helpers-selftest.py (synthetic adversarial
-# fixtures). Kept import-free of yaml/os so the selftest can hand it plain
-# dicts and a fake `path_exists` without touching disk, matching the
-# discipline test/lib/recovery-check-helpers.py already uses for its own
-# adversarial self-test.
 import re
 
 ENVIRONMENTS = {"hermetic", "nested-vm", "real-backend", "physical-hardware"}
 STATUSES = {"passed", "unsupported-environment", "required-before-supported"}
 
-# Matches a stable matrix case id embedded in ledger prose, e.g.
-# "recovery.pam-fingerprint-backend-unavailable".
 ID_RE = re.compile(r"\brecovery\.[a-z0-9][a-z0-9-]*\b")
 
 
@@ -26,16 +16,6 @@ def _check_ids(case):
 
 
 def validate(matrix, ledger, repo_path_exists, recovery_checks):
-    """Raise AssertionError on the first violation found; return None on success.
-
-    `repo_path_exists(path)` replaces `os.path.exists(os.path.join(repo, path))`
-    so fixtures never need a real filesystem. `recovery_checks` is the
-    RECOVERY_CHECKS dict from recovery-check-helpers.py - the one registry
-    this function cross-checks every matrix `check:` entry against, so an
-    id that does not exist there, or whose registered owner does not match
-    the matrix case's own surface, is rejected the same way a missing
-    evidence file is.
-    """
     items = matrix["items"]
     security = {item["id"]: item for item in ledger["items"] if item["id"].startswith("security.")}
     security_ids = set(security)
@@ -66,11 +46,6 @@ def validate(matrix, ledger, repo_path_exists, recovery_checks):
                 f"{cid}: check id {check_id!r} is owned by {scenario['owner']!r}, "
                 f"not this case's surface {case['surface']!r} (cross-surface check id)"
             )
-            # A scenario id shared by coincidence (same owner, same evidence
-            # file) can never stand in for a matrix case it does not itself
-            # claim: e.g. two implemented, same-surface, same-evidence-file
-            # scenarios must not be interchangeable just because nothing
-            # else here distinguishes them.
             assert cid in scenario.get("matrix_cases", ()), (
                 f"{cid}: check id {check_id!r} does not list this case in its own "
                 "matrix_cases - a scenario must explicitly own every matrix case it is "
@@ -121,10 +96,6 @@ def validate(matrix, ledger, repo_path_exists, recovery_checks):
         "security.recovery must be represented in the recovery matrix"
     )
 
-    # Reverse direction of the same binding: every id a scenario's own
-    # matrix_cases claims must be a real matrix case, and that case's own
-    # check field must cite the scenario back - a registry entry cannot
-    # unilaterally claim ownership of a case that never actually names it.
     for check_id, scenario in recovery_checks.items():
         for owned_cid in scenario.get("matrix_cases", ()):
             case = by_id.get(owned_cid)
@@ -137,22 +108,10 @@ def validate(matrix, ledger, repo_path_exists, recovery_checks):
                 f"that case's own check field does not cite {check_id!r} back"
             )
 
-    # Exact bidirectional mapping between each ledger entry's own
-    # required_before_supported prose and the matrix cases it owns - never a
-    # bare "some case exists for this surface" check, and never satisfiable
-    # by a different entry citing the same case (that would let
-    # security.recovery, or any other entry, silently duplicate ownership of
-    # a child surface's own gap).
-    referenced_by = {}  # matrix case id -> set of ledger entry ids citing it
+    referenced_by = {}
     for entry_id, entry in security.items():
         required_before_supported = entry["evidence"].get("required_before_supported") or []
 
-        # Every individual bullet must carry its own stable recovery.* id -
-        # not merely the joined text of the whole list. A prose-only bullet
-        # sitting alongside another bullet that does cite a real id used to
-        # pass (the aggregate text search would still find that other
-        # bullet's id somewhere), which let untracked support-gate prose
-        # accumulate silently; each bullet now stands on its own.
         referenced = set()
         for bullet in required_before_supported:
             bullet_ids = set(ID_RE.findall(bullet))

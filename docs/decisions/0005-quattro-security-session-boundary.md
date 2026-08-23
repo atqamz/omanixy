@@ -4,7 +4,9 @@
 
 Accepted for the issue #4 foundation layer.
 
-The security runtime remains blocked and unreachable after this decision.
+The security runtime remains disabled by default; reviewed opt-in lock, PAM,
+fingerprint, polkit, idle, and notification ownership controls implement this
+boundary in the subsequent security layers.
 
 ## Context
 
@@ -1859,6 +1861,21 @@ the `nixos-test` Nix system feature, so these checks build and run locally
 exactly as `nix flake check` would run them elsewhere with the same
 features.
 
+Two low-level conventions recur across every Layer 8 VM test file. A pinned
+source file that lives inside a derivation output - for example
+`compatRoot`'s copy of `Service.qml` - must never be read with
+`builtins.readFile` directly at Nix-evaluation time: doing so would force
+that derivation to build during evaluation (import-from-derivation), which
+breaks `nix flake check --no-build`. `pkgs.runCommand` defers the read and
+patch to the build phase instead, and every test harness that patches a
+pinned QML source before use follows this same pattern. Every test script
+also reports correctness exclusively through its own `CHECK ... PASS/FAIL`
+lines, consumed by `assert_scenario`, never through the driver script's own
+process exit code: a scenario's last statement in a bash case branch is
+frequently a `wait` on a deliberately-killed background process, and that
+wait's reported (128+signal) exit status must never be allowed to leak out
+as the whole script's own exit code.
+
 ### Nested-compositor environment limitation: lock, idle, suspend/resume
 
 Quickshell's `PamContext`, the native `PolkitAgent` object, and
@@ -2044,6 +2061,25 @@ presentation remains unavailable for the same nested-compositor reason as
 lock and idle (`recovery.polkit-nested-compositor`), and a larger,
 hundreds-of-cycles stress run beyond the finite 20-cycle one just proven
 stays under `required_before_supported` (`recovery.polkit-stress-large-scale`).
+
+Two of that stress and collision evidence's supporting fixtures rely on
+facts about D-Bus and `polkitd` themselves, not about the Quattro agent
+under test. D-Bus object paths only allow `[A-Za-z0-9_]` in each segment -
+no hyphens - so the rival-agent fixture's own object path is deliberately
+built without one; an earlier hyphenated path caused
+`polkit_agent_listener_register_with_options` to reject it via a
+`g_variant_is_object_path` assertion that `registerComplete` never surfaced
+as an error, which would have made the collision scenario report a false
+"no collision" instead of a real one. Separately, `polkitd`'s backend
+refuses to check authorization for any action id that is not already
+registered in its action pool - parsed from `*.policy` files under its
+`--datadir`, which resolves to `/run/current-system/sw/share/polkit-1/actions`
+on NixOS via `environment.pathsToLink` - failing immediately with "Action
+... is not registered" before any JS rule or agent is ever consulted;
+`security.polkit.extraConfig`'s `addRule` alone is therefore not
+sufficient, which is why this test and
+`test/security-recovery-cross-feature-vm.nix` both ship a matching
+test-only `.policy` file registering the fixture action id.
 
 ### Notifications real D-Bus ownership and collision behavior
 

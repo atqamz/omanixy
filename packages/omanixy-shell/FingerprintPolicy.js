@@ -7,9 +7,6 @@ function isExhausted(attempts, maxAttempts) {
 }
 
 function nextReadyAfterProbe(exitCode) {
-  // 0/1 are resolved answers, 2 is "cannot determine" - both a negative
-  // answer and an indeterminate one fail closed to not-ready, so a stale
-  // fingerprintReady = true never survives an indeterminate probe.
   return exitCode === 0
 }
 
@@ -26,9 +23,6 @@ function canStartFingerprint(opts) {
 }
 
 function shouldFinishUnlockOnSuccess(fingerprintConfigured) {
-  // A success callback can arrive after capability/readiness was revoked
-  // mid-conversation - fingerprintConfigured must be read at callback time,
-  // not captured when the conversation started, so this stays fail-closed.
   return fingerprintConfigured === true
 }
 

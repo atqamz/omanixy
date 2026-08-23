@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Check post-patch source reachability against presentation and capability metadata."""
 
 from __future__ import annotations
 

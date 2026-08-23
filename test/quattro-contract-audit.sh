@@ -88,9 +88,6 @@ jq -e '.environment_variables | index("CUSTOM_RUNTIME_VARIABLE") != null' "$outp
 jq -e '.environment_variables | index("lowercase_runtime_variable") != null' "$output" >/dev/null
 jq -e '.schema == 4' "$output" >/dev/null
 
-# Section 7 adversarial cases A-F: every dynamic/ambiguous shape inside the
-# BFS-traversed omarchy-apply-lock helper is a visible, categorized record -
-# never silently dropped, and never misclassified as a literal executable.
 jq -e '.security_dynamic_executions | map(.category) | index("variable-command-head") != null' "$output" >/dev/null
 jq -e '.security_dynamic_executions | map(.category) | index("dynamic-source") != null' "$output" >/dev/null
 jq -e '.security_dynamic_executions | map(.category) | index("eval") != null' "$output" >/dev/null
@@ -107,23 +104,13 @@ jq -e '.security_external_executables | map(.name) | index("env") != null' "$out
 jq -e '.security_external_executables | map(.name) | index("timeout") != null' "$output" >/dev/null
 jq -e '.security_external_executables | map(.name) | index("literal-runner") == null' "$output" >/dev/null
 
-# Regression: a `name+=value` array-append assignment prefix is not a
-# command name itself - the real command word that follows it in the same
-# part must still be discovered, exactly like a plain `name=value` prefix.
 jq -e '.security_external_executables | map(.name) | index("literal-array-prefixed-tool") != null' "$output" >/dev/null
 
-# Regression: a heredoc body is literal data, never shell syntax - none of
-# its lines (a PAM-style "account"/"auth" directive or the closing
-# delimiter itself) may surface as a discovered command name.
 jq -e '.security_external_executables | map(.name) | index("account") == null' "$output" >/dev/null
 jq -e '.security_external_executables | map(.name) | index("auth") == null' "$output" >/dev/null
 jq -e '.security_external_executables | map(.name) | index("EOF") == null' "$output" >/dev/null
 jq -e '.security_external_executables | map(.name) | index("literal-heredoc-should-not-appear.so") == null' "$output" >/dev/null
 
-# Regression: a subshell-closing paren is not a case-arm pattern terminator -
-# shell_command_line must leave a bare `) redirect &` fragment untouched
-# rather than stripping the paren and promoting the redirect word into
-# command position.
 PYTHONPATH="$repo/scripts" "$python" - "$scanner" <<'PY'
 import importlib.machinery
 import importlib.util
@@ -138,16 +125,9 @@ line = '  ) 9>"${FIXTURE_LOCK_DIR:-/tmp}/fixture.lock" &'
 assert module.shell_command_line(line) == line, module.shell_command_line(line)
 PY
 
-# Section 4/7 case H: every dynamic execution in this fixture is genuinely
-# unreviewed (the pinned disposition table only covers the real pinned repo),
-# and every real disposition is correctly reported dead against a tree that
-# does not contain the shape it was reviewed against - the mechanism works in
-# both directions on an arbitrary tree, not just the pinned snapshot.
 jq -e '(.security_unreviewed_dynamic_executions | length) == (.security_dynamic_executions | length)' "$output" >/dev/null
 jq -e '.security_dead_dynamic_execution_dispositions | length > 0' "$output" >/dev/null
 
-# Section 5/7 case G: dead_dispositions is a pure function the check FAILS
-# against - a fabricated unused entry must be reported, not swallowed.
 PYTHONPATH="$repo/scripts" "$python" - "$scanner" <<'PY'
 import importlib.machinery
 import importlib.util
@@ -165,17 +145,11 @@ dead = module.dead_dispositions(
 assert dead == {"bin/omarchy-never-reached"}, dead
 PY
 
-# Finding 1: a security source with no hand-added filename entry is discovered
-# purely by living under a declared root, and carries a content hash.
 jq -e '.security_source_files | any(.[]; .path == "shell/plugins/lock/Service.qml" and .present == true and (.hash | length == 64))' "$output" >/dev/null
 jq -e '.security_source_files | any(.[]; .path == "shell/plugins/notifications/Card.qml")' "$output" >/dev/null
 
-# Finding 2: an unrecognized bash executable is discovered without any
-# predeclared executable name list.
 jq -e '.security_external_executables | map(.name) | index("mystery-security-tool") != null' "$output" >/dev/null
 
-# Finding 3: an unknown helper edge is recorded unresolved (disposition null)
-# rather than silently skipped, and stays terminal until dispositioned.
 jq -e '.security_helper_edges[] | select(.name == "omarchy-security-fixture") | .disposition == null and .present == false' "$output" >/dev/null
 jq -e '.security_helpers | map(.name) | index("omarchy-security-fixture") != null' "$output" >/dev/null
 
@@ -212,16 +186,12 @@ jq -e '.security_contracts | map(.name) | index("WlSessionLock") != null' <<<"$d
 jq -e '.service_contracts | map(.name) | index("org.freedesktop.NewSecurityService") != null' <<<"$drifted" >/dev/null
 jq -e '.security_helpers | map(.name) | index("omarchy-security-new") != null' <<<"$drifted" >/dev/null
 
-# Finding 1 (modification): editing a security source changes its hash.
 new_service_hash=$(jq -r '.security_source_files[] | select(.path == "shell/plugins/lock/Service.qml") | .hash' <<<"$drifted")
 if [ "$service_hash" = "$new_service_hash" ]; then
   printf '%s\n' 'editing a security source did not change its hash' >&2
   exit 1
 fi
 
-# Finding 3 (closure): an unresolved edge stays terminal even once its file
-# exists and itself references a further omarchy-* name - one omitted or
-# unresolved edge never pulls in the rest of a bin tree.
 jq -e '.security_helper_edges[] | select(.name == "omarchy-security-fixture") | .disposition == null and .present == true' <<<"$drifted" >/dev/null
 jq -e '.security_helper_edges | map(.name) | index("omarchy-security-fixture-child") == null' <<<"$drifted" >/dev/null
 

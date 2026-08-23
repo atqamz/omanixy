@@ -181,3 +181,81 @@ They do not start or configure a second instance of any host service.
 
 See [porting-principles.md](porting-principles.md) for the `exact`, `adapted`,
 `omitted`, and `blocked` taxonomy.
+
+## Ledger schemas
+
+### `upstream/issue-4-acceptance.yaml`
+
+```text
+Final Layer 8 acceptance mapping for issue atqamz/omanixy#4.
+
+Maps every acceptance criterion issue #4 was opened against to exact
+evidence, validated by test/security-issue-4-acceptance.sh. Two statuses
+only:
+
+  satisfied            - a real test in this repo directly proves the
+                          criterion; `tests` names the file(s), and the
+                          contract requires each one to actually be wired
+                          into flake.nix's checks.
+  experimental-boundary - the criterion is honestly bounded rather than
+                          proven: the native surface it concerns remains
+                          experimental (never promoted to supported) or a
+                          specific piece of live evidence is genuinely
+                          unavailable in this environment. `matrix_case`
+                          names the upstream/security-recovery-matrix.yaml
+                          row whose non-passed status the contract
+                          cross-checks, so this file can never claim a
+                          checked-looking state for a test that did not
+                          actually happen.
+
+No third status exists: a criterion is either backed by a real passing
+test, or explicitly, machine-verifiably marked as a boundary - never
+silently implied to be satisfied by omission.
+```
+
+### `upstream/security-recovery-matrix.yaml`
+
+```text
+Layer 8 (`4-08-security-recovery`) failure/recovery evidence matrix.
+
+This is the durable, machine-checked record of what issue atqamz/omanixy#4's
+final promotion gate actually exercised, referenced by
+upstream/porting-matrix.yaml's security.* entries and validated by
+test/security-recovery-contract.sh. It exists so the prose in the ledger and
+the ADR cannot silently drift from what the tests in this layer actually
+proved.
+
+Fields:
+  id                 stable, unique identifier for this case
+  surface            the upstream/porting-matrix.yaml security.* id this
+                      case is evidence for
+  environment        hermetic | nested-vm | real-backend | physical-hardware
+  status             passed | unsupported-environment | required-before-supported
+  evidence           the test file (and, where useful, the specific
+                      scenario within it) that produced this result; "none"
+                      when status is not passed
+  check              the exact, stable assertion/check name(s) inside the
+                      owning evidence file that this case's "passed" claim
+                      reduces to - never free prose alone. Required on
+                      every case; for a non-passed case this instead names
+                      the check that would need to exist for that case to
+                      ever become passed.
+  expected_invariant  the property the case proves or, for a not-yet-
+                      exercised case, the property still to prove
+  attempted_evidence  optional. Present only when a real probe/attempt was
+                      genuinely run for a non-passed case (never required,
+                      never a substitute for `evidence`, and never present
+                      on a `passed` row). Durable record of what was tried
+                      even though the case did not pass.
+  reason              optional, paired with attempted_evidence: why the
+                      attempt did not (or could not) reach `passed`.
+
+A "passed" row must always carry real evidence produced by an actual test
+run recorded in `evidence`, mapped to a concrete `check`. A
+physical-hardware environment is not schema-forbidden from `passed` - it
+simply has none in this environment today, because no such hardware exists
+here to produce evidence from. Hardware or environment breadth that is
+genuinely unavailable here is recorded as required-before-supported or
+unsupported-environment, never as passed - see Sections 26 and 60 of issue
+atqamz/omanixy#4 for the rule this file exists to enforce.
+```

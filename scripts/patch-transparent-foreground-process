@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Remove the pinned Bar.qml transparent foreground implementation."""
 
 from pathlib import Path
 import sys

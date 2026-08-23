@@ -1,45 +1,4 @@
 #!/usr/bin/env bash
-# Real generated-QML behavior test for the adapted idle Service.qml,
-# following the same offscreen Quickshell pattern as
-# test/security-polkit-qml-behavior.sh.
-#
-# The production source under test is the real, already-patched
-# shell/plugins/services/idle/Service.qml from the built idle-enabled
-# runtime - not a hand-authored reimplementation. Section 41 permits the
-# harness to replace IdleMonitor/Process with deterministic fakes; three
-# mechanical, exact-count, fail-closed-on-drift transforms do exactly that:
-# the real IdleMonitor (needs a live Wayland ext-idle-notify-v1 compositor)
-# and the three real Process objects (lockProcess, stayAwakeStateProbe,
-# stayAwakeStateWriter - each would otherwise try to exec a real binary) all
-# become plain QtObject fakes exposing the identical property/signal
-# surface this file actually reads, plus small fakeXxx() driver functions.
-# Every onExited/onRunningChanged/onIsIdleChanged handler body is preserved
-# verbatim. The FileView directory watcher and the real lockRetryTimer are
-# left untouched - a Timer needs no live backend, and the harness
-# stops/replaces its effect manually instead of waiting out the real 1s
-# interval.
-#
-# The idleMonitor fake additionally models one real behavior the pinned
-# ABI itself exhibits (proven separately by
-# test/security-idle-quickshell-contract.sh): isIdle is a read-only
-# property driven solely by the live notification object, and disabling
-# the monitor destroys that notification, so isIdle falls back to false
-# while disabled and stays false until a fresh notification (and therefore
-# a fresh genuine idle transition) exists after re-enabling. This is a
-# deliberate choice among the two documented options for what happens if
-# the monitor is idle at trust-revocation/recovery time: recovery never
-# auto-resumes a stale cycle, and never reuses an exhausted budget - only
-# the next genuine idle transition starts a fresh one.
-#
-# fakeFailedToStart() on all three Process fakes models the pinned
-# Quickshell Process ABI's other real transition (proven by
-# test/security-idle-quickshell-contract.sh against src/io/process.cpp):
-# onErrorOccurred(QProcess::FailedToStart) only ever emits runningChanged(),
-# never exited() - so it is deliberately implemented as a bare
-# `running = false` (which fires the auto-generated runningChanged
-# notification) with no `exited(...)` emission at all, never as
-# `fakeExit(some-code)`, which would exercise a different, real-exit path
-# instead of this one.
 set -euo pipefail
 
 compat_root=${1:?idle-enabled compatibility root required}

@@ -89,18 +89,9 @@
           corePolkitRuntime = runtimeForSecurity system [ "core" ] { polkitAgent = true; };
           idleRuntime = runtimeForSecurity system null { lock = true; idle = true; };
           coreLockIdleRuntime = runtimeForSecurity system [ "core" ] { lock = true; idle = true; };
-          # Layer 7 (notifications): unlike idle, the daemon requires no
-          # lock/polkit prerequisite and no NixOS pairing at all - session
-          # D-Bus ownership only - so its closure baseline is plain core,
-          # mirroring corePolkitRuntime rather than coreLockIdleRuntime.
           notificationDaemonRuntime = runtimeForSecurity system null { notificationDaemon = true; };
           coreNotificationDaemonRuntime = runtimeForSecurity system [ "core" ] { notificationDaemon = true; };
-          # Section 38 client/daemon independence: the client presentation
-          # feature plus the daemon together, proving the union is exactly
-          # what each yields alone with nothing substituted or dropped.
           notificationClientAndDaemonRuntime = runtimeForSecurity system [ "notification" ] { notificationDaemon = true; };
-          # Section 39 lower-layer independence: every prior experimental
-          # security capability on at once, crossed with the daemon on/off.
           allSecurityWithoutNotificationDaemonRuntime = runtimeForSecurity system null {
             lock = true;
             fingerprint = true;
@@ -116,13 +107,6 @@
             idle = true;
             notificationDaemon = true;
           };
-          # Section 15/30-31 of the Layer-6 remediation: proves
-          # packages/omanixy-shell/default.nix's own idleRequiresLockValid
-          # assertion fires for a caller that constructs the security
-          # attrset directly, bypassing programs.omanixy.security.idle and
-          # the Home Manager assertion matrix entirely. Both force real
-          # evaluation (.drvPath) rather than merely building an
-          # unevaluated attrset.
           packageIdleWithoutLockEval = builtins.tryEval (
             builtins.seq (runtimeForSecurity system null { idle = true; lock = false; }).drvPath true
           );
@@ -232,12 +216,6 @@
               }
             ];
           };
-          # A minimal, otherwise-unrelated boot/root-filesystem stub so that
-          # forcing config.system.build.toplevel (the only path that actually
-          # runs NixOS assertion checking) does not fail on the generic
-          # "no root filesystem"/"no bootloader" assertions every minimal
-          # fixture would otherwise trip, independent of the PAM invariant
-          # under test.
           bootableStub = {
             fileSystems."/" = {
               device = "/dev/null";
@@ -245,12 +223,6 @@
             };
             boot.loader.grub.devices = [ "/dev/null" ];
           };
-          # Forces config.system.build.toplevel's evaluation (not build) for
-          # a nixosSystem result, without invoking a derivation builder. This
-          # is the only attribute that runs `assertions`/`warnings` checking
-          # (nixpkgs' lib.asserts.checkAssertWarn, wired in
-          # nixos/modules/system/activation/top-level.nix); evaluating any
-          # other config.* attribute does not.
           toplevelForced = nixosConfig: (builtins.tryEval (builtins.seq nixosConfig.config.system.build.toplevel.drvPath true)).success;
           pamPasswordNixosConfiguration = nixpkgs.lib.nixosSystem {
             inherit system;
@@ -278,10 +250,6 @@
               (
                 { config, ... }:
                 {
-                  # An unrelated, ordinary normal-priority module definition
-                  # of the same PAM service - simulates a third-party module
-                  # that is unaware Omanixy owns this service. Must not
-                  # merge into the generated file.
                   security.pam.services."omarchy-lock-password".text = ''
                     auth sufficient ${config.security.pam.package}/lib/security/pam_permit.so
                   '';
@@ -290,10 +258,6 @@
             ];
           };
           pamPasswordAdversarialServiceFile = "${pamPasswordAdversarialNixosConfiguration.config.environment.etc."pam.d/omarchy-lock-password".source}";
-          # D. An unrelated, ordinary normal-priority module that disables
-          # the service outright. Omanixy must keep owning the enabled
-          # state: the service must still be present and byte-identical to
-          # the plain enabled build.
           pamPasswordEnableConflictNixosConfiguration = nixpkgs.lib.nixosSystem {
             inherit system;
             modules = [
@@ -310,14 +274,6 @@
             ];
           };
           pamPasswordEnableConflictServiceFile = "${pamPasswordEnableConflictNixosConfiguration.config.environment.etc."pam.d/omarchy-lock-password".source}";
-          # E. A second module contesting the same PAM text at Omanixy's own
-          # override strength (another lib.mkForce). nixpkgs' `lines` type
-          # merges same-priority definitions by concatenation instead of
-          # raising a conflict, so this does NOT fail on its own - proven
-          # below via pamPasswordStrongConflictServiceFile, checked by
-          # security-pam-capability. The Omanixy module's own assertion is
-          # what must fail this configuration's config.system.build.toplevel
-          # closed rather than let the merge through silently.
           pamPasswordStrongConflictNixosConfiguration = nixpkgs.lib.nixosSystem {
             inherit system;
             modules = [
@@ -338,20 +294,7 @@
               )
             ];
           };
-          # The raw generated file, ignoring assertions entirely - proves the
-          # danger the Omanixy assertion defends against is real: two
-          # equal-priority (mkForce) `text` definitions merge by
-          # concatenation instead of conflicting, since assertions are only
-          # checked when config.system.build.toplevel is forced, never on
-          # config.environment.etc directly.
           pamPasswordStrongConflictServiceFile = "${pamPasswordStrongConflictNixosConfiguration.config.environment.etc."pam.d/omarchy-lock-password".source}";
-          # The fingerprint mirror of pamPassword* above: same adversarial
-          # shapes (ordinary competing text, competing enable = false, a
-          # second equal-priority mkForce on text), plus one shape password
-          # has no equivalent of - a host or module setting
-          # services.fprintd.enable directly, which this capability's own
-          # assertion must reject rather than silently widen fingerprint
-          # auth into login/sudo/su/sshd/polkit-1/greetd.
           pamFingerprintNixosConfiguration = nixpkgs.lib.nixosSystem {
             inherit system;
             modules = [
@@ -420,12 +363,6 @@
             ];
           };
           pamFingerprintStrongConflictServiceFile = "${pamFingerprintStrongConflictNixosConfiguration.config.environment.etc."pam.d/omarchy-lock-fingerprint".source}";
-          # G. The widening hazard itself: some other module or host config
-          # sets services.fprintd.enable directly (here alongside sshd and
-          # polkit, the two PAM services most likely to actually exist on a
-          # real host and therefore most likely to silently gain fingerprint
-          # auth) while the Omanixy capability is also on. The capability's
-          # own first assertion must fail this closed.
           pamFingerprintFprintdEnableConflictNixosConfiguration = nixpkgs.lib.nixosSystem {
             inherit system;
             modules = [
@@ -441,12 +378,6 @@
               }
             ];
           };
-          # H. The widening-absence proof itself: fingerprint enabled
-          # alongside sshd and polkit actually present (services.fprintd.
-          # enable deliberately left untouched, exactly as the capability
-          # intends), reading the resolved fprintAuth default every other
-          # PAM service would have inherited had services.fprintd.enable
-          # been set.
           pamFingerprintNoWideningNixosConfiguration = nixpkgs.lib.nixosSystem {
             inherit system;
             modules = [
@@ -461,14 +392,9 @@
               }
             ];
           };
-          # Section 26 scenario 1/7: standalone Home Manager, lock disabled
-          # (the default) - must evaluate cleanly.
           standaloneLockDisabledEval = builtins.tryEval (
             builtins.seq (homeConfigurationFor system { }).activationPackage.drvPath true
           );
-          # Section 26 scenario 2/7: standalone Home Manager, lock enabled -
-          # must fail evaluation, since there is no osConfig to provision the
-          # PAM service the lock authenticates against.
           standaloneLockEnabledEval = builtins.tryEval (
             builtins.seq
               (homeConfigurationFor system {
@@ -476,10 +402,6 @@
               }).activationPackage.drvPath
               true
           );
-          # Fingerprint HM matrix scenario A/7: fingerprint enabled with the
-          # lock itself left at its default (disabled) - must fail closed via
-          # the security.lock.enable assertion in modules/home/default.nix,
-          # independent of osConfig or the paired NixOS config entirely.
           standaloneFingerprintLockDisabledEval = builtins.tryEval (
             builtins.seq
               (homeConfigurationFor system {
@@ -487,9 +409,6 @@
               }).activationPackage.drvPath
               true
           );
-          # Fingerprint HM matrix scenario B/7: lock and fingerprint both
-          # enabled, but standalone (no osConfig) - must fail closed via the
-          # osConfig != null assertion.
           standaloneFingerprintLockEnabledEval = builtins.tryEval (
             builtins.seq
               (homeConfigurationFor system {
@@ -498,13 +417,6 @@
               }).activationPackage.drvPath
               true
           );
-          # Scenarios 3-6/7: NixOS + Home Manager integrated via
-          # home-manager.nixosModules.home-manager, crossed with whether the
-          # NixOS PAM password service and the Home Manager lock option are
-          # each enabled. Only pam-enabled x lock-enabled must pass; the
-          # remaining lock-enabled combination (PAM off) must fail closed via
-          # the programs.omanixy.security.lock.enable assertion in
-          # modules/home/default.nix.
           integratedHomeManagerNixosConfigurationFor = pamEnabled: lockEnabled: nixpkgs.lib.nixosSystem {
             inherit system;
             modules = [
@@ -536,12 +448,6 @@
           integratedPamOnLockOffNixosConfiguration = integratedHomeManagerNixosConfigurationFor true false;
           integratedPamOffLockOnNixosConfiguration = integratedHomeManagerNixosConfigurationFor false true;
           integratedPamOnLockOnNixosConfiguration = integratedHomeManagerNixosConfigurationFor true true;
-          # Fingerprint HM matrix scenarios C-G/7: integrated NixOS + Home
-          # Manager, lock always on (fingerprint is only ever meaningful
-          # alongside it - scenario A/B above already prove the lock-off and
-          # standalone cases fail independently of these), crossed with the
-          # paired NixOS pam.password/pam.fingerprint enablement and whether
-          # the Home Manager fingerprint option itself is on.
           integratedFingerprintHomeManagerNixosConfigurationFor = pamPasswordEnabled: pamFingerprintEnabled: hmFingerprintEnabled: nixpkgs.lib.nixosSystem {
             inherit system;
             modules = [
@@ -571,28 +477,11 @@
               }
             ];
           };
-          # C/7: neither paired NixOS option on - must fail (both assertions).
           integratedFingerprintPamOffFingerprintOffNixosConfiguration = integratedFingerprintHomeManagerNixosConfigurationFor false false true;
-          # D/7: password on, fingerprint off - must fail (pam.fingerprint assertion).
           integratedFingerprintPamOnFingerprintOffNixosConfiguration = integratedFingerprintHomeManagerNixosConfigurationFor true false true;
-          # E/7: password off, fingerprint on - must fail (pam.password assertion).
           integratedFingerprintPamOffFingerprintOnNixosConfiguration = integratedFingerprintHomeManagerNixosConfigurationFor false true true;
-          # F/7: both paired NixOS options on - must pass.
           integratedFingerprintPamOnFingerprintOnNixosConfiguration = integratedFingerprintHomeManagerNixosConfigurationFor true true true;
-          # G/7: both paired NixOS options on, but the Home Manager
-          # fingerprint option itself left disabled - must pass regardless,
-          # since none of the fingerprint assertions apply while it is off.
           integratedFingerprintPamOnFingerprintOnHmDisabledNixosConfiguration = integratedFingerprintHomeManagerNixosConfigurationFor true true false;
-          # Section 8-10 (custom package identity): a distinguishable custom
-          # services.fprintd.package (a plain overrideAttrs rename, so its
-          # store path differs from the plain pkgs.fprintd default while
-          # remaining a real, buildable fprintd) threaded through an
-          # integrated NixOS + Home Manager configuration with both PAM
-          # capabilities and the Home Manager fingerprint option on. Proves
-          # the PAM service, the three NixOS package-registration lists, and
-          # the Home Manager runtime's own declaredRuntimeInputs all resolve
-          # to this one identity - no independent default pkgs.fprintd is
-          # pulled in alongside it anywhere in the chain.
           customFprintdPackage = pkgs.fprintd.overrideAttrs (old: {
             pname = "omanixy-test-fprintd";
           });
@@ -630,11 +519,6 @@
           integratedFingerprintCustomPackageRuntime = builtins.elemAt
             integratedFingerprintCustomPackageNixosConfiguration.config.home-manager.users."omanixy-test".home.packages
             0;
-          # Layer 5 (polkit): plain NixOS system-capability fixture, and one
-          # stronger-external-override adversary (a second lib.mkForce false
-          # on security.polkit.enable) that must fail this configuration's
-          # config.system.build.toplevel closed via the module's own resolved
-          # -state assertion, mirroring pamPasswordStrongConflict* above.
           polkitSystemNixosConfiguration = nixpkgs.lib.nixosSystem {
             inherit system;
             modules = [
@@ -647,10 +531,6 @@
               }
             ];
           };
-          # Reference fixture with no Omanixy involvement at all - proves the
-          # Omanixy-owned build resolves security.polkit and its PAM/systemd
-          # surface identically to plain, direct NixOS ownership rather than
-          # duplicating or imperatively mutating anything of its own.
           plainPolkitNixosConfiguration = nixpkgs.lib.nixosSystem {
             inherit system;
             modules = [
@@ -681,12 +561,6 @@
               )
             ];
           };
-          # Layer 5 (polkit): standalone Home Manager matrix. Scenario 1/2:
-          # agent disabled is exactly the existing zero-capability baseline
-          # (standaloneLockDisabledEval already proves this evaluates
-          # cleanly); scenario 2/2: agent enabled standalone must fail, since
-          # there is no osConfig to provision the paired NixOS
-          # security.polkit system capability.
           standalonePolkitAgentEnabledEval = builtins.tryEval (
             builtins.seq
               (homeConfigurationFor system {
@@ -694,14 +568,6 @@
               }).activationPackage.drvPath
               true
           );
-          # Layer 7 (notifications): unlike lock/fingerprint/polkit, the
-          # daemon requires no NixOS pairing at all - it is pure session
-          # D-Bus ownership - so standalone Home Manager alone (no osConfig)
-          # is a complete, valid configuration whether or not it is enabled.
-          # mako/dunst/swaync/fnott are themselves ordinary Home
-          # Manager-managed services, so the whole conflict matrix is
-          # provable standalone too, with no NixOS+Home Manager integration
-          # needed at all.
           standaloneNotificationDaemonEnabledEval = builtins.tryEval (
             builtins.seq
               (homeConfigurationFor system {
@@ -741,8 +607,6 @@
               }).activationPackage
               true
           );
-          # The conflict assertions are vacuous while the daemon itself is
-          # off - Omanixy never touches any of the four known daemons.
           standaloneNotificationDaemonOffAllConflictsOnEval = builtins.tryEval (
             builtins.seq
               (homeConfigurationFor system {
@@ -753,11 +617,6 @@
               }).activationPackage.drvPath
               true
           );
-          # Independence from lock/fingerprint/polkit/idle and from the
-          # notification client presentation feature: the daemon on, every
-          # other experimental security capability's own prerequisites
-          # unmet (all left at their defaults) alongside it, plus the
-          # client feature explicitly present, must still evaluate cleanly.
           standaloneNotificationDaemonWithClientFeatureEval = builtins.tryEval (
             builtins.seq
               (homeConfigurationFor system {
@@ -766,14 +625,6 @@
               }).activationPackage.drvPath
               true
           );
-          # Layer 5 (polkit): integrated NixOS + Home Manager matrix, crossed
-          # over the NixOS system capability, the Home Manager agent option,
-          # and the two known-conflicting Home Manager-managed polkit agents.
-          # Only system-on + agent-on (with both conflicting agents off) may
-          # pass while agent is on; a known conflicting agent, or agent
-          # without the paired system capability, must fail closed. lock is
-          # deliberately left at its default (false) throughout - this
-          # matrix is the proof that polkit needs no lock involvement at all.
           integratedPolkitHomeManagerNixosConfigurationFor = systemEnabled: agentEnabled: hyprpolkitagentEnabled: polkitGnomeEnabled: nixpkgs.lib.nixosSystem {
             inherit system;
             modules = [
@@ -803,33 +654,14 @@
               }
             ];
           };
-          # 3/12: neither on - PASS.
           integratedPolkitOffOffNixosConfiguration = integratedPolkitHomeManagerNixosConfigurationFor false false false false;
-          # 4/12: system on, agent off - PASS.
           integratedPolkitOnOffNixosConfiguration = integratedPolkitHomeManagerNixosConfigurationFor true false false false;
-          # 5/12: system off, agent on - FAIL (paired-capability assertion).
           integratedPolkitOffOnNixosConfiguration = integratedPolkitHomeManagerNixosConfigurationFor false true false false;
-          # 6/12 (and 11/12, lock left disabled throughout): both on, no
-          # competing agent - PASS.
           integratedPolkitOnOnNixosConfiguration = integratedPolkitHomeManagerNixosConfigurationFor true true false false;
-          # 7/12: both on, hyprpolkitagent also on - FAIL (known-conflict assertion).
           integratedPolkitOnOnHyprConflictNixosConfiguration = integratedPolkitHomeManagerNixosConfigurationFor true true true false;
-          # 8/12: both on, polkit-gnome also on - FAIL (known-conflict assertion).
           integratedPolkitOnOnGnomeConflictNixosConfiguration = integratedPolkitHomeManagerNixosConfigurationFor true true false true;
-          # 9/12: agent off, hyprpolkitagent on - PASS (conflict assertion is
-          # vacuous while the Quattro agent itself is off).
           integratedPolkitAgentOffHyprNixosConfiguration = integratedPolkitHomeManagerNixosConfigurationFor false false true false;
-          # 10/12: agent off, polkit-gnome on - PASS, same reasoning.
           integratedPolkitAgentOffGnomeNixosConfiguration = integratedPolkitHomeManagerNixosConfigurationFor false false false true;
-          # Layer 6 (idle): integrated NixOS + Home Manager matrix, crossed
-          # over lock, idle, the two known-conflicting Home Manager idle
-          # daemons, fingerprint, and the polkit agent. The paired NixOS
-          # capability for whichever of lock/fingerprint/polkit is exercised
-          # as "on" in a given case is always provisioned alongside it, so
-          # each case isolates the Layer-6-specific assertions under test
-          # (idle-requires-lock, hypridle conflict, swayidle conflict)
-          # rather than re-tripping the already-proven Layer 3/4/5 pairing
-          # assertions.
           integratedIdleHomeManagerNixosConfigurationFor = lockEnabled: idleEnabled: hypridleEnabled: swayidleEnabled: fingerprintEnabled: polkitAgentEnabled: nixpkgs.lib.nixosSystem {
             inherit system;
             modules = [
@@ -864,36 +696,16 @@
               }
             ];
           };
-          # 1/10: everything off - PASS (baseline).
           integratedIdleAllOffNixosConfiguration = integratedIdleHomeManagerNixosConfigurationFor false false false false false false;
-          # 2/10: idle on, lock off - FAIL (idle requires the native lock).
           integratedIdleOnLockOffNixosConfiguration = integratedIdleHomeManagerNixosConfigurationFor false true false false false false;
-          # 3/10: idle on, lock on, no conflicting daemons - PASS (minimal valid idle).
           integratedIdleOnLockOnNixosConfiguration = integratedIdleHomeManagerNixosConfigurationFor true true false false false false;
-          # 4/10: idle+lock on, hypridle also on - FAIL (known-conflict assertion).
           integratedIdleOnHypridleConflictNixosConfiguration = integratedIdleHomeManagerNixosConfigurationFor true true true false false false;
-          # 5/10: idle+lock on, swayidle also on - FAIL (known-conflict assertion).
           integratedIdleOnSwayidleConflictNixosConfiguration = integratedIdleHomeManagerNixosConfigurationFor true true false true false false;
-          # 6/10: idle+lock on, both hypridle and swayidle on - FAIL (both conflicts at once).
           integratedIdleOnBothConflictNixosConfiguration = integratedIdleHomeManagerNixosConfigurationFor true true true true false false;
-          # 7/10: idle off, hypridle and swayidle both on - PASS (the conflict
-          # assertions are vacuous while Layer 6's idle owner itself is off).
           integratedIdleOffBothDaemonsOnNixosConfiguration = integratedIdleHomeManagerNixosConfigurationFor false false true true false false;
-          # 8/10: idle+lock on, fingerprint also on - PASS (idle is
-          # independent of fingerprint; enabling it changes nothing about
-          # whether idle may be enabled).
           integratedIdleOnFingerprintOnNixosConfiguration = integratedIdleHomeManagerNixosConfigurationFor true true false false true false;
-          # 9/10: idle+lock on, polkit agent also on - PASS (idle is
-          # independent of polkit for the same reason).
           integratedIdleOnPolkitOnNixosConfiguration = integratedIdleHomeManagerNixosConfigurationFor true true false false false true;
-          # 10/10: lock on, idle off - PASS (lock remains valid on its own
-          # without idle ever being involved).
           integratedIdleOffLockOnNixosConfiguration = integratedIdleHomeManagerNixosConfigurationFor true false false false false false;
-          # Layer 5 (polkit) x Layer 4 (fingerprint) independence: fingerprint
-          # and polkit system capability both enabled - proves enabling
-          # polkit changes nothing about the fingerprint PAM service already
-          # proven byte-for-byte by pamFingerprintServiceFile, and that
-          # services.fprintd.enable is still never set by either capability.
           pamFingerprintPolkitSystemNixosConfiguration = nixpkgs.lib.nixosSystem {
             inherit system;
             modules = [
@@ -908,21 +720,6 @@
             ];
           };
           pamFingerprintPolkitSystemServiceFile = "${pamFingerprintPolkitSystemNixosConfiguration.config.environment.etc."pam.d/omarchy-lock-fingerprint".source}";
-          # Section 11-13 (TOD activation): services.fprintd.package's own
-          # default already resolves to the TOD-aware daemon when
-          # services.fprintd.tod.enable is set, independent of
-          # services.fprintd.enable; this fixture proves that, and proves
-          # the one environment variable this capability mirrors from
-          # upstream's own services.fprintd.enable-gated block
-          # (FP_TOD_DRIVERS_DIR) resolves to the selected driver's real
-          # path rather than a placeholder.
-          # A hermetic stand-in rather than a real TOD driver package: every
-          # real libfprint-2-tod1-* package in nixpkgs is either unfree
-          # (broadcom, broadcom-cv3plus, elan, goodix, goodix-550a) or marked
-          # broken (vfs0090), neither of which a flake check may depend on.
-          # services.fprintd.tod.driver only needs a package exposing a
-          # driverPath passthru attribute, so this fixture provides exactly
-          # that shape.
           todDriverPackage = pkgs.runCommand "omanixy-test-tod-driver"
             {
               passthru.driverPath = "/lib/libfprint-2/tod-1";
@@ -950,28 +747,12 @@
           weatherActivationScript = pkgs.writeShellScript "omanixy-shell-weather-state-activation" weatherHomeConfiguration.config.home.activation.omanixyShellState.data;
           networkActivationScript = pkgs.writeShellScript "omanixy-shell-network-state-activation" networkHomeConfiguration.config.home.activation.omanixyShellState.data;
           customActivationScript = pkgs.writeShellScript "omanixy-shell-custom-state-activation" customHomeConfiguration.config.home.activation.omanixyShellState.data;
-          # Extracted from the integrated PAM-on/lock-on configuration, the
-          # only combination where programs.omanixy.security.lock.enable
-          # evaluates without failing its osConfig assertion - proves that
-          # enabling the lock capability never changes shell.json handling,
-          # which stays owned by the presentation feature model alone.
           lockEnabledActivationScript = pkgs.writeShellScript "omanixy-shell-lock-state-activation"
             integratedPamOnLockOnNixosConfiguration.config.home-manager.users."omanixy-test".home.activation.omanixyShellState.data;
-          # Extracted from the integrated system-on/agent-on polkit
-          # configuration - proves enabling the polkit agent capability never
-          # changes shell.json handling either, exactly mirroring the lock
-          # proof above.
           polkitEnabledActivationScript = pkgs.writeShellScript "omanixy-shell-polkit-state-activation"
             integratedPolkitOnOnNixosConfiguration.config.home-manager.users."omanixy-test".home.activation.omanixyShellState.data;
-          # Extracted from the integrated lock-on/idle-on configuration -
-          # proves enabling the idle capability never changes shell.json
-          # handling either, exactly mirroring the lock and polkit proofs
-          # above.
           idleEnabledActivationScript = pkgs.writeShellScript "omanixy-shell-idle-state-activation"
             integratedIdleOnLockOnNixosConfiguration.config.home-manager.users."omanixy-test".home.activation.omanixyShellState.data;
-          # Standalone, unlike lock/polkit/idle above, since the notification
-          # daemon requires no NixOS pairing to evaluate at all - proves
-          # enabling it never changes shell.json handling either.
           notificationDaemonHomeConfiguration = homeConfigurationFor system {
             programs.omanixy.security.notifications.daemon.enable = true;
           };
@@ -1497,9 +1278,6 @@
           '';
           security-lock-managed-plugin = pkgs.runCommand "omanixy-security-lock-managed-plugin"
             {
-              # findutils: the real PluginRegistry.rescan() scan script (driven
-              # by the registry-scan harness) shells out to `find` to locate
-              # manifests under firstPartyDir/pluginsDir.
               nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.findutils ];
             } ''
             ${pkgs.bash}/bin/bash ${./test/security-lock-managed-plugin.sh} \
@@ -1536,15 +1314,6 @@
               corePolkitClosurePaths = "${corePolkitRuntimeClosureInfo}/store-paths";
               coreDeclaredRuntimeInputs = pkgs.writeText "omanixy-core-declared-runtime-inputs.json" coreRuntime.passthru.declaredRuntimeInputs;
               corePolkitDeclaredRuntimeInputs = pkgs.writeText "omanixy-core-polkit-declared-runtime-inputs.json" corePolkitRuntime.passthru.declaredRuntimeInputs;
-              # The exact, named set of Omanixy-owned derivations expected to
-              # change store path when the compatibility root's contents
-              # change (here: the polkit plugin becoming reachable) - not a
-              # package-name pattern. omarchyCompatibilityRoot genuinely
-              # contains different files; ipc/compatAdapter/runtime/
-              # compatibilityBin/the final package all reference its store
-              # path in interpolated script text or their own build inputs,
-              # so they propagate a new hash without gaining any new
-              # external dependency of their own.
               coreExpectedChanged = pkgs.writeText "omanixy-core-expected-changed" (nixpkgs.lib.concatMapStringsSep "\n" toString [
                 coreRuntime
                 coreRuntime.passthru.omarchyCompatibilityRoot
@@ -1706,11 +1475,6 @@
               lockIdleClosurePaths = "${coreLockIdleRuntimeClosureInfo}/store-paths";
               lockDeclaredRuntimeInputs = pkgs.writeText "omanixy-lock-only-declared-runtime-inputs.json" coreLockRuntime.passthru.declaredRuntimeInputs;
               lockIdleDeclaredRuntimeInputs = pkgs.writeText "omanixy-lock-idle-declared-runtime-inputs.json" coreLockIdleRuntime.passthru.declaredRuntimeInputs;
-              # The exact, named set of Omanixy-owned derivations expected to
-              # change store path when the compatibility root's contents
-              # change (here: the idle plugin becoming reachable) - not a
-              # package-name pattern, mirroring corePolkitExpectedChanged
-              # above.
               lockExpectedChanged = pkgs.writeText "omanixy-lock-only-expected-changed" (nixpkgs.lib.concatMapStringsSep "\n" toString [
                 coreLockRuntime
                 coreLockRuntime.passthru.omarchyCompatibilityRoot
@@ -1933,6 +1697,20 @@
               nativeBuildInputs = [ pkgs.python3 ];
             } ''
             python3 ${./test/lib/recovery-check-helpers-selftest.py} ${./test/lib/recovery-check-helpers.py}
+            touch "$out"
+          '';
+          source-comment-policy-selftest = pkgs.runCommand "omanixy-source-comment-policy-selftest"
+            {
+              nativeBuildInputs = [ pkgs.python3 ];
+            } ''
+            python3 ${./test/lib/source-comment-policy-selftest.py} ${./scripts/check-source-comments}
+            touch "$out"
+          '';
+          source-comment-policy = pkgs.runCommand "omanixy-source-comment-policy"
+            {
+              nativeBuildInputs = [ pkgs.python3 ];
+            } ''
+            python3 ${self}/scripts/check-source-comments ${self}
             touch "$out"
           '';
           security-recovery-contract-helpers-selftest = pkgs.runCommand "omanixy-security-recovery-contract-helpers-selftest"
