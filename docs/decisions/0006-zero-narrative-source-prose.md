@@ -38,11 +38,23 @@ source comments and are not touched.
 An unsupported or unrecognized maintained-source language fails the checker
 closed with an actionable error rather than being silently skipped.
 Python patchers distinguish pinned match input from generated replacement
-source by the operands' call positions and recursively resolve only bounded
-local string construction.
-Nix executable-source builders use the same fail-closed provenance model for
-direct strings, finite local aliases, known source-producing phases, and
-maintained `writeText` suffixes.
+source by the operands' call positions and recursively resolve only a
+bounded lexical AST subset.
+Assignments are associated with their owning module or function and with
+the control-flow path that contains them.
+Nested functions and classes are separate owners, and ambiguous or
+unresolved assignments fail closed.
+Nix executable-source builders assign bindings to lexical scope identities
+for `let`, recursive attrsets, functions, and the supported grouping forms.
+Only direct literals, bounded acyclic aliases, statically composed source
+fragments, and explicitly proven data expressions are resolved.
+Indirect executable-source builder values, interpolations, and `readFile`
+compositions fail closed unless their lexical provenance and maintained
+source target are proven.
+Pinned patch input may retain upstream comments as exact data, while
+Omanixy-authored generated patch output is scanned as source.
+Machine directives are accepted only through exact language-specific forms
+and the fixed ShellCheck allowlist.
 
 ## Ownership
 
@@ -55,6 +67,8 @@ source file, closing the embedded-code escape hatch that a string-only scan
 would leave open.
 Indirect executable builder bodies are followed only through bounded,
 acyclic lexical provenance; dynamic or ambiguous bodies fail closed.
+This is a conservative structural classifier, not a Python or Nix evaluator,
+and unsupported syntax is rejected rather than inferred.
 Machine directives are exact language-aware shebang forms and a fixed
 allowlist of the ShellCheck codes present in the tree, with no generic
 shebang or suppression exemption.

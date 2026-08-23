@@ -78,6 +78,42 @@ def _scan_registered_python(relative_path, source):
         return scan_python(path, source, root=root)
 
 
+def _assert_python_provenance_error(source):
+    try:
+        _scan_registered_python("scripts/patch-lock-service", source)
+    except PythonEmbeddedStringError:
+        return
+    raise AssertionError("expected PythonEmbeddedStringError")
+
+
+def _assert_nix_provenance_error(source):
+    try:
+        scan_nix(Path("x.nix"), source)
+    except NixLexError:
+        return
+    raise AssertionError("expected NixLexError")
+
+
+def _scan_nix_with_source_files(source, files):
+    with tempfile.TemporaryDirectory() as tmp_path_str:
+        root = Path(tmp_path_str)
+        path = root / "x.nix"
+        path.write_text(source)
+        for relative_path, content in files.items():
+            target = root / relative_path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content)
+        return scan_nix(path, source, root=root)
+
+
+def _assert_nix_with_source_files_error(source, files):
+    try:
+        _scan_nix_with_source_files(source, files)
+    except NixLexError:
+        return
+    raise AssertionError("expected NixLexError")
+
+
 def test_classify_language_by_extension():
     assert classify_language(Path("x/y.py"), Path("x")) == "python"
     assert classify_language(Path("x/y.nix"), Path("x")) == "nix"
@@ -481,6 +517,395 @@ def test_nix_dynamic_builder_body_fails_closed():
         raise AssertionError("expected NixLexError")
 
 
+def test_nix_outer_dynamic_binding_nested_safe_attrset_fails_closed():
+    src = """let
+  script = dynamicSource;
+  unrelated = {
+    script = ''
+      echo safe
+    '';
+  };
+in
+pkgs.writeShellScript "thing" script
+"""
+    _assert_nix_provenance_error(src)
+
+
+def test_nix_outer_safe_binding_wins_over_nested_dynamic_attrset():
+    src = """let
+  script = ''
+    echo safe
+  '';
+  unrelated = {
+    script = dynamicSource;
+  };
+in
+pkgs.writeShellScript "thing" script
+"""
+    assert scan_nix(Path("x.nix"), src) == []
+
+
+def test_nix_sibling_attrsets_do_not_cross_resolve():
+    src = """let
+  left = { script = dynamicSource; };
+  right = { script = '' echo safe ''; };
+in
+pkgs.writeShellScript "thing" script
+"""
+    _assert_nix_provenance_error(src)
+
+
+def test_nix_inner_let_shadow_applies_inside_its_scope():
+    src = """let
+  script = "ordinary data";
+  result = let script = ''
+    # narrative
+    echo inner
+  ''; in pkgs.writeShellScript "thing" script;
+in
+result
+"""
+    assert _kinds(scan_nix(Path("x.nix"), src)) == {
+        "narrative-comment"
+    }
+
+
+def test_nix_inner_let_cannot_satisfy_outer_use():
+    src = """let
+  script = dynamicSource;
+  wrapper = let script = '' echo safe ''; in script;
+in
+pkgs.writeShellScript "thing" script
+"""
+    _assert_nix_provenance_error(src)
+
+
+def test_nix_duplicate_let_binding_fails_closed():
+    src = """let
+  script = '' echo safe '';
+  script = dynamicSource;
+in
+pkgs.writeShellScript "thing" script
+"""
+    _assert_nix_provenance_error(src)
+
+
+def test_nix_function_local_binding_cannot_satisfy_outer_use():
+    src = """let
+  result = name: let script = '' echo safe ''; in script;
+in
+pkgs.writeShellScript "thing" script
+"""
+    _assert_nix_provenance_error(src)
+
+
+def test_nix_unrelated_attrset_binding_cannot_satisfy_derivation_phase():
+    src = """let
+  phase = dynamicSource;
+  unrelated = { phase = '' echo safe ''; };
+in
+pkgs.mkDerivation {
+  pname = "thing";
+  version = "1";
+  buildPhase = phase;
+}
+"""
+    _assert_nix_provenance_error(src)
+
+
+def test_nix_write_shell_application_text_alias_respects_scope():
+    src = """let
+  body = dynamicSource;
+  unrelated = { body = '' echo safe ''; };
+in
+pkgs.writeShellApplication {
+  name = "thing";
+  text = body;
+}
+"""
+    _assert_nix_provenance_error(src)
+
+
+def test_nix_write_text_aliases_respect_filename_and_body_scope():
+    src = """let
+  filename = dynamicFilename;
+  body = dynamicSource;
+  unrelated = {
+    filename = "unit.service";
+    body = "ordinary data";
+  };
+in
+pkgs.writeText filename body
+"""
+    _assert_nix_provenance_error(src)
+
+
+def test_nix_unresolved_source_interpolation_fails_closed():
+    src = """let fragment = dynamicSource; in pkgs.writeShellScript "thing" ''
+  ${fragment}
+  echo hello
+''
+"""
+    _assert_nix_provenance_error(src)
+
+
+def test_nix_dynamic_source_fragment_interpolation_fails_closed():
+    src = """let fragment = if condition then ''
+  # narrative
+'' else ""; in pkgs.writeShellScript "thing" ''
+  ${fragment}
+  echo hello
+''
+"""
+    _assert_nix_provenance_error(src)
+
+
+def test_nix_static_source_fragment_interpolation_is_scanned():
+    src = """let fragment = ''
+  # narrative
+  echo hello
+''; in pkgs.writeShellScript "thing" ''
+  ${fragment}
+''
+"""
+    assert _kinds(scan_nix(Path("x.nix"), src)) == {
+        "narrative-comment"
+    }
+
+
+def test_nix_static_clean_source_fragment_interpolation_is_accepted():
+    src = """let fragment = ''
+  echo hello
+''; in pkgs.writeShellScript "thing" ''
+  ${fragment}
+''
+"""
+    assert scan_nix(Path("x.nix"), src) == []
+
+
+def test_nix_string_alias_with_inline_shell_comment_is_scanned():
+    src = """let fragment = "printf hello # narrative"; in pkgs.writeShellScript "thing" ''
+  ${fragment}
+''
+"""
+    assert _kinds(scan_nix(Path("x.nix"), src)) == {
+        "narrative-comment"
+    }
+
+
+def test_nix_package_path_interpolation_is_data():
+    src = """let package = pkgs.foo; in pkgs.writeShellScript "thing" ''
+  echo ${package}/bin/tool
+''
+"""
+    assert scan_nix(Path("x.nix"), src) == []
+
+
+def test_nix_numeric_interpolation_is_data():
+    src = """let count = 3; in pkgs.writeShellScript "thing" ''
+  echo ${count}
+''
+"""
+    assert scan_nix(Path("x.nix"), src) == []
+
+
+def test_nix_safe_scalar_alias_interpolation_is_data():
+    src = """let count = 3; alias = count; in pkgs.writeShellScript "thing" ''
+  echo ${alias}
+''
+"""
+    assert scan_nix(Path("x.nix"), src) == []
+
+
+def test_nix_source_fragment_alias_is_recursively_scanned():
+    src = """let fragment = ''
+  # narrative
+  echo hello
+''; alias = fragment; in pkgs.writeShellScript "thing" ''
+  ${alias}
+''
+"""
+    assert _kinds(scan_nix(Path("x.nix"), src)) == {
+        "narrative-comment"
+    }
+
+
+def test_nix_source_interpolation_cycle_fails_closed():
+    src = """let a = b; b = a; in pkgs.writeShellScript "thing" ''
+  ${a}
+''
+"""
+    _assert_nix_provenance_error(src)
+
+
+def test_nix_bare_read_file_source_is_separately_scanned():
+    src = """pkgs.writeShellApplication {
+  name = "thing";
+  text = builtins.readFile ./clean.sh;
+}
+"""
+    assert _scan_nix_with_source_files(src, {"clean.sh": "echo safe\n"}) == []
+
+
+def test_nix_read_file_interpolation_requires_tracked_source():
+    src = """pkgs.writeShellScript "thing" ''
+  ${builtins.readFile ./clean.sh}
+''
+"""
+    assert _scan_nix_with_source_files(src, {"clean.sh": "echo safe\n"}) == []
+    _assert_nix_with_source_files_error(src, {})
+
+
+def test_nix_composite_read_file_requires_tracked_source():
+    src = """pkgs.writeShellApplication {
+  name = "thing";
+  text = builtins.concatStringsSep "\\n" [
+    builtins.readFile ./clean.sh
+    ""
+  ];
+}
+"""
+    _assert_nix_with_source_files_error(src, {})
+
+
+def test_nix_read_file_plus_clean_literal_is_accepted():
+    src = """pkgs.writeShellApplication {
+  name = "thing";
+  text = builtins.concatStringsSep "\\n" [
+    (builtins.readFile ./clean.sh)
+    "echo safe"
+  ];
+}
+"""
+    assert _scan_nix_with_source_files(src, {"clean.sh": "echo safe\n"}) == []
+
+
+def test_nix_write_shell_script_composite_scans_every_component():
+    src = """pkgs.writeShellScript "thing" (builtins.concatStringsSep "\\n" [
+  (builtins.readFile ./clean.sh)
+  "# narrative"
+])
+"""
+    assert _kinds(_scan_nix_with_source_files(src, {"clean.sh": "echo safe\n"})) == {
+        "narrative-comment"
+    }
+
+
+def test_nix_concat_separator_is_scanned_as_source_output():
+    src = """pkgs.writeShellApplication {
+  name = "thing";
+  text = builtins.concatStringsSep "# narrative" [ "echo safe" ];
+}
+"""
+    assert _kinds(scan_nix(Path("x.nix"), src)) == {"narrative-comment"}
+
+
+def test_nix_read_file_plus_narrative_literal_is_rejected():
+    src = """pkgs.writeShellApplication {
+  name = "thing";
+  text = builtins.concatStringsSep "\\n" [
+    (builtins.readFile ./clean.sh)
+    "# narrative"
+  ];
+}
+"""
+    assert _kinds(_scan_nix_with_source_files(src, {"clean.sh": "echo safe\n"})) == {
+        "narrative-comment"
+    }
+
+
+def test_nix_concat_source_with_unresolved_child_fails_closed():
+    src = """let fragment = dynamicSource; in pkgs.writeShellApplication {
+  name = "thing";
+  text = builtins.concatStringsSep "\\n" [
+    (builtins.readFile ./clean.sh)
+    fragment
+  ];
+}
+"""
+    _assert_nix_provenance_error(src)
+
+
+def test_nix_unproven_data_call_does_not_bless_source_fragment():
+    src = """let fragment = lib.concatLists [ "# narrative" ]; in pkgs.writeShellScript "thing" ''
+  ${fragment}
+  echo hello
+''
+"""
+    _assert_nix_provenance_error(src)
+
+
+def test_nix_unproven_dotted_alias_fails_closed():
+    src = """let fragment = unknown.value; in pkgs.writeShellScript "thing" ''
+  ${fragment}
+  echo hello
+''
+"""
+    _assert_nix_provenance_error(src)
+
+
+def test_nix_replace_strings_over_read_file_with_static_replacements_is_safe():
+    src = """pkgs.writeShellApplication {
+  name = "thing";
+  text = builtins.replaceStrings [ "old" ] [ "new" ] (builtins.readFile ./clean.sh);
+}
+"""
+    assert _scan_nix_with_source_files(src, {"clean.sh": "echo safe\n"}) == []
+
+
+def test_nix_replace_strings_with_unresolved_source_replacement_fails_closed():
+    src = """let replacement = dynamicSource; in pkgs.writeShellApplication {
+  name = "thing";
+  text = builtins.replaceStrings [ "old" ] [ replacement ] (builtins.readFile ./clean.sh);
+}
+"""
+    _assert_nix_provenance_error(src)
+
+
+def test_nix_nested_composite_unsafe_child_is_rejected():
+    src = """let fragment = ''
+  # narrative
+  echo hello
+''; in pkgs.writeShellApplication {
+  name = "thing";
+  text = builtins.concatStringsSep "\\n" [
+    (builtins.readFile ./clean.sh)
+    fragment
+  ];
+}
+"""
+    assert _kinds(_scan_nix_with_source_files(src, {"clean.sh": "echo safe\n"})) == {
+        "narrative-comment"
+    }
+
+
+def test_nix_optional_source_fragment_is_scanned():
+    src = """pkgs.runCommand "thing" { } ''
+  ${lib.optionalString condition ''
+    # narrative
+  ''}
+''
+"""
+    assert _kinds(scan_nix(Path("x.nix"), src)) == {"narrative-comment"}
+
+
+def test_nix_nested_builder_interpolation_fails_closed():
+    src = """pkgs.writeShellScript "thing" ''
+  ${pkgs.writeShellScript "nested" "echo safe"}
+''
+"""
+    _assert_nix_provenance_error(src)
+
+
+def test_nix_unproven_package_call_interpolation_fails_closed():
+    src = """let fragment = "# narrative"; in pkgs.writeShellScript "thing" ''
+  ${pkgs.someBuilder fragment}
+  echo hello
+''
+"""
+    _assert_nix_provenance_error(src)
+
+
 def test_nix_install_phase_comment_rejected():
     src = 'x = stdenv.mkDerivation { installPhase = \'\'\n# narrative\nmkdir -p "$out"\n\'\'; };\n'
     assert _kinds(scan_nix(Path("x.nix"), src)) == {"narrative-comment"}
@@ -543,6 +968,11 @@ def test_nix_writetext_non_source_suffix_is_data():
 
 def test_nix_plain_double_quoted_data_string_is_data():
     src = 'x = "ordinary # data";\n'
+    assert scan_nix(Path("x.nix"), src) == []
+
+
+def test_nix_keyword_text_inside_source_binding_is_not_syntax():
+    src = 'let script = "let"; in pkgs.writeShellScript "thing" script\n'
     assert scan_nix(Path("x.nix"), src) == []
 
 
@@ -839,6 +1269,147 @@ def test_python_dynamic_formatted_generated_operand_fails_closed():
         pass
     else:
         raise AssertionError("expected PythonEmbeddedStringError")
+
+
+def test_python_dead_branch_literal_cannot_satisfy_generated_variable():
+    src = (
+        'def patch(text):\n'
+        '    pinned = "Item {}"\n'
+        '    generated = make_source()\n'
+        '    if False:\n'
+        '        generated = "Item {}"\n'
+        '    return replace_once(text, pinned, generated, "fixture")\n'
+    )
+    _assert_python_provenance_error(src)
+
+
+def test_python_conditional_reassignment_fails_closed():
+    src = (
+        'def patch(text):\n'
+        '    pinned = "Item {}"\n'
+        '    generated = "Item {}"\n'
+        '    if condition:\n'
+        '        generated = make_source()\n'
+        '    return replace_once(text, pinned, generated, "fixture")\n'
+    )
+    _assert_python_provenance_error(src)
+
+
+def test_python_duplicate_same_scope_assignments_fail_closed():
+    src = (
+        'def patch(text):\n'
+        '    pinned = "Item {}"\n'
+        '    generated = "Item {}"; generated = "Other {}"\n'
+        '    return replace_once(text, pinned, generated, "fixture")\n'
+    )
+    _assert_python_provenance_error(src)
+
+
+def test_python_loop_assignment_cannot_satisfy_outer_use():
+    src = (
+        'def patch(text):\n'
+        '    pinned = "Item {}"\n'
+        '    generated = make_source()\n'
+        '    for item in items:\n'
+        '        generated = "Item {}"\n'
+        '    return replace_once(text, pinned, generated, "fixture")\n'
+    )
+    _assert_python_provenance_error(src)
+
+
+def test_python_try_assignment_cannot_satisfy_outer_use():
+    src = (
+        'def patch(text):\n'
+        '    pinned = "Item {}"\n'
+        '    generated = make_source()\n'
+        '    try:\n'
+        '        generated = "Item {}"\n'
+        '    except Exception:\n'
+        '        pass\n'
+        '    return replace_once(text, pinned, generated, "fixture")\n'
+    )
+    _assert_python_provenance_error(src)
+
+
+def test_python_nested_function_assignment_cannot_satisfy_outer_use():
+    src = (
+        'def patch(text):\n'
+        '    pinned = "Item {}"\n'
+        '    generated = make_source()\n'
+        '    def nested():\n'
+        '        generated = "Item {}"\n'
+        '        return generated\n'
+        '    return replace_once(text, pinned, generated, "fixture")\n'
+    )
+    _assert_python_provenance_error(src)
+
+
+def test_python_nested_class_assignment_cannot_satisfy_outer_use():
+    src = (
+        'def patch(text):\n'
+        '    pinned = "Item {}"\n'
+        '    generated = make_source()\n'
+        '    class Nested:\n'
+        '        generated = "Item {}"\n'
+        '    return replace_once(text, pinned, generated, "fixture")\n'
+    )
+    _assert_python_provenance_error(src)
+
+
+def test_python_sibling_scope_assignment_cannot_satisfy_outer_use():
+    src = (
+        'generated = make_source()\n'
+        'def sibling():\n'
+        '    generated = "Item {}"\n'
+        'def patch(text):\n'
+        '    return replace_once(text, "Item {}", generated, "fixture")\n'
+    )
+    _assert_python_provenance_error(src)
+
+
+def test_python_unconditional_same_scope_alias_passes():
+    src = (
+        'def patch(text):\n'
+        '    pinned = "Item {}"\n'
+        '    source = "Item {}"\n'
+        '    generated = source\n'
+        '    return replace_once(text, pinned, generated, "fixture")\n'
+    )
+    assert _scan_registered_python("scripts/patch-lock-service", src) == []
+
+
+def test_python_two_hop_unconditional_same_scope_alias_passes():
+    src = (
+        'def patch(text):\n'
+        '    pinned = "Item {}"\n'
+        '    source = "Item {}"\n'
+        '    middle = source\n'
+        '    generated = middle\n'
+        '    return replace_once(text, pinned, generated, "fixture")\n'
+    )
+    assert _scan_registered_python("scripts/patch-lock-service", src) == []
+
+
+def test_python_loop_local_assignment_can_supply_same_loop_use():
+    src = (
+        'def patch(text):\n'
+        '    pinned = "Item {}"\n'
+        '    for item in items:\n'
+        '        generated = "Item {}"\n'
+        '        text = replace_once(text, pinned, generated, "fixture")\n'
+        '    return text\n'
+    )
+    assert _scan_registered_python("scripts/patch-lock-service", src) == []
+
+
+def test_python_pinned_data_resolution_also_fails_closed_when_unresolved():
+    src = (
+        'def patch(text):\n'
+        '    pinned = make_pinned()\n'
+        '    generated = "Item {}"\n'
+        '    return replace_once(text, pinned, generated, "fixture")\n'
+    )
+    _assert_python_provenance_error(src)
 
 
 def test_python_empty_generated_operand_is_allowed():

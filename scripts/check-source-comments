@@ -272,27 +272,114 @@ def _python_function_for(node, functions):
     return max(candidates, key=lambda function: function.lineno)
 
 
+def _python_assignment_targets(node):
+    if isinstance(node, ast.Assign):
+        return node.targets, node.value
+    if isinstance(node, ast.AnnAssign) and node.value is not None:
+        return [node.target], node.value
+    return [], None
+
+
+def _python_target_names(targets):
+    return {
+        target.id
+        for target in targets
+        if isinstance(target, ast.Name)
+    }
+
+
 def _python_assignments(scope, module):
+    def collect(owner):
+        assignments = {}
+        paths = {}
+
+        def visit(node, path):
+            paths[node] = path
+            if node is not owner and isinstance(
+                node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)
+            ):
+                return
+            targets, value = _python_assignment_targets(node)
+            for name in _python_target_names(targets):
+                assignments.setdefault(name, []).append((node.lineno, value, path))
+            if isinstance(node, ast.If):
+                visit(node.test, path)
+                for child in node.body:
+                    visit(child, path + ((node, "body"),))
+                for child in node.orelse:
+                    visit(child, path + ((node, "orelse"),))
+                return
+            if isinstance(node, (ast.For, ast.AsyncFor, ast.While)):
+                if isinstance(node, (ast.For, ast.AsyncFor)):
+                    visit(node.target, path)
+                    visit(node.iter, path)
+                else:
+                    visit(node.test, path)
+                for child in node.body:
+                    visit(child, path + ((node, "body"),))
+                for child in node.orelse:
+                    visit(child, path + ((node, "orelse"),))
+                return
+            if isinstance(node, (ast.With, ast.AsyncWith)):
+                for child in node.items:
+                    visit(child, path)
+                for child in node.body:
+                    visit(child, path + ((node, "body"),))
+                return
+            if isinstance(node, ast.Try):
+                for child in node.body:
+                    visit(child, path + ((node, "body"),))
+                for handler_index, child in enumerate(node.handlers):
+                    visit(child, path + ((node, f"handler-{handler_index}"),))
+                for child in node.orelse:
+                    visit(child, path + ((node, "orelse"),))
+                for child in node.finalbody:
+                    visit(child, path + ((node, "finalbody"),))
+                return
+            if isinstance(node, ast.ExceptHandler):
+                if node.type is not None:
+                    visit(node.type, path)
+                for child in node.body:
+                    visit(child, path)
+                return
+            if isinstance(node, ast.Match):
+                visit(node.subject, path)
+                for case_index, case in enumerate(node.cases):
+                    visit(case, path + ((node, f"case-{case_index}"),))
+                return
+            if isinstance(node, ast.match_case):
+                visit(node.pattern, path)
+                if node.guard is not None:
+                    visit(node.guard, path)
+                for child in node.body:
+                    visit(child, path)
+                return
+            for child in ast.iter_child_nodes(node):
+                visit(child, path)
+
+        for statement in owner.body:
+            visit(statement, ())
+        return assignments, paths
+
+    owner = module if scope is None else scope
+    local_assignments, local_paths = collect(owner)
+    module_assignments, module_paths = collect(module)
+    if scope is None:
+        return local_assignments, local_paths
     assignments = {}
-    nodes = module.body if scope is None else module.body + list(ast.walk(scope))
-    for node in nodes:
-        if isinstance(node, ast.Assign):
-            targets = node.targets
-            value = node.value
-        elif isinstance(node, ast.AnnAssign) and node.value is not None:
-            targets = [node.target]
-            value = node.value
-        else:
-            continue
-        for target in targets:
-            if isinstance(target, ast.Name):
-                assignments.setdefault(target.id, []).append((node.lineno, value))
-    return assignments
+    for name, candidates in local_assignments.items():
+        assignments[name] = candidates
+    for name, candidates in module_assignments.items():
+        if name not in assignments:
+            assignments[name] = candidates
+    paths = dict(module_paths)
+    paths.update(local_paths)
+    return assignments, paths
 
 
 class _PythonStringResolver:
     def __init__(self, scope, module, allow_dynamic=False):
-        self.assignments = _python_assignments(scope, module)
+        self.assignments, self.paths = _python_assignments(scope, module)
         self.allow_dynamic = allow_dynamic
 
     def resolve(self, node, stack=None):
@@ -330,14 +417,18 @@ class _PythonStringResolver:
         if isinstance(node, ast.Name):
             if node.id in stack:
                 raise PythonEmbeddedStringError(f"cyclic Python string binding: {node.id}")
-            candidates = [
-                (line, value)
-                for line, value in self.assignments.get(node.id, [])
-                if line <= node.lineno
+            use_path = self.paths.get(node, ())
+            candidates = self.assignments.get(node.id, [])
+            active = [
+                candidate
+                for candidate in candidates
+                if candidate[2] == ()
+                or use_path[:len(candidate[2])] == candidate[2]
             ]
-            if not candidates:
+            inactive = [candidate for candidate in candidates if candidate not in active]
+            if inactive or len(active) != 1 or active[0][0] > node.lineno:
                 raise PythonEmbeddedStringError(f"unresolved Python string binding: {node.id}")
-            _, value = candidates[-1]
+            _, value, _ = active[0]
             return self.resolve(value, stack + [node.id])
         if (
             isinstance(node, ast.Call)
@@ -969,8 +1060,52 @@ class NixToken:
 class NixBinding:
     name: str
     value_index: int | None
+    value_end: int
     start: int
     end: int
+    scope_id: int
+    kind: str = "assignment"
+
+
+@dataclass(frozen=True)
+class NixScope:
+    scope_id: int
+    kind: str
+    start: int
+    end: int
+
+
+class NixBindings(list):
+    def __init__(self, bindings, scopes, token_indices, source_path=None, root=None):
+        super().__init__(bindings)
+        self.scopes = scopes
+        self.token_indices = token_indices
+        self.source_path = None if source_path is None else Path(source_path).resolve()
+        self.root = None if root is None else Path(root).resolve()
+
+    def scope_chain(self, index):
+        containing = [
+            scope
+            for scope in self.scopes
+            if scope.start <= index < scope.end
+        ]
+        return tuple(
+            scope.scope_id
+            for scope in sorted(
+                containing,
+                key=lambda scope: (
+                    scope.end - scope.start,
+                    scope.kind == "root",
+                    -scope.start,
+                ),
+            )
+        )
+
+    def token_index_for_position(self, position):
+        try:
+            return self.token_indices[position]
+        except KeyError as error:
+            raise NixLexError(f"missing Nix token position: {position}") from error
 
 
 def _decode_nix_double_quoted(value):
@@ -1165,7 +1300,139 @@ def _nix_expression_end(tokens, start):
     return index
 
 
-def _nix_bindings(tokens):
+def _nix_expression_boundary(tokens, start):
+    delimiter_stack = []
+    let_depth = 0
+    pairs = {"{": "}", "(": ")", "[": "]"}
+    for index in range(start, len(tokens)):
+        value = tokens[index].value
+        if value in pairs:
+            delimiter_stack.append(pairs[value])
+            continue
+        if delimiter_stack and value == delimiter_stack[-1]:
+            delimiter_stack.pop()
+            continue
+        if tokens[index].kind == "identifier" and value == "let":
+            let_depth += 1
+            continue
+        if tokens[index].kind == "identifier" and value == "in" and let_depth:
+            let_depth -= 1
+            continue
+        if not delimiter_stack and not let_depth and value in {";", ","}:
+            return index
+    return len(tokens)
+
+
+def _nix_scopes(tokens):
+    scopes = [NixScope(0, "root", 0, len(tokens))]
+    delimiters = []
+    pairs = {"{": "}", "(": ")", "[": "]"}
+    matching_close = {}
+    for index, token in enumerate(tokens):
+        if token.value in pairs:
+            delimiters.append((index, pairs[token.value]))
+            continue
+        if delimiters and token.value == delimiters[-1][1]:
+            open_index, _ = delimiters.pop()
+            matching_close[open_index] = index
+    for index, token in enumerate(tokens):
+        if token.value == "{" and index in matching_close:
+            kind = "rec-attrset" if index > 0 and tokens[index - 1].value == "rec" else "attrset"
+            scopes.append(NixScope(len(scopes), kind, index + 1, matching_close[index]))
+    for index, token in enumerate(tokens):
+        if token.value != "let":
+            continue
+        depth = 1
+        body_start = None
+        for candidate in range(index + 1, len(tokens)):
+            value = tokens[candidate].value
+            if tokens[candidate].kind == "identifier" and value == "let":
+                depth += 1
+            elif tokens[candidate].kind == "identifier" and value == "in":
+                depth -= 1
+                if depth == 0:
+                    body_start = candidate + 1
+                    break
+        if body_start is None:
+            raise NixLexError("unterminated Nix let expression")
+        scopes.append(
+            NixScope(
+                len(scopes),
+                "let",
+                index,
+                _nix_expression_boundary(tokens, body_start),
+            )
+        )
+    for index, token in enumerate(tokens):
+        if token.value != ":":
+            continue
+        body_start = index + 1
+        scopes.append(
+            NixScope(
+                len(scopes),
+                "function",
+                body_start,
+                _nix_expression_boundary(tokens, body_start),
+            )
+        )
+    return tuple(scopes)
+
+
+def _nix_innermost_scope(scopes, index):
+    containing = [
+        scope
+        for scope in scopes
+        if scope.start <= index < scope.end
+    ]
+    if not containing:
+        raise NixLexError(f"Nix token is outside lexical scopes: {index}")
+    return min(
+        containing,
+        key=lambda scope: (
+            scope.end - scope.start,
+            scope.kind == "root",
+            -scope.start,
+        ),
+    )
+
+
+def _nix_scalar_token(token):
+    return (
+        token.kind == "string"
+        or token.value in {"true", "false", "null"}
+        or token.value.isdigit()
+    )
+
+
+def _nix_simple_expression_end(tokens, start):
+    if start >= len(tokens):
+        return None
+    if _nix_scalar_token(tokens[start]):
+        return start + 1
+    if tokens[start].kind == "identifier":
+        index = start + 1
+        while (
+            index + 1 < len(tokens)
+            and tokens[index].value == "."
+            and tokens[index + 1].kind == "identifier"
+        ):
+            index += 2
+        return index
+    if (
+        tokens[start].value == "."
+        and start + 1 < len(tokens)
+        and tokens[start + 1].value == "/"
+    ):
+        index = start + 2
+        while index < len(tokens) and tokens[index].value not in {";", ",", "]", "}"}:
+            index += 1
+        return index
+    return None
+
+
+def _nix_bindings(tokens, source_path=None, root=None):
+    scopes = _nix_scopes(tokens)
+    token_indices = {token.start: index for index, token in enumerate(tokens)}
     bindings = []
     for index, token in enumerate(tokens[:-1]):
         if token.kind != "identifier" or tokens[index + 1].value != "=":
@@ -1173,33 +1440,89 @@ def _nix_bindings(tokens):
         if index > 0 and tokens[index - 1].value == ".":
             continue
         value_index = index + 2
-        end = _nix_expression_end(tokens, value_index)
-        direct = (
-            value_index
-            if end == value_index + 1
-            and tokens[value_index].kind in {"string", "identifier"}
-            else None
-        )
+        end = _nix_expression_boundary(tokens, value_index)
+        direct = value_index if value_index < len(tokens) else None
+        scope = _nix_innermost_scope(scopes, index)
         bindings.append(
             NixBinding(
                 token.value,
                 direct,
+                end,
                 token.start,
                 tokens[end - 1].end if end > value_index else token.end,
+                scope.scope_id,
             )
         )
-    return bindings
+    function_scopes = {
+        scope.start - 1: scope
+        for scope in scopes
+        if scope.kind == "function"
+    }
+    for index, token in enumerate(tokens):
+        if token.value != ":" or index == 0:
+            continue
+        parameter = tokens[index - 1]
+        scope = function_scopes.get(index)
+        if scope is None:
+            continue
+        parameter_names = []
+        if parameter.kind == "identifier":
+            parameter_names.append(parameter)
+        elif parameter.value == "}":
+            depth = 1
+            opening = None
+            for candidate in range(index - 2, -1, -1):
+                if tokens[candidate].value == "}":
+                    depth += 1
+                elif tokens[candidate].value == "{":
+                    depth -= 1
+                    if depth == 0:
+                        opening = candidate
+                        break
+            if opening is None:
+                raise NixLexError("unterminated Nix function parameter set")
+            parameter_names.extend(
+                current
+                for offset, current in enumerate(tokens[opening + 1:index - 1], opening + 1)
+                if current.kind == "identifier"
+                and (offset == opening + 1 or tokens[offset - 1].value != ".")
+            )
+        for parameter in parameter_names:
+            bindings.append(
+                NixBinding(
+                    parameter.value,
+                    None,
+                    index,
+                    parameter.start,
+                    parameter.end,
+                    scope.scope_id,
+                    "parameter",
+                )
+            )
+    return NixBindings(bindings, scopes, token_indices, source_path, root)
 
 
 def _nix_binding_for(bindings, name, position):
-    candidates = [
-        binding
-        for binding in bindings
-        if binding.name == name and binding.start < position
-    ]
-    if not candidates:
+    reference_index = bindings.token_index_for_position(position)
+    scope_chain = bindings.scope_chain(reference_index)
+    for scope_id in scope_chain:
+        scope = bindings.scopes[scope_id]
+        if scope.kind == "attrset":
+            continue
+        candidates = [
+            binding
+            for binding in bindings
+            if binding.name == name
+            and binding.scope_id == scope_id
+            and (scope.kind == "let" or binding.start < position)
+        ]
+        if len(candidates) > 1:
+            raise NixLexError(f"ambiguous Nix source binding: {name}")
+        if candidates:
+            return candidates[0]
+    if not scope_chain:
         raise NixLexError(f"unresolved Nix source binding: {name}")
-    return max(candidates, key=lambda binding: binding.start)
+    raise NixLexError(f"unresolved Nix source binding: {name}")
 
 
 def _nix_function_return_index(tokens, bindings, name, position):
@@ -1262,15 +1585,32 @@ def _looks_like_nix_code(value):
 
 
 def _mark_nix_position(positions, token, language):
-    existing = positions.get(token.start)
-    if existing is not None and existing != language:
-        raise NixLexError(f"conflicting Nix source provenance at {token.start}")
-    positions[token.start] = language
+    existing = positions.get(token.start, ())
+    if isinstance(existing, str):
+        languages = {existing}
+    else:
+        languages = set(existing)
+    languages.add(language)
+    positions[token.start] = frozenset(languages)
+
+
+def _nix_source_languages(value):
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        return (value,)
+    return tuple(value)
 
 
 def _mark_nix_source(tokens, bindings, index, language, positions):
-    resolved = _resolve_nix_string(tokens, bindings, index)
-    _mark_nix_position(positions, tokens[resolved], language)
+    _nix_mark_source_expression(
+        tokens,
+        bindings,
+        index,
+        language,
+        positions,
+        set(),
+    )
 
 
 def _mark_nix_data(tokens, bindings, index, data_positions):
@@ -1307,50 +1647,376 @@ def _is_nix_read_file_expression(tokens, index):
     )
 
 
-def _is_nix_static_shell_source_expression(tokens, bindings, index, stack=None):
+def _nix_expression_end_until(tokens, start, stop_values):
+    delimiter_stack = []
+    pairs = {"{": "}", "(": ")", "[": "]"}
+    for index in range(start, len(tokens)):
+        value = tokens[index].value
+        if not delimiter_stack and value in stop_values:
+            return index
+        if value in pairs:
+            delimiter_stack.append(pairs[value])
+            continue
+        if delimiter_stack and value == delimiter_stack[-1]:
+            delimiter_stack.pop()
+            continue
+    return len(tokens)
+
+
+def _nix_static_path_end(tokens, start):
+    return _nix_expression_end_until(tokens, start, {";", ",", "]", ")", "}"})
+
+
+def _nix_validate_source_file_path(bindings, raw_path, language=None):
+    if bindings.source_path is None or bindings.root is None:
+        raise NixLexError("Nix readFile source has no repository provenance")
+    if not raw_path.startswith(("./", "../")):
+        raise NixLexError(f"Nix readFile source is not repository-relative: {raw_path}")
+    candidate = bindings.source_path.parent / raw_path
+    current = candidate
+    while current != bindings.root and current != current.parent:
+        if current.is_symlink():
+            raise NixLexError(f"Nix readFile source is a symlink: {candidate}")
+        current = current.parent
+    try:
+        target = candidate.resolve(strict=True)
+    except OSError as error:
+        raise NixLexError(f"Nix readFile source cannot be resolved: {raw_path}") from error
+    try:
+        target.relative_to(bindings.root)
+    except ValueError as error:
+        raise NixLexError(f"Nix readFile source escapes repository: {raw_path}") from error
+    if target.is_symlink() or not target.is_file():
+        raise NixLexError(f"Nix readFile source is not a maintained file: {raw_path}")
+    target_language = classify_language(target, bindings.root)
+    if target_language in {None, "unsupported"}:
+        raise NixLexError(f"Nix readFile source is not maintained source: {raw_path}")
+    if language is not None and target_language != language:
+        raise NixLexError(f"Nix readFile source language mismatch: {raw_path}")
+    return target
+
+
+def _nix_read_file_path(tokens, index):
+    if not _is_nix_read_file_expression(tokens, index):
+        raise NixLexError("expected Nix readFile expression")
+    end = _nix_static_path_end(tokens, index + 3)
+    raw_path = "".join(token.value for token in tokens[index + 3:end])
+    if not raw_path:
+        raise NixLexError("empty Nix readFile path")
+    return raw_path, end
+
+
+def _nix_list_end(tokens, index):
+    if index >= len(tokens) or tokens[index].value != "[":
+        raise NixLexError("expected Nix list")
+    return _nix_balanced_end(tokens, index)
+
+
+def _nix_map_read_file_end(tokens, index, bindings, stack, language):
+    if index >= len(tokens) or tokens[index].value != "(":
+        return None
+    close = _nix_balanced_end(tokens, index)
+    if (
+        index + 4 >= close
+        or tokens[index + 1].value != "map"
+        or tokens[index + 2].value != "builtins"
+        or tokens[index + 3].value != "."
+        or tokens[index + 4].value != "readFile"
+    ):
+        return None
+    source_list = index + 5
+    if tokens[source_list].value == "(":
+        source_list_end = _nix_balanced_end(tokens, source_list)
+    else:
+        source_list_end = _nix_expression_end_until(tokens, source_list, {")", ";", ","})
+    _nix_validate_read_file_sources(
+        tokens,
+        bindings,
+        source_list,
+        source_list_end,
+        stack,
+        language,
+    )
+    if source_list_end != close - 1:
+        raise NixLexError("unsupported Nix readFile map expression")
+    return close
+
+
+def _nix_path_expression_end(tokens, start, end):
+    if start >= end or tokens[start].value != ".":
+        raise NixLexError(f"expected relative Nix path at {tokens[start].start}")
+    index = start + 1
+    if index < end and tokens[index].value == ".":
+        index += 1
+    if index >= end or tokens[index].value != "/":
+        raise NixLexError(f"expected relative Nix path at {tokens[start].start}")
+    index += 1
+    while index < end:
+        if tokens[index].value == "." and index + 1 < end and tokens[index + 1].value in {".", "/"}:
+            break
+        if tokens[index].value in {",", "]", ")", "}"}:
+            break
+        index += 1
+    return index
+
+
+def _nix_validate_read_file_sources(tokens, bindings, start, end, stack, language):
+    if start >= end:
+        raise NixLexError("empty Nix readFile source list")
+    if tokens[start].value == "(":
+        close = _nix_balanced_end(tokens, start)
+        if close != end:
+            raise NixLexError("unsupported grouped Nix readFile source list")
+        return _nix_validate_read_file_sources(
+            tokens,
+            bindings,
+            start + 1,
+            close - 1,
+            stack,
+            language,
+        )
+    if tokens[start].value == "[":
+        close = _nix_balanced_end(tokens, start)
+        if close != end:
+            raise NixLexError("unsupported Nix readFile source list")
+        index = start + 1
+        while index < close - 1:
+            if tokens[index].value == ",":
+                index += 1
+                continue
+            item_end = _nix_path_expression_end(tokens, index, close - 1)
+            raw_path = "".join(token.value for token in tokens[index:item_end])
+            _nix_validate_source_file_path(bindings, raw_path, language)
+            index = item_end
+        return
+    if tokens[start].kind != "identifier":
+        raise NixLexError(f"dynamic Nix readFile source list at {tokens[start].start}")
+    if tokens[start].value in stack:
+        raise NixLexError(f"cyclic Nix readFile source list: {tokens[start].value}")
+    binding = _nix_binding_for(bindings, tokens[start].value, tokens[start].start)
+    if binding.value_index is None or tokens[binding.value_index].value not in {"[", "("}:
+        raise NixLexError(f"dynamic Nix readFile source list: {tokens[start].value}")
+    _nix_validate_read_file_sources(
+        tokens,
+        bindings,
+        binding.value_index,
+        binding.value_end,
+        stack + [tokens[start].value],
+        language,
+    )
+
+
+def _nix_mark_data_expression(tokens, bindings, index, data_positions, stack=None):
     stack = [] if stack is None else stack
     if index >= len(tokens):
-        return False
+        raise NixLexError("missing Nix data expression")
     token = tokens[index]
+    if token.value == "(":
+        close = _nix_balanced_end(tokens, index)
+        inner_end = _nix_mark_data_expression(
+            tokens, bindings, index + 1, data_positions, stack
+        )
+        if inner_end != close - 1:
+            raise NixLexError("unsupported grouped Nix data expression")
+        return close
+    if _nix_scalar_token(token):
+        if token.kind == "string":
+            data_positions.add(token.start)
+        return index + 1
+    simple_end = _nix_simple_expression_end(tokens, index)
+    if token.kind == "identifier" and simple_end is not None and simple_end > index + 1:
+        _nix_prove_data_expression(tokens, bindings, index, simple_end, stack)
+        return simple_end
+    if token.kind != "identifier":
+        raise NixLexError(f"dynamic Nix data expression at {token.start}")
+    if token.value in stack:
+        raise NixLexError(f"cyclic Nix data binding: {token.value}")
+    binding = _nix_binding_for(bindings, token.value, token.start)
+    if binding.value_index is None:
+        raise NixLexError(f"dynamic Nix data binding: {token.value}")
+    _nix_mark_data_expression(
+        tokens,
+        bindings,
+        binding.value_index,
+        data_positions,
+        stack + [token.value],
+    )
+    return index + 1
+
+
+def _nix_mark_source_expression(
+    tokens,
+    bindings,
+    index,
+    language,
+    source_positions,
+    data_positions,
+    stack=None,
+):
+    stack = [] if stack is None else stack
+    if index >= len(tokens):
+        raise NixLexError("missing Nix executable-source expression")
+    token = tokens[index]
+    if token.value == "(":
+        close = _nix_balanced_end(tokens, index)
+        if index + 2 < close - 1 and tokens[index + 1].kind == "identifier":
+            try:
+                result_index = _nix_function_return_index(
+                    tokens,
+                    bindings,
+                    tokens[index + 1].value,
+                    token.start,
+                )
+            except NixLexError:
+                pass
+            else:
+                _mark_nix_position(source_positions, tokens[result_index], language)
+                return close
+        inner_end = _nix_mark_source_expression(
+            tokens,
+            bindings,
+            index + 1,
+            language,
+            source_positions,
+            data_positions,
+            stack,
+        )
+        if inner_end != close - 1:
+            raise NixLexError("unsupported grouped Nix executable-source expression")
+        return close
+    if token.kind == "string":
+        _mark_nix_position(source_positions, token, language)
+        return index + 1
     if _is_nix_read_file_expression(tokens, index):
-        return True
+        raw_path, end = _nix_read_file_path(tokens, index)
+        _nix_validate_source_file_path(bindings, raw_path, language)
+        return end
     if (
         index + 2 < len(tokens)
-        and tokens[index].kind == "identifier"
-        and tokens[index].value == "builtins"
+        and token.kind == "identifier"
+        and token.value == "builtins"
         and tokens[index + 1].value == "."
         and tokens[index + 2].kind == "identifier"
-        and tokens[index + 2].value in {"replaceStrings", "concatStringsSep"}
     ):
-        if any(
-            token.kind == "identifier" and token.value == "readFile"
-            for token in tokens[index:index + 80]
-        ):
-            return True
-        for candidate in tokens[index:index + 80]:
-            if candidate.kind != "identifier" or candidate.value in {
-                "builtins", "replaceStrings", "concatStringsSep", "readFile"
-            }:
-                continue
+        function_name = tokens[index + 2].value
+        if function_name == "concatStringsSep":
+            separator_start = index + 3
+            separator_end = _nix_expression_end(tokens, separator_start)
             try:
-                binding = _nix_binding_for(bindings, candidate.value, candidate.start)
+                _nix_prove_data_expression(
+                    tokens,
+                    bindings,
+                    separator_start,
+                    separator_end,
+                    stack,
+                )
             except NixLexError:
-                continue
-            if binding.value_index is not None and _is_nix_static_shell_source_expression(
-                tokens, bindings, binding.value_index, stack + [candidate.value]
-            ):
-                return True
-        return False
-    if token.kind == "identifier":
-        if token.value in stack:
-            return False
-        binding = _nix_binding_for(bindings, token.value, token.start)
-        if binding.value_index is None:
-            return False
-        return _is_nix_static_shell_source_expression(
-            tokens, bindings, binding.value_index, stack + [token.value]
-        )
-    return False
+                _nix_mark_source_expression(
+                    tokens,
+                    bindings,
+                    separator_start,
+                    language,
+                    source_positions,
+                    data_positions,
+                    stack,
+                )
+            mapped_end = _nix_map_read_file_end(
+                tokens, separator_end, bindings, stack, language
+            )
+            list_end = mapped_end if mapped_end is not None else _nix_list_end(tokens, separator_end)
+            if mapped_end is not None:
+                return list_end
+            component = separator_end + 1
+            while component < list_end - 1:
+                if tokens[component].value == ",":
+                    component += 1
+                    continue
+                try:
+                    _nix_prove_data_expression(
+                        tokens,
+                        bindings,
+                        component,
+                        _nix_expression_end_until(tokens, component, {",", "]"}),
+                        stack,
+                    )
+                    component = _nix_expression_end_until(tokens, component, {",", "]"})
+                except NixLexError:
+                    component = _nix_mark_source_expression(
+                        tokens,
+                        bindings,
+                        component,
+                        language,
+                        source_positions,
+                        data_positions,
+                        stack,
+                    )
+            return list_end
+        if function_name == "replaceStrings":
+            old_end = _nix_list_end(tokens, index + 3)
+            new_end = _nix_list_end(tokens, old_end)
+            component = index + 4
+            while component < old_end - 1:
+                if tokens[component].value == ",":
+                    component += 1
+                    continue
+                component = _nix_mark_data_expression(
+                    tokens, bindings, component, data_positions, stack
+                )
+            component = old_end + 1
+            while component < new_end - 1:
+                if tokens[component].value == ",":
+                    component += 1
+                    continue
+                component_end = _nix_expression_end_until(tokens, component, {",", "]"})
+                try:
+                    _nix_prove_data_expression(
+                        tokens,
+                        bindings,
+                        component,
+                        component_end,
+                        stack,
+                    )
+                    component = component_end
+                except NixLexError:
+                    component = _nix_mark_source_expression(
+                        tokens,
+                        bindings,
+                        component,
+                        language,
+                        source_positions,
+                        data_positions,
+                        stack,
+                    )
+            return _nix_mark_source_expression(
+                tokens,
+                bindings,
+                new_end,
+                language,
+                source_positions,
+                data_positions,
+                stack,
+            )
+        raise NixLexError(f"unsupported Nix source function: {function_name}")
+    if token.kind != "identifier":
+        raise NixLexError(f"dynamic Nix executable-source expression at {token.start}")
+    simple_end = _nix_simple_expression_end(tokens, index)
+    if simple_end is not None and simple_end > index + 1:
+        raise NixLexError(f"unresolved Nix executable-source path at {token.start}")
+    if token.value in stack:
+        raise NixLexError(f"cyclic Nix source binding: {token.value}")
+    binding = _nix_binding_for(bindings, token.value, token.start)
+    if binding.value_index is None:
+        raise NixLexError(f"dynamic Nix executable-source binding: {token.value}")
+    _nix_mark_source_expression(
+        tokens,
+        bindings,
+        binding.value_index,
+        language,
+        source_positions,
+        data_positions,
+        stack + [token.value],
+    )
+    return index + 1
 
 
 def _is_nix_activation_data_expression(tokens, index):
@@ -1380,9 +2046,57 @@ def _is_nix_to_json_expression(tokens, index):
     )
 
 
-NIX_SIMPLE_INTERPOLATION_PATTERN = re.compile(
-    r"\$\{\s*([A-Za-z_][A-Za-z0-9_'-]*)\s*\}"
-)
+def _nix_interpolation_expressions(raw):
+    position = 0
+    while position < len(raw):
+        start = raw.find("${", position)
+        if start == -1:
+            return
+        if (start > 0 and raw[start - 1] == "\\") or raw[max(0, start - 2):start] == "''":
+            position = start + 2
+            continue
+        depth = 1
+        cursor = start + 2
+        while cursor < len(raw) and depth:
+            if raw.startswith("''", cursor):
+                cursor += 2
+                while cursor < len(raw):
+                    if raw.startswith("''\\", cursor):
+                        cursor += 4
+                        continue
+                    if raw.startswith("'''", cursor):
+                        cursor += 3
+                        continue
+                    if raw.startswith("''${", cursor):
+                        cursor += 4
+                        continue
+                    if raw.startswith("''", cursor):
+                        cursor += 2
+                        break
+                    cursor += 1
+                continue
+            if raw[cursor] == '"':
+                cursor += 1
+                while cursor < len(raw):
+                    if raw[cursor] == "\\":
+                        cursor += 2
+                        continue
+                    if raw[cursor] == '"':
+                        cursor += 1
+                        break
+                    cursor += 1
+                continue
+            if raw.startswith("${", cursor):
+                depth += 1
+                cursor += 2
+                continue
+            if raw[cursor] == "}":
+                depth -= 1
+            cursor += 1
+        if depth:
+            raise NixLexError("unterminated Nix interpolation")
+        yield raw[start + 2:cursor - 1], start
+        position = cursor
 
 
 def _infer_nix_embedded_language(value):
@@ -1401,41 +2115,882 @@ def _infer_nix_embedded_language(value):
     return None
 
 
-def _scan_nix_interpolated_source_bindings(text, tokens, bindings, source_positions):
-    pending = [token.start for token in tokens if token.start in source_positions]
-    visited = set()
-    while pending:
-        start = pending.pop()
-        if start in visited:
+def _nix_interpolation_is_data_expression(expression):
+    expression = expression.strip()
+    return (
+        expression.isdigit()
+        or expression in {"true", "false", "null"}
+        or re.fullmatch(r"(?:\.\.?/)+[A-Za-z0-9_./-]+", expression)
+    )
+
+
+def _nix_interpolation_source_candidate(value):
+    return _infer_nix_embedded_language(value) is not None or any(
+        line.lstrip().startswith(("#", "//", "/*"))
+        for line in value.splitlines()
+    )
+
+
+def _nix_validate_raw_read_file(expression, bindings, language):
+    match = re.fullmatch(r"(?:builtins\.)?readFile\s+(\.\.?/[^\s)]+)", expression)
+    if match is None:
+        raise NixLexError("unsupported Nix readFile interpolation source")
+    _nix_validate_source_file_path(bindings, match.group(1), language)
+
+
+NIX_PROVEN_DATA_PARAMETER_NAMES = {
+    "config",
+    "home-manager",
+    "dbusPath",
+    "ipcTarget",
+    "lib",
+    "nixpkgs",
+    "omarchy",
+    "osConfig",
+    "pkgs",
+    "quickshell",
+    "scenario",
+    "self",
+    "system",
+}
+NIX_OPAQUE_DATA_CALL_HEADS = {
+    "featureSelection.resolveCapabilities",
+    "featureSelection.select",
+    "forEachSystem",
+    "homeConfigurationFor",
+    "homeManagerConfiguration",
+    "nixosSystem",
+    "nixpkgs.lib.genAttrs",
+    "nixpkgs.lib.nixosSystem",
+    "omanixyRuntimeFor",
+    "pkgs.makeFontsConf",
+    "runtimeFor",
+    "runtimeForSecurity",
+    "home-manager.lib.homeManagerConfiguration",
+    "mkDerivation",
+}
+NIX_DATA_CALL_ARITIES = {
+    "builtins.attrNames": 1,
+    "builtins.elem": 2,
+    "builtins.hasAttr": 2,
+    "lib.attrNames": 1,
+    "lib.concatLists": 1,
+    "lib.filter": 2,
+    "lib.filterAttrs": 2,
+    "lib.findFirst": 3,
+    "lib.getAttrs": 2,
+    "lib.hasInfix": 2,
+    "lib.hasSuffix": 2,
+    "lib.mapAttrs": 2,
+    "lib.optionalAttrs": 2,
+    "lib.optionals": 2,
+    "lib.subtractLists": 2,
+    "lib.unique": 1,
+    "map": 2,
+    "throw": 1,
+}
+NIX_DATA_PREDICATE_CALL_HEADS = {
+    "builtins.elem",
+    "builtins.hasAttr",
+    "lib.hasInfix",
+    "lib.hasSuffix",
+}
+
+
+def _nix_identifier_path_end(tokens, start, end):
+    index = start
+    if index >= end or tokens[index].kind != "identifier":
+        return None
+    index += 1
+    while (
+        index + 1 < end
+        and tokens[index].value == "."
+        and tokens[index + 1].kind == "identifier"
+    ):
+        index += 2
+    return index
+
+
+def _nix_top_level_binary(tokens, start, end):
+    pairs = {"&&": ("&", "&"), "||": ("|", "|"), "++": ("+", "+"),
+        "==": ("=", "="), "!=": ("!", "="), "<=": ("<", "="),
+        ">=": (">", "=")}
+    delimiters = []
+    closing = {"{": "}", "(": ")", "[": "]"}
+    for index in range(start, end):
+        value = tokens[index].value
+        if value in closing:
+            delimiters.append(closing[value])
             continue
-        visited.add(start)
-        token = next(token for token in tokens if token.start == start)
+        if delimiters and value == delimiters[-1]:
+            delimiters.pop()
+            continue
+        if delimiters:
+            continue
+        if tokens[index].kind == "identifier" and value == "or":
+            return index, index + 1
+        for operator, (left, right) in pairs.items():
+            if value == left and index + 1 < end and tokens[index + 1].value == right:
+                return index, index + 2
+    return None
+
+
+def _nix_data_argument_end(tokens, start, end):
+    if start >= end:
+        raise NixLexError("missing Nix data call argument")
+    token = tokens[start]
+    if token.value in {"(", "[", "{"}:
+        close = _nix_balanced_end(tokens, start)
+        if close > end:
+            raise NixLexError(f"composite Nix data call argument at {token.start}")
+        return close
+    if token.kind == "string" or _nix_scalar_token(token):
+        return start + 1
+    if token.kind == "identifier":
+        path_end = _nix_identifier_path_end(tokens, start, end)
+        if path_end is not None:
+            return path_end
+        if token.value == "throw":
+            return _nix_data_argument_end(tokens, start + 1, end)
+    if token.value == ".":
+        return _nix_path_expression_end(tokens, start, end)
+    raise NixLexError(f"unsupported Nix data call argument at {token.start}")
+
+
+def _nix_top_level_colon(tokens, start, end):
+    delimiters = []
+    closing = {"{": "}", "(": ")", "[": "]"}
+    for index in range(start, end):
+        value = tokens[index].value
+        if value in closing:
+            delimiters.append(closing[value])
+            continue
+        if delimiters and value == delimiters[-1]:
+            delimiters.pop()
+            continue
+        if not delimiters and value == ":":
+            return index
+    return None
+
+
+def _nix_prove_data_path(tokens, bindings, start, end, stack, allow_parameters):
+    root = tokens[start]
+    if root.kind != "identifier":
+        raise NixLexError(f"invalid Nix data path at {root.start}")
+    if root.value in {"pkgs", "nixpkgs", "self"}:
+        return
+    binding = _nix_binding_for(bindings, root.value, root.start)
+    if binding.kind == "parameter":
+        if not allow_parameters and binding.name not in NIX_PROVEN_DATA_PARAMETER_NAMES:
+            raise NixLexError(f"untyped Nix function parameter: {binding.name}")
+        return
+    if binding.value_index is None:
+        raise NixLexError(f"dynamic Nix data path: {root.value}")
+    if root.value in stack:
+        raise NixLexError(f"cyclic Nix data path: {root.value}")
+    _nix_prove_data_expression(
+        tokens,
+        bindings,
+        binding.value_index,
+        binding.value_end,
+        stack + [root.value],
+        allow_parameters,
+    )
+
+
+def _nix_prove_data_lambda(tokens, bindings, start, end, stack, allow_parameters=False):
+    colon = _nix_top_level_colon(tokens, start, end)
+    if colon is None:
+        _nix_prove_data_expression(
+            tokens,
+            bindings,
+            start,
+            end,
+            stack,
+            allow_parameters,
+        )
+        return
+    if colon + 1 >= end:
+        raise NixLexError(f"empty Nix data lambda at {tokens[colon].start}")
+    _nix_prove_data_expression(
+        tokens,
+        bindings,
+        colon + 1,
+        end,
+        stack,
+        allow_parameters=True,
+    )
+
+
+def _nix_prove_data_expression(
+    tokens,
+    bindings,
+    start,
+    end,
+    stack=None,
+    allow_parameters=False,
+):
+    stack = [] if stack is None else stack
+    if start >= end:
+        raise NixLexError("empty Nix data expression")
+    token = tokens[start]
+    binary = _nix_top_level_binary(tokens, start, end)
+    if binary is not None and token.value != "if":
+        operator_start, operator_end = binary
+        _nix_prove_data_expression(
+            tokens,
+            bindings,
+            start,
+            operator_start,
+            stack,
+            allow_parameters=True,
+        )
+        _nix_prove_data_expression(
+            tokens,
+            bindings,
+            operator_end,
+            end,
+            stack,
+            allow_parameters=True,
+        )
+        return
+    if token.value == "(":
+        close = _nix_balanced_end(tokens, start)
+        if close != end:
+            raise NixLexError(f"composite Nix grouping at {token.start}")
+        _nix_prove_data_lambda(
+            tokens,
+            bindings,
+            start + 1,
+            close - 1,
+            stack,
+            allow_parameters,
+        )
+        return
+    if token.kind == "string":
+        if _nix_interpolation_source_candidate(token.value):
+            raise NixLexError(f"source-shaped Nix data string at {token.start}")
+        if start + 1 != end:
+            raise NixLexError(f"composite Nix data string at {token.start}")
+        return
+    if _nix_scalar_token(token):
+        if start + 1 != end:
+            raise NixLexError(f"composite Nix scalar at {token.start}")
+        return
+    if token.value == "[":
+        close = _nix_balanced_end(tokens, start)
+        if close != end:
+            raise NixLexError(f"composite Nix list at {token.start}")
+        index = start + 1
+        while index < close - 1:
+            if tokens[index].value == ",":
+                index += 1
+                continue
+            item_end = _nix_simple_expression_end(tokens, index)
+            if item_end is None or item_end > close - 1:
+                if tokens[index].value in {"[", "{", "("}:
+                    item_end = _nix_balanced_end(tokens, index)
+                else:
+                    item_end = _nix_expression_end_until(tokens, index, {",", "]"})
+            _nix_prove_data_expression(tokens, bindings, index, item_end, stack, allow_parameters)
+            index = item_end
+        return
+    if token.value == "{":
+        close = _nix_balanced_end(tokens, start)
+        if close != end:
+            raise NixLexError(f"composite Nix attrset at {token.start}")
+        index = start + 1
+        while index < close - 1:
+            if tokens[index].value == "inherit":
+                index += 1
+                while index < close - 1 and tokens[index].value != ";":
+                    if tokens[index].kind != "identifier":
+                        raise NixLexError(f"unsupported Nix inherit data at {tokens[index].start}")
+                    binding = _nix_binding_for(bindings, tokens[index].value, tokens[index].start)
+                    if binding.value_index is None:
+                        raise NixLexError(f"dynamic Nix inherited data: {tokens[index].value}")
+                    _nix_prove_data_expression(
+                        tokens,
+                        bindings,
+                        binding.value_index,
+                        binding.value_end,
+                        stack + [tokens[index].value],
+                        allow_parameters,
+                    )
+                    index += 1
+                index += 1
+                continue
+            if tokens[index].kind != "identifier" or index + 1 >= close or tokens[index + 1].value != "=":
+                raise NixLexError(f"unsupported Nix attrset data at {tokens[index].start}")
+            value_start = index + 2
+            value_end = _nix_expression_end_until(
+                tokens,
+                value_start,
+                {";", "}", ")", "]"},
+            )
+            _nix_prove_data_expression(
+                tokens,
+                bindings,
+                value_start,
+                value_end,
+                stack,
+                allow_parameters,
+            )
+            index = value_end + 1
+        return
+    if token.kind == "identifier" and token.value == "if":
+        then_index = next(
+            (
+                index
+                for index in range(start + 1, end)
+                if tokens[index].kind == "identifier" and tokens[index].value == "then"
+            ),
+            None,
+        )
+        else_index = next(
+            (
+                index
+                for index in range((then_index or start) + 1, end)
+                if tokens[index].kind == "identifier" and tokens[index].value == "else"
+            ),
+            None,
+        )
+        if then_index is None or else_index is None:
+            raise NixLexError(f"dynamic Nix conditional at {token.start}")
+        _nix_prove_data_expression(
+            tokens,
+            bindings,
+            start + 1,
+            then_index,
+            stack,
+            allow_parameters=True,
+        )
+        _nix_prove_data_expression(
+            tokens,
+            bindings,
+            then_index + 1,
+            else_index,
+            stack,
+            allow_parameters,
+        )
+        _nix_prove_data_expression(
+            tokens,
+            bindings,
+            else_index + 1,
+            end,
+            stack,
+            allow_parameters,
+        )
+        return
+    if (
+        token.kind == "identifier"
+        and start + 1 < end
+        and tokens[start + 1].value == ":"
+    ):
+        _nix_prove_data_lambda(tokens, bindings, start, end, stack, allow_parameters)
+        return
+    path_end = _nix_identifier_path_end(tokens, start, end)
+    if path_end == end and path_end > start + 1:
+        _nix_prove_data_path(tokens, bindings, start, end, stack, allow_parameters)
+        return
+    if all(
+        current.kind == "identifier"
+        or current.value in {".", "/", "-", "$", "{", "}"}
+        for current in tokens[start:end]
+    ) and any(current.value in {".", "/", "$"} for current in tokens[start:end]):
+        return
+    if token.kind != "identifier":
+        raise NixLexError(f"dynamic Nix data expression at {token.start}")
+    if token.value in stack:
+        raise NixLexError(f"cyclic Nix data expression: {token.value}")
+    head_end = _nix_identifier_path_end(tokens, start, end)
+    head = ".".join(
+        current.value
+        for current in tokens[start:head_end]
+        if current.kind == "identifier"
+    ) if head_end is not None else token.value
+    if head in NIX_OPAQUE_DATA_CALL_HEADS or head.endswith(".mkDerivation"):
+        return
+    if head in NIX_DATA_CALL_ARITIES:
+        cursor = head_end
+        for argument_index in range(NIX_DATA_CALL_ARITIES[head]):
+            argument_end = _nix_data_argument_end(tokens, cursor, end)
+            if argument_end > end:
+                raise NixLexError(f"composite Nix data call at {token.start}")
+            if tokens[cursor].value == "(" and _nix_top_level_colon(tokens, cursor + 1, argument_end - 1) is not None:
+                _nix_prove_data_lambda(
+                    tokens,
+                    bindings,
+                    cursor + 1,
+                    argument_end - 1,
+                    stack,
+                    allow_parameters,
+                )
+            else:
+                _nix_prove_data_expression(
+                    tokens,
+                    bindings,
+                    cursor,
+                    argument_end,
+                    stack,
+                    allow_parameters or head in NIX_DATA_PREDICATE_CALL_HEADS or (
+                        head == "lib.optionals" and argument_index == 0
+                    ),
+                )
+            cursor = argument_end
+        if cursor != end:
+            raise NixLexError(f"composite Nix data call at {token.start}")
+        return
+    if head in {"builtins.readFile", "readFile"}:
+        raise NixLexError(f"Nix readFile is an executable-source expression at {token.start}")
+    if head in {"builtins.toJSON", "builtins.fromJSON", "toString", "lib.escapeShellArg"}:
+        argument_start = head_end
+        argument_end = _nix_expression_end_until(tokens, argument_start, {";", ",", ")", "]", "}"})
+        if argument_end != end:
+            argument_end = end
+        _nix_prove_data_expression(
+            tokens,
+            bindings,
+            argument_start,
+            argument_end,
+            stack,
+            allow_parameters,
+        )
+        return
+    if head in {"builtins.removeAttrs"}:
+        first_start = head_end
+        first_end = _nix_expression_end_until(tokens, first_start, {"["})
+        _nix_prove_data_expression(
+            tokens,
+            bindings,
+            first_start,
+            first_end,
+            stack,
+            allow_parameters,
+        )
+        list_end = _nix_list_end(tokens, first_end)
+        if list_end != end:
+            raise NixLexError(f"composite Nix removeAttrs expression at {token.start}")
+        _nix_prove_data_expression(
+            tokens,
+            bindings,
+            first_end,
+            list_end,
+            stack,
+            allow_parameters,
+        )
+        return
+    if head in {"builtins.concatStringsSep", "lib.concatStringsSep", "nixpkgs.lib.concatStringsSep"}:
+        separator_start = head_end
+        separator_end = _nix_expression_end(tokens, separator_start)
+        _nix_prove_data_expression(
+            tokens,
+            bindings,
+            separator_start,
+            separator_end,
+            stack,
+            allow_parameters,
+        )
+        list_start = separator_end
+        list_end = _nix_list_end(tokens, list_start)
+        if list_end != end:
+            raise NixLexError(f"composite Nix concatStringsSep expression at {token.start}")
+        _nix_prove_data_expression(
+            tokens,
+            bindings,
+            list_start,
+            list_end,
+            stack,
+            allow_parameters,
+        )
+        return
+    if head.endswith(".mkDerivation"):
+        return
+    if head.startswith(("pkgs.", "nixpkgs.")):
+        if any(
+            head.endswith(suffix)
+            for suffix in (
+                ".writeShellScript",
+                ".writeShellScriptBin",
+                ".writeShellApplication",
+                ".runCommand",
+                ".runCommandLocal",
+                ".writeText",
+                ".writeTextDir",
+                ".withPackages",
+                ".overrideAttrs",
+            )
+        ):
+            return
+        raise NixLexError(f"unproven Nix package call at {token.start}")
+    binding = _nix_binding_for(bindings, token.value, token.start)
+    if binding.kind == "parameter":
+        if not allow_parameters and binding.name not in NIX_PROVEN_DATA_PARAMETER_NAMES:
+            raise NixLexError(f"untyped Nix function parameter: {binding.name}")
+        if start + 1 != end:
+            raise NixLexError(f"composite Nix function parameter: {binding.name}")
+        return
+    if binding.value_index is None:
+        raise NixLexError(f"dynamic Nix data binding: {token.value}")
+    _nix_prove_data_expression(
+        tokens,
+        bindings,
+        binding.value_index,
+        binding.value_end,
+        stack + [token.value],
+    )
+
+
+def _nix_classify_interpolation_value(
+    tokens,
+    bindings,
+    index,
+    language,
+    source_positions,
+    data_positions,
+    stack,
+):
+    if index is None or index >= len(tokens):
+        raise NixLexError("unresolved Nix interpolation source")
+    token = tokens[index]
+    if token.kind == "string":
+        _mark_nix_position(source_positions, token, language)
+        return
+    if _nix_scalar_token(token):
+        return
+    simple_end = _nix_simple_expression_end(tokens, index)
+    if token.kind == "identifier" and simple_end is not None and simple_end > index + 1:
+        _nix_prove_data_expression(tokens, bindings, index, simple_end)
+        return
+    if token.kind != "identifier":
+        raise NixLexError(f"unresolved Nix interpolation source at {token.start}")
+    if token.value in stack:
+        raise NixLexError(f"cyclic Nix interpolation source: {token.value}")
+    binding = _nix_binding_for(bindings, token.value, token.start)
+    if binding.kind == "parameter":
+        if binding.name not in NIX_PROVEN_DATA_PARAMETER_NAMES:
+            raise NixLexError(f"untyped Nix interpolation parameter: {binding.name}")
+        return
+    if binding.value_index is None:
+        raise NixLexError(f"dynamic Nix interpolation source: {token.value}")
+    if binding.value_end > binding.value_index + 1:
+        try:
+            _nix_prove_data_expression(
+                tokens,
+                bindings,
+                binding.value_index,
+                binding.value_end,
+                stack + [token.value],
+            )
+        except NixLexError:
+            _nix_mark_source_expression(
+                tokens,
+                bindings,
+                binding.value_index,
+                language,
+                source_positions,
+                data_positions,
+                stack + [token.value],
+            )
+        return
+    _nix_classify_interpolation_value(
+        tokens,
+        bindings,
+        binding.value_index,
+        language,
+        source_positions,
+        data_positions,
+        stack + [token.value],
+    )
+
+
+def _nix_outer_parentheses(expression):
+    expression = expression.strip()
+    while expression.startswith("(") and expression.endswith(")"):
+        depth = 0
+        enclosed = True
+        for index, char in enumerate(expression):
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+                if depth == 0 and index != len(expression) - 1:
+                    enclosed = False
+                    break
+        if not enclosed or depth != 0:
+            break
+        expression = expression[1:-1].strip()
+    return expression
+
+
+def _nix_classify_raw_interpolation(
+    expression,
+    tokens,
+    bindings,
+    reference_position,
+    language,
+    source_positions,
+    data_positions,
+    expression_start=None,
+):
+    expression = _nix_outer_parentheses(expression)
+    if not expression:
+        raise NixLexError("empty Nix interpolation")
+    nested = list(_nix_interpolation_expressions(expression))
+    if nested:
+        for child, child_start in nested:
+            _nix_classify_raw_interpolation(
+                child,
+                tokens,
+                bindings,
+                reference_position,
+                language,
+                source_positions,
+                data_positions,
+                None if expression_start is None else expression_start + child_start + 2,
+            )
+        expression = re.sub(r"\$\{[^{}]*\}", "path", expression)
+    if _nix_interpolation_is_data_expression(expression):
+        return
+    dotted = re.fullmatch(
+        r"([A-Za-z_][A-Za-z0-9_'-]*)(?:\.[A-Za-z_][A-Za-z0-9_'-]*)+",
+        expression,
+    )
+    if dotted:
+        root_name = dotted.group(1)
+        if root_name in {"pkgs", "nixpkgs", "self"}:
+            return
+        binding = _nix_binding_for(bindings, root_name, reference_position)
+        if binding.kind == "parameter":
+            if binding.name not in NIX_PROVEN_DATA_PARAMETER_NAMES:
+                raise NixLexError(f"untyped Nix interpolation parameter: {binding.name}")
+            return
+        if binding.value_index is None:
+            raise NixLexError(f"dynamic Nix dotted interpolation: {root_name}")
+        _nix_prove_data_expression(
+            tokens,
+            bindings,
+            binding.value_index,
+            binding.value_end,
+            [root_name],
+        )
+        return
+    if re.fullmatch(r"\"(?:[^\"\\]|\\.)*\"", expression, re.DOTALL):
+        value = _decode_nix_double_quoted(expression[1:-1])
+        if _nix_interpolation_source_candidate(value):
+            raise NixLexError("source-shaped literal Nix interpolation")
+        return
+    if expression.startswith("''") and expression.endswith("''"):
+        value = expression[2:-2]
+        if _nix_interpolation_source_candidate(value):
+            raise NixLexError("source-shaped literal Nix interpolation")
+        return
+    if re.fullmatch(r"(?:builtins\.)?readFile\s+\.\.?/[^\s)]+", expression):
+        _nix_validate_raw_read_file(expression, bindings, language)
+        return
+    conditional = re.match(r"^if\b.*?\bthen\s+(.+?)\s+else\s+(.+)$", expression, re.DOTALL)
+    if conditional:
+        for branch in conditional.groups():
+            _nix_classify_raw_interpolation(
+                branch,
+                tokens,
+                bindings,
+                reference_position,
+                language,
+                source_positions,
+                data_positions,
+            )
+        return
+    optional_string = re.match(r"^lib\.optionalString\s+(.+?)\s+(''.*)$", expression, re.DOTALL)
+    if optional_string:
+        fragment = optional_string.group(2)
+        if not fragment.endswith("''") or len(fragment) < 4:
+            raise NixLexError("unterminated optional Nix source fragment")
+        fragment_start = expression.find("''", len("lib.optionalString"))
+        if expression_start is not None and fragment_start != -1:
+            fragment_position = expression_start + fragment_start
+            existing = source_positions.get(fragment_position, ())
+            source_positions[fragment_position] = frozenset(
+                set(_nix_source_languages(existing)) | {language}
+            )
+            for child, child_start in _nix_interpolation_expressions(fragment[2:-2]):
+                _nix_classify_raw_interpolation(
+                    child,
+                    tokens,
+                    bindings,
+                    reference_position,
+                    language,
+                    source_positions,
+                    data_positions,
+                    fragment_position + 2 + child_start + 2,
+                )
+        return
+    for prefix in (
+        "builtins.toJSON ",
+        "builtins.fromJSON ",
+        "toString ",
+        "lib.escapeShellArg ",
+    ):
+        if expression.startswith(prefix):
+            _nix_classify_raw_interpolation(
+                expression[len(prefix):],
+                tokens,
+                bindings,
+                reference_position,
+                language,
+                source_positions,
+                data_positions,
+            )
+            return
+    concat = re.match(
+        r"^(?:builtins\.concatStringsSep|lib\.concatStringsSep|nixpkgs\.lib\.concatStringsSep)\s+(\"(?:[^\"\\]|\\.)*\"|''.*'')\s+(.+)$",
+        expression,
+        re.DOTALL,
+    )
+    if concat:
+        _nix_classify_raw_interpolation(
+            concat.group(1),
+            tokens,
+            bindings,
+            reference_position,
+            language,
+            source_positions,
+            data_positions,
+        )
+        _nix_classify_raw_interpolation(
+            concat.group(2),
+            tokens,
+            bindings,
+            reference_position,
+            language,
+            source_positions,
+            data_positions,
+        )
+        return
+    call = re.match(r"^([A-Za-z_][A-Za-z0-9_'-]*)\s+(.+)$", expression, re.DOTALL)
+    if call:
+        name, argument = call.groups()
+        binding = _nix_binding_for(bindings, name, reference_position)
+        if binding.value_index is None:
+            raise NixLexError(f"dynamic Nix interpolation function: {name}")
+        try:
+            result_index = _nix_function_return_index(
+                tokens, bindings, name, reference_position
+            )
+        except NixLexError as error:
+            raise NixLexError(f"unresolved Nix interpolation source: {expression}") from error
+        returned = tokens[result_index].value
+        returned_language = _infer_nix_embedded_language(returned)
+        if returned_language is None:
+            data_positions.add(tokens[result_index].start)
+        else:
+            _mark_nix_position(
+                source_positions,
+                tokens[result_index],
+                returned_language,
+            )
+        return
+    if expression.startswith(("pkgs.", "nixpkgs.", "self.")):
+        if re.search(
+            r"\b(?:writeShellScript|writeShellScriptBin|writeShellApplication|runCommand|runCommandLocal|writeText|writeTextDir)\b",
+            expression,
+        ):
+            raise NixLexError("unresolved Nix executable builder interpolation")
+        if re.fullmatch(
+            r"(?:pkgs|nixpkgs|self)(?:\.[A-Za-z_][A-Za-z0-9_'-]*)+",
+            expression,
+        ):
+            return
+        if re.fullmatch(
+            r"(?:pkgs|nixpkgs|self)(?:\.[A-Za-z_][A-Za-z0-9_'-]*)+\s+.*",
+            expression,
+            re.DOTALL,
+        ) and re.search(r"\.(?:withPackages|overrideAttrs)\b", expression):
+            return
+        raise NixLexError("unproven Nix package interpolation")
+    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_'-]*", expression):
+        binding = _nix_binding_for(bindings, expression, reference_position)
+        if binding.kind == "parameter":
+            if binding.name not in NIX_PROVEN_DATA_PARAMETER_NAMES:
+                raise NixLexError(f"untyped Nix interpolation parameter: {binding.name}")
+            return
+        if binding.value_index is None:
+            raise NixLexError(f"dynamic Nix interpolation source: {expression}")
+        if binding.value_end > binding.value_index + 1:
+            try:
+                _nix_prove_data_expression(
+                    tokens,
+                    bindings,
+                    binding.value_index,
+                    binding.value_end,
+                    [expression],
+                )
+            except NixLexError:
+                _nix_mark_source_expression(
+                    tokens,
+                    bindings,
+                    binding.value_index,
+                    language,
+                    source_positions,
+                    data_positions,
+                    [expression],
+                )
+        else:
+            _nix_classify_interpolation_value(
+                tokens,
+                bindings,
+                binding.value_index,
+                language,
+                source_positions,
+                data_positions,
+                [expression],
+            )
+        return
+    raise NixLexError(f"unresolved Nix interpolation source: {expression}")
+
+
+def _scan_nix_interpolated_source_bindings(text, tokens, bindings, source_positions, data_positions):
+    pending = [
+        (token.start, language)
+        for token in tokens
+        if token.start in source_positions
+        for language in _nix_source_languages(source_positions[token.start])
+    ]
+    visited = set()
+    tokens_by_start = {token.start: token for token in tokens}
+    while pending:
+        start, language = pending.pop()
+        visit = (start, language)
+        if visit in visited:
+            continue
+        visited.add(visit)
+        token = tokens_by_start[start]
         raw = text[token.start:token.end]
-        for match in NIX_SIMPLE_INTERPOLATION_PATTERN.finditer(raw):
-            name = match.group(1)
-            try:
-                binding = _nix_binding_for(bindings, name, token.start)
-            except NixLexError:
-                continue
-            if binding.value_index is None:
-                continue
-            try:
-                resolved = _resolve_nix_string(tokens, bindings, binding.value_index)
-            except NixLexError:
-                continue
-            value = tokens[resolved].value
-            language = _infer_nix_embedded_language(value)
-            if language is None:
-                if _looks_like_nix_code(value):
-                    raise NixLexError(f"unclassified Nix interpolation source: {name}")
-                continue
-            _mark_nix_position(source_positions, tokens[resolved], language)
-            pending.append(tokens[resolved].start)
+        for expression, local_start in _nix_interpolation_expressions(raw):
+            before = {
+                position: set(_nix_source_languages(value))
+                for position, value in source_positions.items()
+            }
+            _nix_classify_raw_interpolation(
+                expression,
+                tokens,
+                bindings,
+                token.start,
+                language,
+                source_positions,
+                data_positions,
+                token.start + local_start + 2,
+            )
+            for position, value in source_positions.items():
+                if position not in tokens_by_start:
+                    continue
+                for new_language in set(_nix_source_languages(value)) - before.get(position, set()):
+                    pending.append((position, new_language))
 
 
-def _classify_nix_embedded_strings(path, text):
+def _classify_nix_embedded_strings(path, text, root=None):
     tokens = _lex_nix_tokens(path, text)
-    bindings = _nix_bindings(tokens)
+    bindings = _nix_bindings(tokens, path, root)
     source_positions = {}
     data_positions = set()
     for token in tokens:
@@ -1484,11 +3039,14 @@ def _classify_nix_embedded_strings(path, text):
                 ):
                     if binding.value_index is None:
                         raise NixLexError("dynamic writeShellApplication text")
-                    if _is_nix_static_shell_source_expression(
-                        tokens, bindings, binding.value_index
-                    ):
-                        continue
-                    _mark_nix_source(tokens, bindings, binding.value_index, "shell", source_positions)
+                    _nix_mark_source_expression(
+                        tokens,
+                        bindings,
+                        binding.value_index,
+                        "shell",
+                        source_positions,
+                        data_positions,
+                    )
             continue
         if token.value in {"writeShellScript", "writeShellScriptBin"}:
             name_end = _nix_expression_end(tokens, index + 1)
@@ -1531,7 +3089,13 @@ def _classify_nix_embedded_strings(path, text):
             _mark_nix_data_range(tokens, body_index, body_end, data_positions)
         else:
             _mark_nix_source(tokens, bindings, body_index, language, source_positions)
-    _scan_nix_interpolated_source_bindings(text, tokens, bindings, source_positions)
+    _scan_nix_interpolated_source_bindings(
+        text,
+        tokens,
+        bindings,
+        source_positions,
+        data_positions,
+    )
     if set(EXTENSION_LANGUAGE.values()) != set(EMBEDDED_LANGUAGE_SCANNERS):
         raise NixLexError("classifiable embedded language has no scanner")
     classified_positions = set(source_positions) | data_positions
@@ -1549,14 +3113,17 @@ def _classify_nix_embedded_strings(path, text):
 
 
 def _scan_embedded_nix_string(path, literal_text, base_line, base_col, language, embedded_violations):
-    scanner = EMBEDDED_LANGUAGE_SCANNERS.get(language)
-    if scanner is None:
-        raise NixLexError(f"{path}: no embedded scanner for Nix source language: {language}")
     dedented = _dedent_nix_indented_string(literal_text)
-    for v in scanner(path, dedented):
-        line = base_line + v.line - 1
-        col = v.col + base_col if v.line == 1 else v.col
-        embedded_violations.append(Violation(path, line, col, v.kind, v.text))
+    for current_language in _nix_source_languages(language):
+        scanner = EMBEDDED_LANGUAGE_SCANNERS.get(current_language)
+        if scanner is None:
+            raise NixLexError(
+                f"{path}: no embedded scanner for Nix source language: {current_language}"
+            )
+        for v in scanner(path, dedented):
+            line = base_line + v.line - 1
+            col = v.col + base_col if v.line == 1 else v.col
+            embedded_violations.append(Violation(path, line, col, v.kind, v.text))
 
 
 def _consume_nix_line_comment(path, text, pos, violations):
@@ -1769,7 +3336,7 @@ def _scan_nix_region(
 def scan_nix(path, text, root=None):
     raw_violations = []
     embedded_violations = []
-    _, classifications, _ = _classify_nix_embedded_strings(path, text)
+    _, classifications, _ = _classify_nix_embedded_strings(path, text, root)
     _scan_nix_region(
         path,
         text,
