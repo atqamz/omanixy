@@ -113,6 +113,10 @@ Humans own reviewed `Migration` guidance.
 
 Normal feature, fix, and documentation pull requests must not casually edit those files.
 
+CI allows `.release-please-manifest.json`, `version.txt`, or `CHANGELOG.md` to change only for the one-time bootstrap where all three files are absent from the base revision, or for a same-repository pending Release PR authored by `github-actions[bot]` and carrying the `autorelease: pending` label.
+A human may edit migration guidance on that pending Release PR without changing the PR's automation provenance.
+A label alone is not sufficient to authorize a normal PR to mutate release-owned files.
+
 The intentional human-curated release-file change is migration guidance inside the pending Release PR.
 
 No runtime QML, Nix module option, flake metadata, README version, or package metadata mirrors the release version.
@@ -134,10 +138,16 @@ successful main CI for the current main SHA
 Release Please creates or updates a pending Release PR, initially as a draft
         |
         v
+live main and the pending Release PR base are revalidated against that CI SHA
+        |
+        v
 the pending Release PR is found and checked out
         |
         v
 Nix is installed for release-context --write and --check
+        |
+        v
+live main is revalidated before release-context mutation and before its push
         |
         v
 release-context --write and --check update the candidate changelog
@@ -172,12 +182,13 @@ The final changelog entry already contains the context before the Release PR is 
 
 CI runs on pull requests targeting `main` and pushes to `main` with `contents: read`.
 
-CI runs formatting, `just check`, all-system flake evaluation, source-comment policy, release contract checks, release-context selftests, actionlint, and the release-owned-file context check when those files change.
+CI runs formatting, `just check`, all-system flake evaluation, source-comment policy, release contract checks, release-context selftests, actionlint, and release-owned-file provenance and context checks when those files change.
 
 Release Please runs only from a successful `CI` `workflow_run` for a push whose SHA is checked against live `main` immediately before the action is invoked.
-At that final mutation boundary, the workflow skips Release Please and all later release-context work when the live SHA differs.
-This check does not provide an atomic compare-and-swap with GitHub branch movement.
-It establishes the strongest practical stale-at-boundary guarantee available while the upstream action targets symbolic `main`.
+At that mutation boundary, the workflow skips Release Please when the live SHA differs.
+After Release Please runs, the workflow requires both live `main` and the pending Release PR's base SHA to still equal the validated SHA before any compatibility-context work continues.
+The workflow rechecks live `main` before context mutation and immediately before pushing a context commit.
+These checks do not provide an atomic compare-and-swap with GitHub branch movement, but they close stale windows before each release-controlled mutation while the upstream action targets symbolic `main`.
 
 The release workflow has a single global `release-main` concurrency group with cancellation disabled.
 
@@ -197,11 +208,35 @@ The repository must allow GitHub Actions to create pull requests with `GITHUB_TO
 That repository setting is not a secret and does not introduce token provisioning or rotation.
 A separate credential may be introduced later only for a concrete capability that cannot be acceptably expressed with `GITHUB_TOKEN` and the existing human gate.
 
+## Repository governance
+
+The release workflow does not replace branch governance.
+Before this release contract is considered ready, repository rules for `main` must mechanically require ordinary changes to arrive through a pull request and require the actual release-quality CI check before merge.
+Ordinary humans and generic automation must not be able to push or write repository contents directly to `main`.
+Force-push and branch deletion must remain prohibited.
+The release workflow's `GITHUB_TOKEN` must not be configured as a general branch-protection bypass.
+
+The rule must be verified behaviorally rather than inferred from a `protected: true` flag:
+
+```text
+direct normal write to main -> rejected
+PR with missing required CI -> cannot merge
+PR with required CI passing -> merge allowed according to policy
+force push -> rejected
+```
+
+Repository rules are GitHub repository state rather than version-controlled workflow state.
+Until those rules are configured and the behavior above is verified, issue `atqamz/omanixy#5` remains open even if this branch's code and CI are green.
+
 ## Failure recovery
 
 If CI fails on `main`, the Release Please workflow does not run.
 
-If the successfully validated main revision is stale at the final mutation boundary, Release Please and all later release-context work are skipped.
+If the successfully validated main revision is stale before Release Please, Release Please is skipped.
+
+If `main` advances after Release Please runs, or the pending Release PR is no longer based on the validated SHA, pending-candidate identity verification fails before context mutation.
+
+If `main` advances during context work, the live-main recheck fails before the context commit is pushed.
 
 If the Release Please API fails, the workflow is red and must be rerun after the transient or repository-permission problem is corrected.
 
