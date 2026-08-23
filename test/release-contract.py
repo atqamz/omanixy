@@ -165,6 +165,18 @@ def assert_release_workflow(release, release_text):
     current = "steps.main-identity.outputs.current == 'true'"
     candidate = current + " && steps.release-pr.outputs.found == 'true'"
 
+    provenance = named["Verify merged PR provenance"]
+    assert provenance["env"] == {
+        "EXPECTED_SHA": "${{ github.event.workflow_run.head_sha }}",
+        "GH_TOKEN": "${{ github.token }}",
+    }
+    assert 'commits/$EXPECTED_SHA/pulls' in provenance["run"]
+    assert '.base.ref == "main"' in provenance["run"]
+    assert '.merged_at != null' in provenance["run"]
+    assert 'test "$merged_pr_count" = "1"' in provenance["run"]
+    assert ordered.index(named["Verify validated main revision"]) < ordered.index(provenance)
+    assert ordered.index(provenance) < ordered.index(named["Verify current main identity"])
+
     assert named["Run Release Please"]["if"] == current
     assert named["Run Release Please"]["uses"] == RELEASE_PLEASE_ACTION
     assert named["Run Release Please"]["with"]["target-branch"] == "main"
