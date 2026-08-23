@@ -77,6 +77,7 @@ consumers to copy internal modules.
 - [Architecture and module ownership](docs/architecture.md)
 - [Porting and compatibility rules](docs/porting-principles.md)
 - [Upstream pinning and upgrade policy](docs/upstream.md)
+- [Release contract](docs/release.md)
 - [Contributor workflow](AGENTS.md)
 
 Project workflow lives in `AGENTS.md`.

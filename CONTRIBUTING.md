@@ -20,16 +20,8 @@ Use titles such as `fix(audio): preserve selected default sink`,
 Do not use fixup, WIP, or review-remediation subjects as the final mainline
 semantic unit when the squash title can describe the actual change.
 
-Release-owned files are `version.txt`, `.release-please-manifest.json`, and
-Release Please entries in `CHANGELOG.md`.
-
-Do not manually bump those files in normal feature or fix pull requests.
-
-Breaking public changes require a `BREAKING CHANGE:` explanation and a usable
-`### Migration` section in the draft Release PR.
-
-Upstream pin changes follow Omanixy impact rather than upstream version
-numbers.
+See [the release contract](docs/release.md) for release-owned files,
+breaking-change guidance, and upstream versioning.
 
 Add matrix entries only after the supported upstream contract has been
 audited.
