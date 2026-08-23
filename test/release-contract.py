@@ -87,10 +87,35 @@ def main_identity_is_current(validated_sha, current_sha):
     return bool(validated_sha) and validated_sha == current_sha
 
 
+def release_flow_steps_allowed(main_current, pending_release_pr):
+    context_allowed = main_current and pending_release_pr
+    return {
+        "release-please": main_current,
+        "find-pending-release-pr": main_current,
+        "checkout-pending-release-pr": context_allowed,
+        "install-nix-for-context": context_allowed,
+        "write-release-context": context_allowed,
+        "push-context": context_allowed,
+    }
+
+
 def assert_main_identity_cases():
     assert main_identity_is_current("A", "A")
     assert not main_identity_is_current("A", "B")
     assert not main_identity_is_current("", "A")
+
+    stale_flow = release_flow_steps_allowed(False, True)
+    assert stale_flow == {step: False for step in stale_flow}
+    current_pending_flow = release_flow_steps_allowed(True, True)
+    assert current_pending_flow == {step: True for step in current_pending_flow}
+    current_without_pending_flow = release_flow_steps_allowed(True, False)
+    assert current_without_pending_flow["release-please"] is True
+    assert current_without_pending_flow["find-pending-release-pr"] is True
+    assert all(
+        not current_without_pending_flow[step]
+        for step in current_without_pending_flow
+        if step not in {"release-please", "find-pending-release-pr"}
+    )
 
 
 def assert_pending_release_pr_identity():
@@ -202,6 +227,11 @@ def assert_workflows(root):
     assert release_job["if"] == "github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main'"
     release_steps = workflow_steps(release, "release")
     release_all_steps = workflow_all_steps(release, "release")
+    release_step_indices = {
+        step["name"]: index
+        for index, step in enumerate(release_all_steps)
+        if "name" in step
+    }
     assert release_steps["Require release credential"]["env"] == {
         "RELEASE_PLEASE_TOKEN": "${{ secrets.RELEASE_PLEASE_TOKEN }}"
     }
@@ -219,6 +249,8 @@ def assert_workflows(root):
     assert "current=true\\n" in guard_lines[5]
     assert any("current=false\\n" in line for line in guard_lines)
     assert any("stale workflow" in line for line in guard_lines)
+    assert release_step_indices["Verify validated main revision"] < release_step_indices["Require release credential"]
+    assert release_step_indices["Require release credential"] < release_step_indices["Verify current main identity"]
     current_condition = "steps.main-identity.outputs.current == 'true'"
     assert release_steps["Run Release Please"]["if"] == current_condition
     assert release_steps["Find pending Release PR"]["if"] == current_condition
@@ -255,6 +287,19 @@ def assert_workflows(root):
     assert checkouts[0]["with"]["ref"] == "${{ github.event.workflow_run.head_sha }}"
     assert checkouts[1]["with"]["ref"] == "${{ steps.release-pr.outputs.branch }}"
     assert checkouts[1]["if"] == release_pr_condition
+
+    assert release_step_indices["Run Release Please"] == release_step_indices["Verify current main identity"] + 1
+    nix_steps = [
+        step
+        for step in release_all_steps
+        if step.get("uses") == "DeterminateSystems/nix-installer-action@v22"
+    ]
+    assert len(nix_steps) == 1
+    nix_step = nix_steps[0]
+    assert nix_step["if"] == release_pr_condition
+    nix_index = next(index for index, step in enumerate(release_all_steps) if step is nix_step)
+    pending_checkout_index = next(index for index, step in enumerate(release_all_steps) if step is checkouts[1])
+    assert nix_index == pending_checkout_index + 1
 
     release_action = release_steps["Run Release Please"]
     assert release_action["uses"] == "googleapis/release-please-action@v5"

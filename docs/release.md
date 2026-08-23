@@ -134,6 +134,12 @@ successful main CI for the current main SHA
 Release Please creates or updates a pending Release PR, initially as a draft
         |
         v
+the pending Release PR is found and checked out
+        |
+        v
+Nix is installed for release-context --write and --check
+        |
+        v
 release-context --write and --check update the candidate changelog
         |
         v
@@ -159,8 +165,10 @@ CI runs on pull requests targeting `main` and pushes to `main` with `contents: r
 
 CI runs formatting, `just check`, all-system flake evaluation, source-comment policy, release contract checks, release-context selftests, actionlint, and the release-owned-file context check when those files change.
 
-Release Please runs only from a successful `CI` `workflow_run` for a push whose SHA still equals the live `main` SHA.
-The workflow skips all release discovery and mutation when that identity check is stale.
+Release Please runs only from a successful `CI` `workflow_run` for a push whose SHA is checked against live `main` immediately before the action is invoked.
+At that final mutation boundary, the workflow skips Release Please and all later release-context work when the live SHA differs.
+This check does not provide an atomic compare-and-swap with GitHub branch movement.
+It establishes the strongest practical stale-at-boundary guarantee available while the upstream action targets symbolic `main`.
 
 The release workflow has a single global `release-main` concurrency group with cancellation disabled.
 

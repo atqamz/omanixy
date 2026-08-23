@@ -26,10 +26,6 @@ jobs:
         max-jobs = 2
         cores = 2
     steps:
-      - name: Require release credential
-        env:
-          RELEASE_PLEASE_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
-        run: test -n "$RELEASE_PLEASE_TOKEN"
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
@@ -39,6 +35,10 @@ jobs:
         env:
           EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - name: Require release credential
+        env:
+          RELEASE_PLEASE_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+        run: test -n "$RELEASE_PLEASE_TOKEN"
       - name: Verify current main identity
         id: main-identity
         env:
@@ -55,7 +55,6 @@ jobs:
             printf 'current=false\n' >> "$GITHUB_OUTPUT"
             printf 'stale workflow: current main is %s, validated SHA is %s\n' "$current_sha" "$EXPECTED_SHA"
           fi
-      - uses: DeterminateSystems/nix-installer-action@v22
       - name: Run Release Please
         id: release
         if: steps.main-identity.outputs.current == 'true'
@@ -87,6 +86,8 @@ jobs:
           ref: ${{ steps.release-pr.outputs.branch }}
           fetch-depth: 0
           token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+      - uses: DeterminateSystems/nix-installer-action@v22
+        if: steps.main-identity.outputs.current == 'true' && steps.release-pr.outputs.found == 'true'
       - name: Write release context
         if: steps.main-identity.outputs.current == 'true' && steps.release-pr.outputs.found == 'true'
         run: |
