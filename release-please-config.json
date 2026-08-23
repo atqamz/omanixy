@@ -4,6 +4,7 @@
   "release-type": "simple",
   "bump-minor-pre-major": true,
   "bump-patch-for-minor-pre-major": false,
+  "initial-version": "0.1.0",
   "include-component-in-tag": false,
   "include-v-in-tag": true,
   "draft-pull-request": true,

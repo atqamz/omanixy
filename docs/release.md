@@ -38,6 +38,10 @@ Omanixy has no public `v0.0.0` release.
 
 The manifest and `version.txt` value `0.0.0` are Release Please's pre-first-release baseline.
 
+Current Release Please requires `initial-version: 0.1.0` for an untagged first release because a manifest baseline is not treated as the latest published release by the current strategy.
+
+This is a first-candidate bootstrap guard, not a `release-as` override and not a public `v0.1.0` release.
+
 `ce7d3d8b53bec61585ca9efa377fdb3ae6763499` is the bootstrap boundary because it is the architecture and workflow baseline.
 
 The next commit, `c756f85dc2ad546fa2cfbad1fdf3b51913bc6723`, is the first pinned Quattro runtime implementation and is included in the first release history.

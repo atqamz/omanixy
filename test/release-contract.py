@@ -51,6 +51,7 @@ def assert_release_files(root):
     assert config["release-type"] == "simple"
     assert config["bump-minor-pre-major"] is True
     assert config["bump-patch-for-minor-pre-major"] is False
+    assert config["initial-version"] == "0.1.0"
     assert config["include-component-in-tag"] is False
     assert config["include-v-in-tag"] is True
     assert config["draft-pull-request"] is True
