@@ -67,6 +67,9 @@
       };
       standaloneService = standaloneHome.config.systemd.user.services.omanixy-shell;
       standaloneSecurity = standaloneHome.config.programs.omanixy.security;
+      standaloneActivationClosure = pkgs.closureInfo {
+        rootPaths = [ standaloneHome.activationPackage ];
+      };
       integratedHome = integratedNixos.config.home-manager.users.${username};
       integratedService = integratedHome.systemd.user.services.omanixy-shell;
       invalidLockDiagnostics = map
@@ -98,6 +101,14 @@
       overrideContractOk =
         !(builtins.elem "clipboard" standaloneHome.config.programs.omanixy.features)
         && builtins.elem "omarchy.bluetooth" standaloneHome.config.programs.omanixy.shell.config.disabledPlugins;
+      hostCapabilitiesOk =
+        integratedNixos.config.networking.networkmanager.enable
+        && integratedNixos.config.hardware.bluetooth.enable
+        && integratedNixos.config.services.pipewire.enable
+        && integratedNixos.config.services.pipewire.pulse.enable
+        && integratedNixos.config.services.upower.enable
+        && integratedNixos.config.services.power-profiles-daemon.enable
+        && integratedNixos.config.programs.hyprland.enable;
       integratedContractOk =
         integratedNixos.config.programs.omanixy.security.pam.password.enable
         && integratedHome.programs.omanixy.security.lock.enable
@@ -115,9 +126,11 @@
         adoption-contract = pkgs.runCommand "omanixy-standalone-adoption-contract"
           {
             inherit pamService nixosToplevel;
+            activationStorePaths = "${standaloneActivationClosure}/store-paths";
             serviceContract = if serviceContractOk then "true" else "false";
             safeOwnership = if safeOwnershipOk then "true" else "false";
             overrideContract = if overrideContractOk then "true" else "false";
+            hostCapabilities = if hostCapabilitiesOk then "true" else "false";
             integratedContract = if integratedContractOk then "true" else "false";
             invalidLockDiagnostic = if invalidLockDiagnosticOk then "true" else "false";
             nativeBuildInputs = [ pkgs.coreutils pkgs.gnugrep ];
@@ -125,11 +138,15 @@
           test "$serviceContract" = true
           test "$safeOwnership" = true
           test "$overrideContract" = true
+          test "$hostCapabilities" = true
           test "$integratedContract" = true
           test "$invalidLockDiagnostic" = true
           test -n "$nixosToplevel"
           test -s "$pamService"
           grep -Fq 'pam_unix.so' "$pamService"
+          if grep -Fq 'universe' "$activationStorePaths"; then
+            exit 1
+          fi
           if grep -R -n -E '/home/atqa|sfx14|pavg15|~/dotfiles|atqamz/universe|Hand|private paths' ${./.}; then
             exit 1
           fi
