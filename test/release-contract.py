@@ -9,11 +9,16 @@ import yaml
 
 
 BOOTSTRAP_SHA = "ce7d3d8b53bec61585ca9efa377fdb3ae6763499"
+RELEASE_PLEASE_SCHEMA = "https://raw.githubusercontent.com/googleapis/release-please/v17.6.0/schemas/config.json"
+CHECKOUT_ACTION = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+NIX_INSTALLER_ACTION = "DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25"
+RELEASE_PLEASE_ACTION = "googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7"
 SEMVER = re.compile(
     r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
     r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
     r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
 )
+IMMUTABLE_ACTION = re.compile(r"^[^@]+@[0-9a-f]{40}$")
 
 
 def load_json(path):
@@ -29,7 +34,11 @@ def workflow_job(workflow, name):
 
 
 def workflow_steps(workflow, job_name):
-    return {step["name"]: step for step in workflow_job(workflow, job_name)["steps"] if "name" in step}
+    return {
+        step["name"]: step
+        for step in workflow_job(workflow, job_name)["steps"]
+        if "name" in step
+    }
 
 
 def workflow_all_steps(workflow, job_name):
@@ -53,7 +62,7 @@ def run_argvs(step):
 
 def has_command_suffix(step, suffix):
     expected = list(suffix)
-    return any(argv[-len(expected):] == expected for argv in run_argvs(step))
+    return any(argv[-len(expected) :] == expected for argv in run_argvs(step))
 
 
 def all_strings(value):
@@ -71,11 +80,13 @@ def pending_release_prs(pull_requests, repository):
     matches = []
     for pull_request in pull_requests:
         head_repository = pull_request.get("headRepository") or {}
+        author = pull_request.get("author") or {}
         labels = {label["name"] for label in pull_request.get("labels", [])}
         if (
             pull_request.get("state") == "OPEN"
             and pull_request.get("baseRefName") == "main"
             and head_repository.get("nameWithOwner") == repository
+            and author.get("login") == "github-actions[bot]"
             and "autorelease: pending" in labels
         ):
             matches.append(pull_request)
@@ -92,6 +103,7 @@ def release_flow_steps_allowed(main_current, pending_release_pr):
     return {
         "release-please": main_current,
         "find-pending-release-pr": main_current,
+        "verify-pending-release-pr": context_allowed,
         "checkout-pending-release-pr": context_allowed,
         "install-nix-for-context": context_allowed,
         "write-release-context": context_allowed,
@@ -121,12 +133,19 @@ def assert_main_identity_cases():
 def assert_pending_release_pr_identity():
     repository = "atqamz/omanixy"
 
-    def pull_request(draft=True, pending=True, base="main", head_repository=repository):
+    def pull_request(
+        draft=True,
+        pending=True,
+        base="main",
+        head_repository=repository,
+        author="github-actions[bot]",
+    ):
         labels = [{"name": "autorelease: pending"}] if pending else []
         return {
             "state": "OPEN",
             "baseRefName": base,
             "headRepository": {"nameWithOwner": head_repository},
+            "author": {"login": author},
             "labels": labels,
             "isDraft": draft,
         }
@@ -136,6 +155,7 @@ def assert_pending_release_pr_identity():
     assert pending_release_prs([pull_request(draft=False, pending=False)], repository) == []
     assert pending_release_prs([pull_request(base="develop")], repository) == []
     assert pending_release_prs([pull_request(head_repository="someone/else")], repository) == []
+    assert pending_release_prs([pull_request(author="atqamz")], repository) == []
     try:
         pending_release_prs([pull_request(), pull_request()], repository)
     except AssertionError:
@@ -150,7 +170,7 @@ def assert_release_files(root):
     version = (root / "version.txt").read_text(encoding="utf-8")
     changelog = (root / "CHANGELOG.md").read_text(encoding="utf-8")
 
-    assert config["$schema"] == "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json"
+    assert config["$schema"] == RELEASE_PLEASE_SCHEMA
     assert config["bootstrap-sha"] == BOOTSTRAP_SHA
     assert config["release-type"] == "simple"
     assert config["version-file"] == "version.txt"
@@ -194,6 +214,28 @@ def assert_release_files(root):
     assert sections == expected_sections
 
 
+def assert_release_owned_file_gate(ci_steps):
+    step = ci_steps["Release-owned files"]
+    assert step["if"] == "github.event_name == 'pull_request'"
+    assert step["env"] == {
+        "BASE_SHA": "${{ github.event.pull_request.base.sha }}",
+        "HEAD_SHA": "${{ github.event.pull_request.head.sha }}",
+        "HEAD_REPOSITORY": "${{ github.event.pull_request.head.repo.full_name }}",
+        "PR_AUTHOR": "${{ github.event.pull_request.user.login }}",
+        "PENDING_RELEASE": "${{ contains(github.event.pull_request.labels.*.name, 'autorelease: pending') }}",
+    }
+    source = step["run"]
+    for required in (
+        'git cat-file -e "$BASE_SHA:$path"',
+        'git cat-file -e "$HEAD_SHA:$path"',
+        'test "$HEAD_REPOSITORY" = "$GITHUB_REPOSITORY"',
+        'test "$PR_AUTHOR" = "github-actions[bot]"',
+        'test "$PENDING_RELEASE" = true',
+    ):
+        assert required in source
+    assert has_command_suffix(step, ("scripts/release-context", "--check"))
+
+
 def assert_workflows(root):
     ci_path = root / ".github/workflows/ci.yaml"
     release_path = root / ".github/workflows/release-please.yaml"
@@ -226,13 +268,21 @@ def assert_workflows(root):
 
     ci_steps = workflow_steps(ci, "validate")
     assert ci_steps["Format"]["run"].strip() == "nix fmt\ngit diff --exit-code"
-    assert ci_steps["Canonical checks"]["run"].strip() == "nix shell nixpkgs#just -c just check"
-    assert ci_steps["All systems evaluation"]["run"].strip() == "nix flake check --show-trace --print-build-logs --all-systems --no-build"
-    assert ci_steps["Release-owned files"]["if"] == "github.event_name == 'pull_request'"
-    assert has_command_suffix(ci_steps["Release-owned files"], ("scripts/release-context", "--check"))
+    assert (
+        ci_steps["Canonical checks"]["run"].strip()
+        == "nix shell nixpkgs#just -c just check"
+    )
+    assert (
+        ci_steps["All systems evaluation"]["run"].strip()
+        == "nix flake check --show-trace --print-build-logs --all-systems --no-build"
+    )
+    assert_release_owned_file_gate(ci_steps)
 
     release_job = workflow_job(release, "release")
-    assert release_job["if"] == "github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main'"
+    assert (
+        release_job["if"]
+        == "github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main'"
+    )
     release_steps = workflow_steps(release, "release")
     release_all_steps = workflow_all_steps(release, "release")
     release_step_indices = {
@@ -241,6 +291,7 @@ def assert_workflows(root):
         if "name" in step
     }
     assert "Require release credential" not in release_steps
+
     main_guard = release_steps["Verify current main identity"]
     assert main_guard["id"] == "main-identity"
     assert main_guard["env"] == {
@@ -255,13 +306,18 @@ def assert_workflows(root):
     assert "current=true\\n" in guard_lines[5]
     assert any("current=false\\n" in line for line in guard_lines)
     assert any("stale workflow" in line for line in guard_lines)
-    assert release_step_indices["Verify validated main revision"] < release_step_indices["Verify current main identity"]
+    assert (
+        release_step_indices["Verify validated main revision"]
+        < release_step_indices["Verify current main identity"]
+    )
 
     current_condition = "steps.main-identity.outputs.current == 'true'"
+    release_pr_condition = current_condition + " && steps.release-pr.outputs.found == 'true'"
     assert release_steps["Run Release Please"]["if"] == current_condition
     assert release_steps["Find pending Release PR"]["if"] == current_condition
+
     release_action = release_steps["Run Release Please"]
-    assert release_action["uses"] == "googleapis/release-please-action@v5"
+    assert release_action["uses"] == RELEASE_PLEASE_ACTION
     assert release_action["with"]["target-branch"] == "main"
     assert "token" not in release_action["with"]
     assert release_steps["Find pending Release PR"]["env"] == {
@@ -271,12 +327,32 @@ def assert_workflows(root):
     pending_query = release_steps["Find pending Release PR"]["run"]
     assert "autorelease: pending" in pending_query
     assert "headRepository.nameWithOwner == env.GITHUB_REPOSITORY" in pending_query
+    assert '.author.login == "github-actions[bot]"' in pending_query
     assert "isDraft == true" not in pending_query
-    release_pr_condition = current_condition + " && steps.release-pr.outputs.found == 'true'"
-    assert release_steps["Write release context"]["if"] == release_pr_condition
-    assert release_steps["Write release context"]["run"].strip().splitlines()[-1] == 'git push origin "HEAD:${{ steps.release-pr.outputs.branch }}"'
-    assert has_command_suffix(release_steps["Write release context"], ("scripts/release-context", "--write"))
-    assert has_command_suffix(release_steps["Write release context"], ("scripts/release-context", "--check"))
+
+    pending_identity = release_steps["Verify pending Release PR identity"]
+    assert pending_identity["if"] == release_pr_condition
+    assert pending_identity["env"] == {
+        "EXPECTED_SHA": "${{ github.event.workflow_run.head_sha }}",
+        "GH_TOKEN": "${{ github.token }}",
+        "RELEASE_PR_NUMBER": "${{ steps.release-pr.outputs.number }}",
+    }
+    identity_source = pending_identity["run"]
+    assert 'gh api "repos/$GITHUB_REPOSITORY/pulls/$RELEASE_PR_NUMBER" --jq '.replace("'", "\'") not in identity_source
+    assert "--jq '.base.sha'" in identity_source
+    assert 'test "$current_sha" = "$EXPECTED_SHA"' in identity_source
+    assert 'test "$base_sha" = "$EXPECTED_SHA"' in identity_source
+
+    write_context = release_steps["Write release context"]
+    assert write_context["if"] == release_pr_condition
+    assert write_context["env"] == {
+        "EXPECTED_SHA": "${{ github.event.workflow_run.head_sha }}"
+    }
+    write_source = write_context["run"]
+    assert write_source.strip().splitlines()[-1] == 'git push origin "HEAD:${{ steps.release-pr.outputs.branch }}"'
+    assert has_command_suffix(write_context, ("scripts/release-context", "--write"))
+    assert has_command_suffix(write_context, ("scripts/release-context", "--check"))
+    assert write_source.count('test "$current_sha" = "$EXPECTED_SHA"') >= 2
 
     release_runs = [step for step in release_steps.values() if "run" in step]
     forbidden_commands = {
@@ -293,9 +369,11 @@ def assert_workflows(root):
         for step in release_runs
         for argv in run_argvs(step)
     )
-    assert all("github.event.pull_request.actor" not in value for value in all_strings(release))
+    assert all(
+        "github.event.pull_request.actor" not in value for value in all_strings(release)
+    )
 
-    checkouts = [step for step in release_all_steps if step.get("uses") == "actions/checkout@v7"]
+    checkouts = [step for step in release_all_steps if step.get("uses") == CHECKOUT_ACTION]
     assert len(checkouts) == 2
     assert checkouts[0]["with"]["ref"] == "${{ github.event.workflow_run.head_sha }}"
     assert "token" not in checkouts[0]["with"]
@@ -303,17 +381,33 @@ def assert_workflows(root):
     assert checkouts[1]["if"] == release_pr_condition
     assert "token" not in checkouts[1]["with"]
 
-    assert release_step_indices["Run Release Please"] == release_step_indices["Verify current main identity"] + 1
+    assert (
+        release_step_indices["Run Release Please"]
+        == release_step_indices["Verify current main identity"] + 1
+    )
+    assert (
+        release_step_indices["Verify pending Release PR identity"]
+        < next(
+            index
+            for index, step in enumerate(release_all_steps)
+            if step.get("uses") == CHECKOUT_ACTION and step.get("if") == release_pr_condition
+        )
+    )
+
     nix_steps = [
         step
         for step in release_all_steps
-        if step.get("uses") == "DeterminateSystems/nix-installer-action@v22"
+        if step.get("uses") == NIX_INSTALLER_ACTION
     ]
     assert len(nix_steps) == 1
     nix_step = nix_steps[0]
     assert nix_step["if"] == release_pr_condition
-    nix_index = next(index for index, step in enumerate(release_all_steps) if step is nix_step)
-    pending_checkout_index = next(index for index, step in enumerate(release_all_steps) if step is checkouts[1])
+    nix_index = next(
+        index for index, step in enumerate(release_all_steps) if step is nix_step
+    )
+    pending_checkout_index = next(
+        index for index, step in enumerate(release_all_steps) if step is checkouts[1]
+    )
     assert nix_index == pending_checkout_index + 1
 
     uses = {
@@ -321,10 +415,10 @@ def assert_workflows(root):
         for workflow in (ci, release)
         for job in workflow["jobs"].values()
         for step in job["steps"]
+        if step.get("uses")
     }
-    assert "actions/checkout@v7" in uses
-    assert "DeterminateSystems/nix-installer-action@v22" in uses
-    assert "googleapis/release-please-action@v5" in uses
+    assert uses == {CHECKOUT_ACTION, NIX_INSTALLER_ACTION, RELEASE_PLEASE_ACTION}
+    assert all(IMMUTABLE_ACTION.fullmatch(action) for action in uses)
 
 
 def main():
