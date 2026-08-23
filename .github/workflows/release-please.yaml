@@ -76,6 +76,21 @@ jobs:
           else
             printf 'found=false\n' >> "$GITHUB_OUTPUT"
           fi
+      - name: Verify pending Release PR identity
+        if: steps.main-identity.outputs.current == 'true' && steps.release-pr.outputs.found == 'true'
+        env:
+          EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_PR_NUMBER: ${{ steps.release-pr.outputs.number }}
+        run: |
+          set -eu -o pipefail
+          current_sha="$(git ls-remote --refs origin refs/heads/main | cut -f1)"
+          base_sha="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$RELEASE_PR_NUMBER" --jq '.base.sha')"
+          test -n "$current_sha"
+          test -n "$base_sha"
+          printf 'validated_sha=%s\ncurrent_main_sha=%s\nrelease_pr_base_sha=%s\n' "$EXPECTED_SHA" "$current_sha" "$base_sha"
+          test "$current_sha" = "$EXPECTED_SHA"
+          test "$base_sha" = "$EXPECTED_SHA"
       - uses: actions/checkout@v7
         if: steps.main-identity.outputs.current == 'true' && steps.release-pr.outputs.found == 'true'
         with:
@@ -85,7 +100,12 @@ jobs:
         if: steps.main-identity.outputs.current == 'true' && steps.release-pr.outputs.found == 'true'
       - name: Write release context
         if: steps.main-identity.outputs.current == 'true' && steps.release-pr.outputs.found == 'true'
+        env:
+          EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
+          set -eu -o pipefail
+          current_sha="$(git ls-remote --refs origin refs/heads/main | cut -f1)"
+          test "$current_sha" = "$EXPECTED_SHA"
           pyyaml_store="$(nix build --no-link --print-out-paths nixpkgs#python3Packages.pyyaml)"
           pyyaml_site="$(find "$pyyaml_store/lib" -type d -name site-packages -print -quit)"
           test -n "$pyyaml_site"
@@ -95,6 +115,8 @@ jobs:
             exit 0
           fi
           test "$(git diff --name-only)" = "CHANGELOG.md"
+          current_sha="$(git ls-remote --refs origin refs/heads/main | cut -f1)"
+          test "$current_sha" = "$EXPECTED_SHA"
           git config user.name "release-please[bot]"
           git config user.email "49699333+release-please[bot]@users.noreply.github.com"
           git add CHANGELOG.md
