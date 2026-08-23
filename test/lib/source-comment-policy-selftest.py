@@ -51,6 +51,7 @@ EMBEDDED_CODE_CALL_HEADS = ns["EMBEDDED_CODE_CALL_HEADS"]
 EMBEDDED_LANGUAGE_SCANNERS = ns["EMBEDDED_LANGUAGE_SCANNERS"]
 _lookback_context = ns["_lookback_context"]
 _is_nix_code_shaped_context = ns["_is_nix_code_shaped_context"]
+_nix_target_string_context = ns["_nix_target_string_context"]
 classify_nix_string_binding = ns["classify_nix_string_binding"]
 classify_write_text_by_name = ns["classify_write_text_by_name"]
 _dedent_nix_indented_string = ns["_dedent_nix_indented_string"]
@@ -100,6 +101,14 @@ def _assert_nix_provenance_error(source):
     except NixLexError:
         return
     raise AssertionError("expected NixLexError")
+
+
+def _assert_nix_target_context_error(source):
+    try:
+        scan_nix(Path("x.nix"), source)
+    except (JsoncLexError, JsLexError, NixLexError, ShellLexError, TomlLexError, YamlLexError):
+        return
+    raise AssertionError("expected target-language context failure")
 
 
 def _scan_nix_with_source_files(source, files):
@@ -706,6 +715,146 @@ def test_nix_static_function_shell_clean_return_inherits_shell_language():
 ''
 """
     assert scan_nix(Path("x.nix"), src) == []
+
+
+def test_nix_shell_target_context_s1_double_quoted_data_is_accepted():
+    src = """let fragment = _: "# not a shell comment"; in pkgs.writeShellScript "thing" ''
+  value="${fragment 1}"
+''
+"""
+    assert scan_nix(Path("x.nix"), src) == []
+
+
+def test_nix_shell_target_context_s2_single_quoted_data_is_accepted():
+    src = """let fragment = _: "# not a shell comment"; in pkgs.writeShellScript "thing" ''
+  value='${fragment 1}'
+''
+"""
+    assert scan_nix(Path("x.nix"), src) == []
+
+
+def test_nix_shell_target_context_s3_unquoted_source_is_rejected():
+    src = """let fragment = _: "# narrative\\n"; in pkgs.writeShellScript "thing" ''
+  value=${fragment 1}
+''
+"""
+    assert _kinds(scan_nix(Path("x.nix"), src)) == {"narrative-comment"}
+
+
+def test_nix_shell_target_context_s4_command_substitution_is_rejected():
+    src = """let fragment = _: "# narrative\\n"; in pkgs.writeShellScript "thing" ''
+  result=$(${fragment 1})
+''
+"""
+    assert _kinds(scan_nix(Path("x.nix"), src)) == {"narrative-comment"}
+
+
+def test_nix_shell_target_context_s5_command_substitution_inside_double_quote_is_rejected():
+    src = """let fragment = _: "# narrative\\n"; in pkgs.writeShellScript "thing" ''
+  result="$(${fragment 1})"
+''
+"""
+    assert _kinds(scan_nix(Path("x.nix"), src)) == {"narrative-comment"}
+
+
+def test_nix_shell_target_context_s6_backtick_substitution_is_rejected():
+    src = """let fragment = _: "# narrative\\n"; in pkgs.writeShellScript "thing" ''
+  result=`${fragment 1}`
+''
+"""
+    assert _kinds(scan_nix(Path("x.nix"), src)) == {"narrative-comment"}
+
+
+def test_nix_shell_target_context_s7_backtick_inside_double_quote_is_rejected():
+    src = """let fragment = _: "# narrative\\n"; in pkgs.writeShellScript "thing" ''
+  result="`${fragment 1}`"
+''
+"""
+    assert _kinds(scan_nix(Path("x.nix"), src)) == {"narrative-comment"}
+
+
+def test_nix_shell_target_context_s8_clean_command_substitution_is_accepted():
+    src = """let fragment = _: "printf safe\\n"; in pkgs.writeShellScript "thing" ''
+  result="$(${fragment 1})"
+''
+"""
+    assert scan_nix(Path("x.nix"), src) == []
+
+
+def test_nix_shell_target_context_s9_nested_command_substitution_is_rejected():
+    src = """let fragment = _: "# narrative\\n"; in pkgs.writeShellScript "thing" ''
+  result="$($(${fragment 1}))"
+''
+"""
+    assert _kinds(scan_nix(Path("x.nix"), src)) == {"narrative-comment"}
+
+
+def test_nix_shell_target_context_s10_inner_single_quote_is_data():
+    src = """let fragment = _: "# not a shell comment"; in pkgs.writeShellScript "thing" ''
+  result="$(printf '%s' '${fragment 1}')"
+''
+"""
+    assert scan_nix(Path("x.nix"), src) == []
+
+
+def test_nix_shell_target_context_s11_escaped_quote_keeps_double_quote_data_context():
+    src = r"""let fragment = _: "# not a shell comment"; in pkgs.writeShellScript "thing" ''
+  result="prefix\"${fragment 1}"
+''
+"""
+    assert scan_nix(Path("x.nix"), src) == []
+
+
+def test_nix_shell_target_context_escaped_command_markers_remain_data():
+    src = r"""let fragment = _: "# not a shell comment"; in pkgs.writeShellScript "thing" ''
+  result="\$(${fragment 1})"
+  backtick="\`${fragment 1}\`"
+''
+"""
+    assert scan_nix(Path("x.nix"), src) == []
+
+
+def test_nix_shell_target_context_s12_malformed_shell_context_fails_closed():
+    src = """let fragment = _: "# narrative\\n"; in pkgs.writeShellScript "thing" ''
+  result="$(${fragment 1}
+''
+"""
+    _assert_nix_target_context_error(src)
+
+
+def test_nix_target_context_python_backticks_are_code():
+    raw = "value = `${fragment 1}`"
+    assert not _nix_target_string_context(raw, raw.index("${"), "python")
+
+
+def test_nix_target_context_python_triple_quotes_are_data():
+    raw = 'value = """${fragment 1}"""'
+    assert _nix_target_string_context(raw, raw.index("${"), "python")
+
+
+def test_nix_target_context_python_fstring_expression_is_code():
+    raw = 'value = f"prefix {${fragment 1}}"'
+    assert not _nix_target_string_context(raw, raw.index("${"), "python")
+
+
+def test_nix_target_context_js_template_raw_is_data():
+    raw = "const value = `raw ${fragment 1}`"
+    assert _nix_target_string_context(raw, raw.index("${"), "js")
+
+
+def test_nix_target_context_yaml_backticks_are_code():
+    raw = "value: `${fragment 1}`"
+    assert not _nix_target_string_context(raw, raw.index("${"), "yaml")
+
+
+def test_nix_target_context_toml_backticks_are_code():
+    raw = "value = `${fragment 1}`"
+    assert not _nix_target_string_context(raw, raw.index("${"), "toml")
+
+
+def test_nix_target_context_jsonc_backticks_are_code():
+    raw = "{\"value\": `${fragment 1}`}"
+    assert not _nix_target_string_context(raw, raw.index("${"), "jsonc")
 
 
 def test_nix_static_function_qml_comment_return_inherits_qml_language():

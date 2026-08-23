@@ -766,27 +766,54 @@ class _ShellLexer:
 
     def run(self):
         while self.pos < len(self.text):
-            top = self.stack[-1]
-            if top in self.COMMENT_RECOGNIZING:
-                self._step_normal()
-            elif top == "SQUOTE":
-                self._step_squote()
-            elif top == "DQUOTE":
-                self._step_dquote()
-            elif top == "DOLLAR_SQUOTE":
-                self._step_dollar_squote()
-            elif top == "ARITH":
-                self._step_arith()
-            elif top == "PARAMEXP":
-                self._step_paramexp()
-            elif top == "HEREDOC":
-                self._step_heredoc()
+            self._step()
         if len(self.stack) != 1 or self.stack[0] != "NORMAL":
             raise ShellLexError(f"{self.path}: unterminated {self.stack[-1]} at EOF")
         return self.violations
 
+    def _step(self):
+        top = self.stack[-1]
+        if top in self.COMMENT_RECOGNIZING:
+            self._step_normal()
+        elif top == "SQUOTE":
+            self._step_squote()
+        elif top == "DQUOTE":
+            self._step_dquote()
+        elif top == "DOLLAR_SQUOTE":
+            self._step_dollar_squote()
+        elif top == "ARITH":
+            self._step_arith()
+        elif top == "PARAMEXP":
+            self._step_paramexp()
+        elif top == "HEREDOC":
+            self._step_heredoc()
+
+    def context_at(self, offset):
+        if offset < 0 or offset > len(self.text):
+            raise ShellLexError(f"{self.path}: invalid shell context offset")
+        probe = _ShellLexer(self.path, self.text[:offset])
+        while probe.pos < len(probe.text):
+            probe._step()
+        backslashes = 0
+        for char in reversed(probe.text):
+            if char != "\\":
+                break
+            backslashes += 1
+        if backslashes % 2 and probe.stack[-1] != "SQUOTE":
+            raise ShellLexError(f"{self.path}: escaped shell interpolation context")
+        if probe.stack[-1] in {"SQUOTE", "DQUOTE", "DOLLAR_SQUOTE", "HEREDOC"}:
+            return True
+        if probe.stack[-1] in {"NORMAL", "CMDSUB", "BACKTICK", "ARITH", "PARAMEXP"}:
+            return False
+        raise ShellLexError(f"{self.path}: unknown shell interpolation context")
+
     def _step_normal(self):
         char = self.peek()
+        if char == "\\":
+            self.advance()
+            if self.pos < len(self.text):
+                self.advance()
+            return
         if char == "'":
             self.advance()
             self.stack.append("SQUOTE")
@@ -2198,7 +2225,28 @@ def _nix_interpolation_expressions(raw):
         position = cursor
 
 
-def _nix_target_string_context(raw, interpolation_start, language):
+def _nix_indented_context_prefix(body):
+    result = []
+    position = 0
+    while position < len(body):
+        if body.startswith("''\\", position):
+            result.append("    ")
+            position += 4
+            continue
+        if body.startswith("'''", position):
+            result.append("   ")
+            position += 3
+            continue
+        if body.startswith("''${", position):
+            result.append("    ")
+            position += 4
+            continue
+        result.append(body[position])
+        position += 1
+    return "".join(result)
+
+
+def _nix_target_context_prefix(raw, interpolation_start):
     prefix = raw[:interpolation_start]
     ignored = list(prefix)
     for expression, start in _nix_interpolation_expressions(prefix):
@@ -2207,48 +2255,299 @@ def _nix_target_string_context(raw, interpolation_start, language):
             if ignored[index] != "\n":
                 ignored[index] = " "
     body_start = 2 if raw.startswith("''") else 1 if raw.startswith('"') else 0
-    quote = None
-    triple = False
-    index = body_start
-    while index < len(ignored):
-        if quote is not None:
-            if triple and "".join(ignored[index:index + 3]) == quote * 3:
-                quote = None
-                triple = False
-                index += 3
+    body = "".join(ignored[body_start:])
+    if raw.startswith("''"):
+        return _nix_indented_context_prefix(body)
+    if raw.startswith('"'):
+        return _decode_nix_double_quoted(body)
+    return body
+
+
+def _python_target_string_context(text):
+    frames = [("code", False, 0)]
+    position = 0
+    while position < len(text):
+        frame = frames[-1]
+        if frame[0] == "string":
+            quote, triple, formatted = frame[1:]
+            if triple and text.startswith(quote * 3, position):
+                frames.pop()
+                position += 3
                 continue
-            if not triple and ignored[index] == quote:
-                quote = None
-                index += 1
+            if not triple and text[position] == quote:
+                frames.pop()
+                position += 1
                 continue
-            if ignored[index] == "\\":
-                index += 2
+            if text[position] == "\\":
+                position += 2
                 continue
-            index += 1
+            if formatted and text.startswith("{{", position):
+                position += 2
+                continue
+            if formatted and text.startswith("}}", position):
+                position += 2
+                continue
+            if formatted and text[position] == "{":
+                frames.append(("code", True, 0))
+                position += 1
+                continue
+            position += 1
             continue
-        if language in {"python", "shell", "yaml", "toml"} and ignored[index] == "#":
-            newline = "".join(ignored).find("\n", index)
-            index = len(ignored) if newline == -1 else newline + 1
+        if frame[1] and text[position] == "}":
+            if frame[2] == 0:
+                frames.pop()
+                position += 1
+                continue
+            frames[-1] = ("code", True, frame[2] - 1)
+            position += 1
             continue
-        if language in {"qml", "js"} and "".join(ignored[index:index + 2]) == "//":
-            newline = "".join(ignored).find("\n", index)
-            index = len(ignored) if newline == -1 else newline + 1
+        if frame[1] and text[position] == "{":
+            frames[-1] = ("code", True, frame[2] + 1)
+            position += 1
             continue
-        if language in {"qml", "js"} and "".join(ignored[index:index + 2]) == "/*":
-            end = "".join(ignored).find("*/", index + 2)
-            index = len(ignored) if end == -1 else end + 2
+        if text[position] == "#":
+            newline = text.find("\n", position)
+            position = len(text) if newline == -1 else newline + 1
             continue
-        if language == "python" and "".join(ignored[index:index + 3]) in {"'''", '"""'}:
-            quote = ignored[index]
-            triple = True
-            index += 3
+        if text.startswith("'''", position) or text.startswith('"""', position):
+            prefix_start = position
+            while prefix_start > 0 and text[prefix_start - 1] in "rRuUbBfF":
+                prefix_start -= 1
+            string_prefix = text[prefix_start:position].lower()
+            formatted = "f" in string_prefix and len(string_prefix) <= 3
+            frames.append(("string", text[position], True, formatted))
+            position += 3
             continue
-        if ignored[index] in {"'", '"', "`"}:
-            quote = ignored[index]
-            index += 1
+        if text[position] in {"'", '"'}:
+            prefix_start = position
+            while prefix_start > 0 and text[prefix_start - 1] in "rRuUbBfF":
+                prefix_start -= 1
+            string_prefix = text[prefix_start:position].lower()
+            formatted = "f" in string_prefix and len(string_prefix) <= 3
+            frames.append(("string", text[position], False, formatted))
+            position += 1
             continue
-        index += 1
-    return quote is not None
+        position += 1
+    return frames[-1][0] == "string"
+
+
+def _js_target_string_context(text):
+    def parse_code(position, in_template_expression=False, brace_depth=0):
+        last_significant = None
+        while position < len(text):
+            if text.startswith("//", position):
+                newline = text.find("\n", position + 2)
+                position = len(text) if newline == -1 else newline
+                continue
+            if text.startswith("/*", position):
+                end = text.find("*/", position + 2)
+                if end == -1:
+                    return "code", len(text)
+                position = end + 2
+                continue
+            char = text[position]
+            if char in {"'", '"'}:
+                quote = char
+                position += 1
+                while position < len(text):
+                    if text[position] == "\\":
+                        position += 2
+                        continue
+                    if text[position] == quote:
+                        position += 1
+                        break
+                    position += 1
+                else:
+                    return "data", len(text)
+                last_significant = "value"
+                continue
+            if char == "`":
+                result, position = parse_template(position + 1)
+                if result != "closed":
+                    return result, position
+                last_significant = "value"
+                continue
+            if char == "/" and _regex_allowed(last_significant):
+                try:
+                    position = _skip_js_regex_literal("<target>", text, position)
+                except JsLexError:
+                    return "code", len(text)
+                last_significant = "value"
+                continue
+            if in_template_expression and char == "{":
+                brace_depth += 1
+                last_significant = "operator"
+                position += 1
+                continue
+            if in_template_expression and char == "}":
+                if brace_depth == 0:
+                    return "closed", position + 1
+                brace_depth -= 1
+                last_significant = "value"
+                position += 1
+                continue
+            if char == ".":
+                last_significant = "dot"
+                position += 1
+                continue
+            if char.isalnum() or char in "_$":
+                start = position
+                while position < len(text) and (text[position].isalnum() or text[position] in "_$"):
+                    position += 1
+                word = text[start:position]
+                if last_significant == "dot":
+                    last_significant = "value"
+                elif word in JS_VALUE_ENDING_KEYWORDS:
+                    last_significant = "value"
+                elif word in JS_REGEX_PRECEDING_KEYWORDS:
+                    last_significant = "keyword"
+                else:
+                    last_significant = "value"
+                continue
+            if not char.isspace():
+                last_significant = "operator"
+            position += 1
+        return "code", position
+
+    def parse_template(position):
+        while position < len(text):
+            if text[position] == "\\":
+                position += 2
+                continue
+            if text[position] == "`":
+                return "closed", position + 1
+            if text.startswith("${", position):
+                result, position = parse_code(position + 2, True)
+                if result != "closed":
+                    return result, position
+                continue
+            position += 1
+        return "data", position
+
+    result, _ = parse_code(0)
+    return result == "data"
+
+
+def _yaml_target_string_context(text):
+    lines = text.split("\n")
+    in_block_scalar = False
+    block_scalar_indent = None
+    pending_dquote = False
+    pending_squote = False
+    for line in lines:
+        if in_block_scalar:
+            indent = len(line) - len(line.lstrip(" "))
+            if line.strip() == "" or indent > block_scalar_indent:
+                continue
+            in_block_scalar = False
+        if pending_dquote or pending_squote:
+            pos, pending_dquote, pending_squote = _yaml_consume_quote_continuation(
+                line, pending_dquote, pending_squote
+            )
+            if pending_dquote or pending_squote:
+                return True
+        else:
+            pos = 0
+        while pos < len(line):
+            char = line[pos]
+            if char == "#" and (pos == 0 or line[pos - 1] in " \t"):
+                return False
+            if char == '"' and _yaml_quote_can_open(line, pos):
+                pos, pending_dquote = _yaml_skip_or_continue_quote(line, pos, '"')
+                if pending_dquote:
+                    return True
+                continue
+            if char == "'" and _yaml_quote_can_open(line, pos):
+                pos, pending_squote = _yaml_skip_or_continue_quote(line, pos, "'")
+                if pending_squote:
+                    return True
+                continue
+            pos += 1
+        if BLOCK_SCALAR_HEADER.search(line):
+            in_block_scalar = True
+            block_scalar_indent = len(line) - len(line.lstrip(" "))
+    return in_block_scalar or pending_dquote or pending_squote
+
+
+def _toml_target_string_context(text):
+    position = 0
+    delimiter = None
+    while position < len(text):
+        if delimiter is not None:
+            if len(delimiter) == 3 and text.startswith(delimiter, position):
+                position += 3
+                delimiter = None
+                continue
+            if len(delimiter) == 1 and text[position] == delimiter:
+                position += 1
+                delimiter = None
+                continue
+            if delimiter == '"' and text[position] == "\\":
+                position += 2
+                continue
+            position += 1
+            continue
+        if text.startswith('"""', position):
+            delimiter = '"""'
+            position += 3
+            continue
+        if text.startswith("'''", position):
+            delimiter = "'''"
+            position += 3
+            continue
+        if text[position] in {'"', "'"}:
+            delimiter = text[position]
+            position += 1
+            continue
+        position += 1
+    return delimiter is not None
+
+
+def _jsonc_target_string_context(text):
+    position = 0
+    in_string = False
+    while position < len(text):
+        if in_string:
+            if text[position] == "\\":
+                position += 2
+                continue
+            if text[position] == '"':
+                in_string = False
+            position += 1
+            continue
+        if text[position] == '"':
+            in_string = True
+            position += 1
+            continue
+        if text.startswith("//", position):
+            newline = text.find("\n", position + 2)
+            position = len(text) if newline == -1 else newline
+            continue
+        if text.startswith("/*", position):
+            end = text.find("*/", position + 2)
+            if end == -1:
+                return False
+            position = end + 2
+            continue
+        position += 1
+    return in_string
+
+
+def _nix_target_string_context(raw, interpolation_start, language):
+    prefix = _nix_target_context_prefix(raw, interpolation_start)
+    if language == "shell":
+        return _ShellLexer("<target>", prefix).context_at(len(prefix))
+    if language == "python":
+        return _python_target_string_context(prefix)
+    if language in {"qml", "js"}:
+        return _js_target_string_context(prefix)
+    if language == "yaml":
+        return _yaml_target_string_context(prefix)
+    if language == "toml":
+        return _toml_target_string_context(prefix)
+    if language == "jsonc":
+        return _jsonc_target_string_context(prefix)
+    raise NixLexError(f"unknown target source language: {language}")
 
 
 def _infer_nix_embedded_language(value):
