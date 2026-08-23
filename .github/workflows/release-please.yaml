@@ -36,6 +36,14 @@ jobs:
         env:
           EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - name: Verify merged PR provenance
+        env:
+          EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu -o pipefail
+          merged_pr_count="$(gh api "repos/$GITHUB_REPOSITORY/commits/$EXPECTED_SHA/pulls" --jq '[.[] | select(.base.ref == "main" and .merged_at != null)] | length')"
+          test "$merged_pr_count" = "1"
       - name: Verify current main identity
         id: main-identity
         env:
