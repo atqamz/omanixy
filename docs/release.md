@@ -38,7 +38,7 @@ Omanixy has no public `v0.0.0` release.
 
 The manifest and `version.txt` value `0.0.0` are Release Please's pre-first-release baseline.
 
-Current Release Please requires `initial-version: 0.1.0` for an untagged first release because a manifest baseline is not treated as the latest published release by the current strategy.
+The pinned Release Please runtime uses `initial-version: 0.1.0` for the untagged first release because the manifest baseline is not itself a published release.
 
 This is a first-candidate bootstrap guard, not a `release-as` override and not a public `v0.1.0` release.
 
@@ -138,10 +138,13 @@ successful main CI for the current main SHA
 Release Please creates or updates a pending Release PR, initially as a draft
         |
         v
+the candidate must be same-repository, github-actions[bot]-authored, and autorelease: pending
+        |
+        v
 live main and the pending Release PR base are revalidated against that CI SHA
         |
         v
-the pending Release PR is found and checked out
+the pending Release PR is checked out
         |
         v
 Nix is installed for release-context --write and --check
@@ -256,10 +259,22 @@ The next successful validated `main` CI run updates the existing pending Release
 
 ## Supply-chain and publication boundary
 
-The introduced actions are `actions/checkout@v7`, `DeterminateSystems/nix-installer-action@v22`, and `googleapis/release-please-action@v5`.
+All third-party workflow actions are pinned to immutable commit SHAs rather than mutable major tags.
 
-The release action currently runs on Node 24 and uses the current manifest configuration contract.
+The reviewed pins are:
 
-Action majors and required permissions are checked by repository actionlint and the release contract test.
+```text
+actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25
+googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7
+```
+
+The Release Please action pin is the `v5.0.0` release commit.
+That action release updated its bundled `release-please` dependency line to `17.6.0`, and Omanixy's manifest schema is pinned to `release-please/v17.6.0` rather than mutable `main`.
+The release contract test locks the exact action SHAs and schema URL so the configuration contract reviewed in CI cannot silently drift away from the workflow runtime.
+
+The release action runs on Node 24.
+
+Immutable action refs, required permissions, workflow identities, and the release configuration contract are checked by repository tests and actionlint.
 
 No npm, PyPI, crates.io, Cachix, Nixpkgs, Nix registry, Homebrew, AUR, binary archive, or install-script publication exists here.
