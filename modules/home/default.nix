@@ -23,6 +23,9 @@ let
     })
     // (lib.optionalAttrs cfg.security.idle.enable {
       idle = true;
+    })
+    // (lib.optionalAttrs cfg.security.notifications.daemon.enable {
+      notificationDaemon = true;
     });
   runtime = omanixyRuntimeFor cfg.features (
     if securitySelection == { }
@@ -260,6 +263,58 @@ in
         that declares a known-conflicting one alongside this option.
       '';
     };
+
+    security.notifications.daemon.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Select the native Quattro notification daemon
+        (shell/plugins/notifications) to own this user session's
+        `org.freedesktop.Notifications` D-Bus service name: an
+        experimental, disabled-by-default capability providing adapted
+        Quattro popup presentation, do-not-disturb, and bounded local
+        history/popup persistence.
+
+        This option is session D-Bus ownership only, not a system
+        capability, and there is no paired NixOS option. It is fully
+        independent of `programs.omanixy.security.lock.enable`,
+        `programs.omanixy.security.lock.fingerprint.enable`,
+        `programs.omanixy.security.polkit.agent.enable`, and
+        `programs.omanixy.security.idle.enable`: enabling this option never
+        implies or requires any of them, and none of them imply or require
+        this option. It is also fully independent of the presentation
+        `programs.omanixy.features = [ "notification" ]` client capability
+        (`notification-send`/`omarchy-notification-send`): that capability
+        continues to mean only that this session can send notifications to
+        whatever daemon already owns the service name, and neither option
+        enables or requires the other.
+
+        Enabling this option asserts that no other Home Manager-managed
+        notification daemon this repository knows how to detect
+        declaratively (`services.mako.enable`, `services.dunst.enable`,
+        `services.swaync.enable`, `services.fnott.enable`) is also enabled,
+        since two notification daemons intentionally competing for the same
+        D-Bus service name is never correct. Omanixy does not stop, mask,
+        kill, or otherwise mutate another daemon on your behalf; it only
+        refuses to evaluate a configuration that declares two at once. A
+        daemon this repository has no way to detect declaratively (an
+        unknown external daemon already registered at runtime) is left
+        alone entirely: the pinned Quickshell `NotificationServer` reports a
+        bounded, diagnostic registration failure rather than taking over or
+        retrying in a loop, and Omanixy never kills or replaces an unknown
+        daemon to make this option's daemon win. When that external owner
+        later disappears, the pinned server retries registration
+        event-driven, never on a polling timer.
+
+        The adapted daemon intentionally does not execute the historical
+        `omarchy-exec` notification hint, any other arbitrary command or
+        argument carried in notification hints, or a compositor-focus
+        fallback for notifications without a live default action: only the
+        standard, sender-owned freedesktop `default` action may be invoked,
+        and a click with no such action simply dismisses the toast. This is
+        a hard security boundary, not a temporary limitation.
+      '';
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -449,6 +504,50 @@ in
           services.swayidle.enable is also true. Both are session idle
           managers and must not intentionally compete. Disable one; Omanixy
           will not stop or mask the other idle manager for you.
+        '';
+      }
+      {
+        assertion = !cfg.security.notifications.daemon.enable
+          || !(config.services.mako.enable or false);
+        message = ''
+          programs.omanixy.security.notifications.daemon.enable is true
+          while services.mako.enable is also true. Both are session
+          notification daemons and must not intentionally compete for
+          org.freedesktop.Notifications. Disable one; Omanixy will not
+          stop or kill the other daemon for you.
+        '';
+      }
+      {
+        assertion = !cfg.security.notifications.daemon.enable
+          || !(config.services.dunst.enable or false);
+        message = ''
+          programs.omanixy.security.notifications.daemon.enable is true
+          while services.dunst.enable is also true. Both are session
+          notification daemons and must not intentionally compete for
+          org.freedesktop.Notifications. Disable one; Omanixy will not
+          stop or kill the other daemon for you.
+        '';
+      }
+      {
+        assertion = !cfg.security.notifications.daemon.enable
+          || !(config.services.swaync.enable or false);
+        message = ''
+          programs.omanixy.security.notifications.daemon.enable is true
+          while services.swaync.enable is also true. Both are session
+          notification daemons and must not intentionally compete for
+          org.freedesktop.Notifications. Disable one; Omanixy will not
+          stop or kill the other daemon for you.
+        '';
+      }
+      {
+        assertion = !cfg.security.notifications.daemon.enable
+          || !(config.services.fnott.enable or false);
+        message = ''
+          programs.omanixy.security.notifications.daemon.enable is true
+          while services.fnott.enable is also true. Both are session
+          notification daemons and must not intentionally compete for
+          org.freedesktop.Notifications. Disable one; Omanixy will not
+          stop or kill the other daemon for you.
         '';
       }
     ];

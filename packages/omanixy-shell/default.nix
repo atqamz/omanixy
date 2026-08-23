@@ -59,9 +59,14 @@ let
   idleRequiresLockValid = lib.assertMsg
     (!idleEnabled || lockEnabled)
     "omanixy idle security requires security.lock to also be true - Layer 6 owns no lock provider of its own";
+  # Independent of lock/fingerprint/polkit/idle entirely - claiming the
+  # session org.freedesktop.Notifications name never implies or requires any
+  # of them, and none of them imply or require it.
+  notificationDaemonEnabled = security != null && (security.notificationDaemon or false);
   managedEnabledSecurityPlugins = lib.optionals lockEnabled [ "omarchy.lock" ]
     ++ lib.optionals polkitAgentEnabled [ "omarchy.polkit" ]
-    ++ lib.optionals idleEnabled [ "omarchy.idle" ];
+    ++ lib.optionals idleEnabled [ "omarchy.idle" ]
+    ++ lib.optionals notificationDaemonEnabled [ "omarchy.notifications" ];
   managedSecurityPluginIds = builtins.toJSON managedEnabledSecurityPlugins;
   externalExecutableCapabilities = contractSource.externalExecutableCapabilities or { };
   helperCapabilities = contractSource.helperCapabilities or { };
@@ -216,6 +221,17 @@ let
               "$out/shell/plugins/services/idle/Service.qml" \
               "$out/shell/plugins/services/idle/IdleModel.js"
             ''}
+            ${lib.optionalString notificationDaemonEnabled ''
+            mkdir -p "$out/shell/plugins/notifications/components"
+            install -Dm644 ${omarchySource}/shell/plugins/notifications/manifest.json "$out/shell/plugins/notifications/manifest.json"
+            install -Dm644 ${omarchySource}/shell/plugins/notifications/Service.qml "$out/shell/plugins/notifications/Service.qml"
+            install -Dm644 ${omarchySource}/shell/plugins/notifications/NotificationLogic.js "$out/shell/plugins/notifications/NotificationLogic.js"
+            install -Dm644 ${omarchySource}/shell/plugins/notifications/components/NotificationCard.qml "$out/shell/plugins/notifications/components/NotificationCard.qml"
+            chmod u+w "$out/shell/plugins/notifications/Service.qml" "$out/shell/plugins/notifications/NotificationLogic.js"
+            ${pkgs.python3}/bin/python3 ${../../scripts/patch-notification-service} \
+              "$out/shell/plugins/notifications/Service.qml" \
+              "$out/shell/plugins/notifications/NotificationLogic.js"
+            ''}
 
             chmod u+w "$out/shell" "$out/shell/shell.qml" "$out/shell/services" "$out/shell/services/PluginRegistry.qml" "$out/shell/services/AppLibrary.qml" "$out/shell/plugins/menu" "$out/shell/plugins/menu/BarWidget.qml"
             ${lib.optionalString (!builtins.elem "launcher" selectedFeatures) ''
@@ -343,7 +359,7 @@ let
             done
     '';
     passthru = {
-      inherit omarchySource safeMenu safeShellConfig selectedFeatures compatibilityHelpers runtimeBlockedPlugins lockEnabled fingerprintEnabled polkitAgentEnabled idleEnabled managedEnabledSecurityPlugins;
+      inherit omarchySource safeMenu safeShellConfig selectedFeatures compatibilityHelpers runtimeBlockedPlugins lockEnabled fingerprintEnabled polkitAgentEnabled idleEnabled notificationDaemonEnabled managedEnabledSecurityPlugins;
     };
   };
 
@@ -492,6 +508,7 @@ let
     ./adapters/clipboard.bash
     ./adapters/lock.bash
     ./adapters/idle.bash
+    ./adapters/notification-state.bash
     ./compat-adapter.bash
   ];
   adapterSourceText = builtins.concatStringsSep "\n" (map builtins.readFile adapterSources);
@@ -536,6 +553,9 @@ let
       ''}
       ${lib.optionalString idleEnabled ''
       ln -s ${compatAdapter}/bin/omanixy-compat-adapter "$out/bin/omanixy-idle-state"
+      ''}
+      ${lib.optionalString notificationDaemonEnabled ''
+      ln -s ${compatAdapter}/bin/omanixy-compat-adapter "$out/bin/omanixy-notification-state"
       ''}
       ${pkgs.python3}/bin/python3 ${../../scripts/generate-postpatch-runtime-surface} \
         ${omarchyCompatibilityRoot} "$out" "$probes" ${quickshell}/bin/quickshell ${fontconfigFile} ${pkgs.bash}/bin/bash ${lib.escapeShellArg (builtins.toJSON helperConsumers)} ${lib.escapeShellArg featureSurface}
@@ -586,10 +606,13 @@ pkgs.symlinkJoin {
     ${lib.optionalString idleEnabled ''
     ln -s ${compatibilityBin}/bin/omanixy-idle-state "$out/bin/omanixy-idle-state"
     ''}
+    ${lib.optionalString notificationDaemonEnabled ''
+    ln -s ${compatibilityBin}/bin/omanixy-notification-state "$out/bin/omanixy-notification-state"
+    ''}
     ln -s ${theme} "$out/share/omarchy-theme"
   '';
   passthru = {
-    inherit omarchyRevision quickshellRevision nixpkgsRevision omarchySource omarchyCompatibilityRoot compatibilityBin compatibilityProbes quickshell theme supportedSystems safeMenu safeShellConfig selectedFeatures selectedCapabilities compatibilityHelpers runtimeBlockedPlugins adapterSources adapterSourceHash featureSurface lockEnabled fingerprintEnabled polkitAgentEnabled idleEnabled managedEnabledSecurityPlugins declaredRuntimeInputs;
+    inherit omarchyRevision quickshellRevision nixpkgsRevision omarchySource omarchyCompatibilityRoot compatibilityBin compatibilityProbes quickshell theme supportedSystems safeMenu safeShellConfig selectedFeatures selectedCapabilities compatibilityHelpers runtimeBlockedPlugins adapterSources adapterSourceHash featureSurface lockEnabled fingerprintEnabled polkitAgentEnabled idleEnabled notificationDaemonEnabled managedEnabledSecurityPlugins declaredRuntimeInputs;
     # Exposed only so closure-independence tests can name the exact set of
     # Omanixy-owned derivations expected to change identity when the
     # compatibility root's contents change (e.g. a security capability

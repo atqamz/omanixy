@@ -55,6 +55,7 @@ assert promoted_ids == {
     "security.pam-fingerprint",
     "security.polkit-agent",
     "security.idle",
+    "security.notification-daemon",
 }
 
 lock = next(item for item in security if item["id"] == "security.lock")
@@ -87,6 +88,10 @@ assert notification_client["helper"] == "omarchy-notification-send"
 assert "org.freedesktop.Notifications" not in notification_client.get("dbus_services", [])
 assert "org.freedesktop.Notifications" in notification_daemon["dbus_services"]
 assert notification_client["id"] != notification_daemon["id"]
+assert notification_daemon["classification"] == "adapted"
+assert notification_daemon["support"] == "experimental"
+assert notification_daemon["target"] == {"classification": "adapted", "support": "experimental"}
+assert notification_daemon["promoted_at_layer"] == "7/8"
 
 support_states = metadata["policy"]["support_state_definition"]
 assert set(support_states) == {"supported", "experimental", "omitted", "blocked"}
@@ -215,11 +220,29 @@ if rg -n 'omarchy-system-sleep-monitor|omarchy-sleep-lock\.service|systemd-inhib
   exit 1
 fi
 
-# Notification daemon ownership remains out of scope until its own stack
-# layer - Home Manager must never reference the notification server ABI.
-if rg -n 'NotificationServer|org\.freedesktop\.Notifications' \
+# Layer 7 (notifications) must never imperatively mutate a known-conflicting
+# notification daemon - it may only assert against one being enabled
+# alongside the Quattro daemon, never set, stop, or kill it. Home Manager's
+# own reference to NotificationServer/org.freedesktop.Notifications in the
+# daemon option's description and conflict-assertion messages is expected
+# from Layer 7 onward and is not itself a violation.
+if rg -n 'services\.(mako|dunst|swaync|fnott)\.enable\s*=\s*(false|true)' \
   "$repo/modules/home"; then
-  printf '%s\n' 'notification daemon ownership is out of scope for the layer-6 security module' >&2
+  printf '%s\n' 'Omanixy must not imperatively set a competing notification daemon service' >&2
+  exit 1
+fi
+if rg -n 'systemctl.*(mako|dunst|swaync|fnott)|kill.*(mako|dunst|swaync|fnott)|pkill.*(mako|dunst|swaync|fnott)' \
+  "$repo/modules" "$repo/packages" "$repo/scripts"; then
+  printf '%s\n' 'Omanixy must not stop or kill a competing notification daemon' >&2
+  exit 1
+fi
+
+# The historical omarchy-exec hint execution path and the compositor-focus
+# fallback are permanently unsupported in the native daemon - neither may
+# reappear as live wiring in the packaged runtime.
+if rg -n 'omarchy-hyprland-focus-app' \
+  "$repo/modules" "$repo/packages"; then
+  printf '%s\n' 'the compositor-focus fallback is intentionally omitted from the native notification daemon' >&2
   exit 1
 fi
 

@@ -46,5 +46,6 @@ case "$compatibility_command" in
   omarchy-hyprland-session-locked) hyprland_session_locked "$@" ;;
   omarchy-lock-fingerprint-ready) lock_fingerprint_ready "$@" ;;
   omanixy-idle-state) idle_state "$@" ;;
+  omanixy-notification-state) notification_state "$@" ;;
   *) fail "$compatibility_command: unsupported compatibility command" 127 ;;
 esac

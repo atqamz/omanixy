@@ -1,0 +1,543 @@
+#!/usr/bin/env python3
+"""Fail-closed scan of the patched Service.qml's process-execution surface
+for the Quattro notification daemon.
+
+Unlike security.idle's scanner (which allowlists a small set of *exact,
+complete* argv arrays), the adapted notification daemon's own commands
+always carry genuinely dynamic DATA after a literal executable and a
+literal verb - a stem, a JSON payload, an image role, a source path. The
+fixed-domain omanixy-notification-state ABI (scripts/patch-notification-
+service, packages/omanixy-shell/adapters/notification-state.bash) defines
+exactly those trailing positions as data, validated and bounded by the
+helper itself at runtime, not by this static scan. This scanner therefore
+checks a narrower, ABI-shaped invariant: the executable (position 0) and the
+verb (position 1) of every command binding must both be literal strings,
+the executable must always be exactly "omanixy-notification-state", and the
+verb must always be one of the fixed, reviewed verbs - never neither, and
+never a third dynamic executable or verb reachable any other way. Trailing
+positions may be literal or dynamic without further constraint here, since
+the ABI itself defines them as opaque data.
+
+The pinned notification plugin's popup-file persistence uses one generic
+serialized job queue (popupFileQueue/enqueuePopupFileJob/
+enqueueHistoryRead/runNextPopupFileJob) that necessarily re-plumbs an
+already-constructed literal command array through two shapes an executable-
+surface scanner must otherwise treat as unauditable: wrapping it in a
+"command" object-literal key for FIFO storage, and dequeuing it back onto
+the one shared Process via `popupFileProc.command = job.command`. A prior
+version of this scanner exempted those two shapes by bare text match
+anywhere in the file - which does not actually prove queue provenance: it
+neither bounds how many times the exemption may appear, nor proves the
+dequeued value ever came from a reviewed literal command, nor rejects a
+caller that swaps in dynamic or attacker-influenced data. This version
+proves it mechanically instead:
+
+1. The three canonical queue functions (enqueuePopupFileJob,
+   enqueueHistoryRead, runNextPopupFileJob) must each match pinned,
+   reviewed text exactly once - any rename, restructure, or duplication
+   fails closed, the same discipline the production patcher itself uses.
+2. The two dynamic-looking shapes above are only ever accepted when they
+   fall inside one of those three verified blocks; the identical text
+   appearing anywhere else in the file is rejected.
+3. Every mutation of `popupFileQueue` itself must fall inside one of those
+   same three blocks - the queue has no other write path.
+4. Every call to `enqueuePopupFileJob` must pass the bare identifier
+   `command` (optionally with a second bare identifier for `done`) - never
+   a function call, a property access, or any other expression - AND that
+   call site must lie inside one of the six pinned, reviewed producer
+   function blocks (persistPopupFile/deletePopupFileFor/
+   archivePopupFileFor/writeHistoryFile/clearHistory/sweepOrphanImages),
+   each required to match pinned text exactly once, the same discipline as
+   the three queue functions above. A prior version of this check instead
+   traced the argument back to its file-global "nearest preceding
+   construction" of the `command` identifier - a lexical-scope-blind proof
+   that a same-named function parameter, an unrelated prior function's
+   literal, a destructured local, or a dynamic reassignment inside a
+   different, unreviewed function could all satisfy by pure text position,
+   without the call actually living in the scope that constructed the
+   value. Because every producer function is now pinned byte-for-byte, a
+   call site outside all six can never smuggle in a shadowed, destructured,
+   reassigned, or otherwise attacker-influenced `command` - the only way to
+   be inside a pinned block is to BE the reviewed producer, verbatim.
+
+Discovery reuses the shared QML source-discovery lexical primitives
+(scripts/source_discovery.py) for comment/string masking and the shared
+ARRAY_COMMAND_RE/DYNAMIC_*_RE regexes for locating command bindings, exactly
+as the lock/polkit/idle scanners do; the verb-allowlist, queue-provenance,
+and exec/run-rejection policy are local to this script.
+"""
+
+from __future__ import annotations
+
+import re
+import sys
+from pathlib import Path
+
+import source_discovery
+
+STRING_RE = re.compile(r'"(?:\\.|[^"\\])*"')
+
+ALLOWED_EXECUTABLE = "omanixy-notification-state"
+
+# The complete, reviewed verb domain (section 16/29 of the Layer-7 spec).
+# Every verb here owns strict arity/stem/role validation inside the adapter
+# itself (packages/omanixy-shell/adapters/notification-state.bash) - this
+# scanner only proves the QML side never reaches this executable with a
+# verb outside this fixed set, and never with a dynamically computed verb.
+ALLOWED_VERBS = {
+    "init",
+    "persist-popup",
+    "persist-history",
+    "archive-popup",
+    "delete-popup",
+    "read-popups",
+    "read-history",
+    "clear-history",
+    "sweep-images",
+}
+
+# Zero tolerance, regardless of arguments - see module docstring and the
+# identical rationale in scan-idle-executable-surface/scan-polkit-
+# executable-surface: Process.startDetached() launches an already-set
+# `command` completely untracked, so even an otherwise-allowlisted argv
+# reaching it would silently become an unbounded, untracked invocation.
+EXEC_CALL_RE = re.compile(r"\b(?:[A-Za-z_][A-Za-z0-9_]*\.)?exec(?:Detached)?\s*\(")
+RUN_CALL_RE = re.compile(r"\b(?:[A-Za-z_][A-Za-z0-9_]*\.)?run\s*\(")
+START_DETACHED_CALL_RE = re.compile(r"\b(?:[A-Za-z_][A-Za-z0-9_]*\.)?startDetached\s*\(")
+
+DYNAMIC_PATTERNS = (
+    ("dynamic command: binding", source_discovery.DYNAMIC_COMMAND_RE),
+    ("dynamic procedural .command = assignment", source_discovery.DYNAMIC_ASSIGNMENT_RE),
+)
+
+
+def block(lines: list[str]) -> str:
+    return "\n".join(lines) + "\n"
+
+
+# The three canonical queue functions, pinned verbatim to the production
+# patcher's own output (scripts/patch-notification-service). Each must
+# occur in the source exactly once - this is the same "exact text, fail on
+# drift" discipline the patcher itself applies, used here to prove
+# provenance rather than to transform text.
+CANONICAL_BLOCKS = {
+    "enqueuePopupFileJob": block([
+        "  function enqueuePopupFileJob(command, done) {",
+        "    popupFileQueue = popupFileQueue.concat([{ command: command, done: done || null }])",
+        "    runNextPopupFileJob()",
+        "  }",
+    ]),
+    "enqueueHistoryRead": block([
+        "  function enqueueHistoryRead() {",
+        "    popupFileQueue = popupFileQueue.concat([{ read: true }])",
+        "    runNextPopupFileJob()",
+        "  }",
+    ]),
+    "runNextPopupFileJob": block([
+        "  function runNextPopupFileJob() {",
+        "    if (readHistoryProc.running || popupFileProc.running) return",
+        "    if (popupFileQueue.length === 0) return",
+        "",
+        "    var job = popupFileQueue[0]",
+        "    popupFileQueue = popupFileQueue.slice(1)",
+        "",
+        "    if (job.read) {",
+        "      startHistoryRead()",
+        "      return",
+        "    }",
+        "",
+        "    popupFileProc.command = job.command",
+        "    service.runningPopupFileJobDone = job.done || null",
+        "    service.popupFileJobAwaitingResult = true",
+        "    popupFileProc.running = true",
+        "  }",
+    ]),
+}
+
+# The six canonical executable producer functions, pinned verbatim to the
+# production patcher's own output (scripts/patch-notification-service).
+# Each must occur in the source exactly once - the same "exact text, fail
+# on drift" discipline as CANONICAL_BLOCKS above. Unlike the queue-plumbing
+# blocks, these are the actual proof of provenance for every
+# enqueuePopupFileJob call site: a call is only ever accepted when it lies
+# inside one of these six pinned ranges, because that is the only way for
+# the call to be paired, in the same lexical scope, with the literal
+# command array that pinned text constructs. Authored here with their real
+# comments (as the patcher emits them) and passed through
+# source_discovery.strip_comments so the pinned text matches this
+# scanner's own comment-stripped `stripped` source exactly.
+_PRODUCER_SOURCE = {
+    "persistPopupFile": block([
+        "  function persistPopupFile(snapshot) {",
+        "    // The JSON and every image source travel as argv elements, not through",
+        "    // shell interpolation - omanixy-notification-state owns HOME/stem",
+        "    // validation, the images directory, and bounded copying internally.",
+        "    var persistable = NotificationLogic.persistablePopup(snapshot, imagesDir)",
+        '    var command = ["omanixy-notification-state", "persist-popup", NotificationLogic.imageStem(snapshot),',
+        "      NotificationLogic.serializePopup(persistable.entry, NotificationUrgency.Normal)]",
+        "    for (var i = 0; i < persistable.copies.length; i++)",
+        "      command.push(persistable.copies[i].role, persistable.copies[i].from)",
+        "    enqueuePopupFileJob(command)",
+        "  }",
+    ]),
+    "deletePopupFileFor": block([
+        "  function deletePopupFileFor(row) {",
+        "    if (!row) return",
+        '    // History replays and the "no recent notifications" placeholder never',
+        "    // had a file - delete-popup on a nonexistent stem is a harmless no-op.",
+        '    var command = ["omanixy-notification-state", "delete-popup", NotificationLogic.imageStem(row)]',
+        "    enqueuePopupFileJob(command)",
+        "  }",
+    ]),
+    "archivePopupFileFor": block([
+        "  function archivePopupFileFor(row) {",
+        "    if (!row) return",
+        "    // A history replay or the empty-history placeholder has no file to move;",
+        "    // archive-popup on a nonexistent stem leaves the history untouched.",
+        "    // Image copies stay put - live and archived entries share imagesDir.",
+        '    var command = ["omanixy-notification-state", "archive-popup", NotificationLogic.imageStem(row)]',
+        "    enqueuePopupFileJob(command)",
+        "  }",
+    ]),
+    "writeHistoryFile": block([
+        "  function writeHistoryFile(entry, done) {",
+        "    if (!entry) {",
+        "      if (done) done()",
+        "      return",
+        "    }",
+        "    var persistable = NotificationLogic.persistablePopup(entry, imagesDir)",
+        '    var command = ["omanixy-notification-state", "persist-history", NotificationLogic.imageStem(entry),',
+        "      NotificationLogic.serializePopup(persistable.entry, NotificationUrgency.Normal)]",
+        "    for (var i = 0; i < persistable.copies.length; i++)",
+        "      command.push(persistable.copies[i].role, persistable.copies[i].from)",
+        "    enqueuePopupFileJob(command, done)",
+        "  }",
+    ]),
+    "clearHistory": block([
+        "  function clearHistory() {",
+        '    var command = ["omanixy-notification-state", "clear-history"]',
+        "    enqueuePopupFileJob(command)",
+        "  }",
+    ]),
+    "sweepOrphanImages": block([
+        "  function sweepOrphanImages() {",
+        '    var command = ["omanixy-notification-state", "sweep-images"]',
+        "    enqueuePopupFileJob(command)",
+        "  }",
+    ]),
+}
+PRODUCER_CANONICAL_BLOCKS = {
+    name: source_discovery.strip_comments(raw, shell=False)
+    for name, raw in _PRODUCER_SOURCE.items()
+}
+
+POPUP_FILE_QUEUE_ASSIGN_RE = re.compile(r"(?<![.\w])\bpopupFileQueue\s*=(?!=)")
+# Excludes the function's own definition header ("function
+# enqueuePopupFileJob(command, done) {") - every other match is a real call
+# site, since enqueuePopupFileJob never calls itself.
+ENQUEUE_CALL_OPEN_RE = re.compile(r"(?<!function )\benqueuePopupFileJob\(")
+ENQUEUE_CALL_ARGS_RE = re.compile(r"^command(?:\s*,\s*[A-Za-z_][A-Za-z0-9_]*)?$")
+
+
+def find_call_close_paren(text: str, open_paren_pos: int) -> int:
+    """Given the position of the opening '(' of a call, return the position
+    of its matching ')', tracking nested (), [], {} and string/backtick
+    literals so an argument expression containing its own parens (a
+    function call, a grouped expression) is walked correctly rather than
+    matched against a naive non-nested-paren regex - which would otherwise
+    silently fail to match at all, hiding the call site from every check
+    below instead of flagging it."""
+
+    depth = 0
+    pos = open_paren_pos
+    length = len(text)
+    quote = ""
+    while pos < length:
+        char = text[pos]
+        if quote:
+            if char == "\\" and pos + 1 < length:
+                pos += 2
+                continue
+            if char == quote:
+                quote = ""
+            pos += 1
+            continue
+        if char in "\"'`":
+            quote = char
+        elif char in "([{":
+            depth += 1
+        elif char in ")]}":
+            depth -= 1
+            if depth == 0:
+                return pos
+        pos += 1
+    fail(f"line {line_of(text, open_paren_pos)}: unterminated enqueuePopupFileJob(...) call")
+    raise AssertionError("unreachable")  # fail() always raises SystemExit
+
+
+def find_enqueue_calls(text: str) -> list[tuple[int, str]]:
+    """Returns (call_start, argument_text) for every real enqueuePopupFileJob
+    call site (excluding its own function definition header)."""
+
+    calls: list[tuple[int, str]] = []
+    for open_match in ENQUEUE_CALL_OPEN_RE.finditer(text):
+        open_paren_pos = open_match.end() - 1
+        close_paren_pos = find_call_close_paren(text, open_paren_pos)
+        calls.append((open_match.start(), text[open_paren_pos + 1:close_paren_pos]))
+    return calls
+
+
+def fail(message: str) -> None:
+    print(f"notification executable surface: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def line_of(text: str, offset: int) -> int:
+    return text.count("\n", 0, offset) + 1
+
+
+def unescape(literal: str) -> str:
+    return literal[1:-1].replace('\\"', '"').replace("\\\\", "\\")
+
+
+def tokenize(array_body: str) -> list[tuple[str, bool]]:
+    """Split a command array body into ordered (value, is_literal) tokens -
+    kept local and duplicated rather than shared, matching this repository's
+    convention of one bespoke policy (including its own lexing helpers where
+    needed) per audited security surface."""
+
+    tokens: list[tuple[str, bool]] = []
+    pos = 0
+    length = len(array_body)
+    while pos < length:
+        while pos < length and array_body[pos] in " \t\r\n,":
+            pos += 1
+        if pos >= length:
+            break
+        match = STRING_RE.match(array_body, pos)
+        if match:
+            tokens.append((unescape(match.group(0)), True))
+            pos = match.end()
+            continue
+        end = pos
+        depth = 0
+        quote = ""
+        while end < length:
+            char = array_body[end]
+            if quote:
+                if char == "\\" and end + 1 < length:
+                    end += 2
+                    continue
+                if char == quote:
+                    quote = ""
+                end += 1
+                continue
+            if char == "," and depth == 0:
+                break
+            if char in "\"'":
+                quote = char
+            elif char in "([":
+                depth += 1
+            elif char in ")]":
+                depth -= 1
+            end += 1
+        tokens.append((array_body[pos:end].strip(), False))
+        pos = end
+    return tokens
+
+
+def check_command(tokens: list[tuple[str, bool]], context: str) -> None:
+    if not tokens:
+        fail(f"{context}: empty command array")
+
+    executable, executable_literal = tokens[0]
+    if not executable_literal:
+        fail(f"{context}: dynamic executable ({executable!r})")
+    if executable != ALLOWED_EXECUTABLE:
+        fail(f"{context}: executable {executable!r} is not the allowed {ALLOWED_EXECUTABLE!r}")
+
+    if len(tokens) < 2:
+        fail(f"{context}: {ALLOWED_EXECUTABLE} invoked with no verb")
+
+    verb, verb_literal = tokens[1]
+    if not verb_literal:
+        fail(f"{context}: dynamic verb ({verb!r})")
+    if verb not in ALLOWED_VERBS:
+        fail(f"{context}: verb {verb!r} is not one of the reviewed fixed-domain verbs {sorted(ALLOWED_VERBS)!r}")
+
+    for value, literal in tokens[2:]:
+        if literal and value in ("bash", "sh"):
+            fail(f"{context}: shell interpreter literal found in a data position ({value!r})")
+
+
+def locate_pinned_blocks(stripped: str, blocks: dict[str, str], label: str) -> dict[str, tuple[int, int]]:
+    ranges: dict[str, tuple[int, int]] = {}
+    for name, canonical_text in blocks.items():
+        count = stripped.count(canonical_text)
+        if count != 1:
+            fail(
+                f"{label} {name!r}: expected exactly one pinned occurrence, found {count} "
+                f"- the canonical {label} has drifted and provenance can no longer be proven"
+            )
+        start = stripped.index(canonical_text)
+        ranges[name] = (start, start + len(canonical_text))
+    return ranges
+
+
+def within_any(position: int, ranges: dict[str, tuple[int, int]]) -> bool:
+    return any(start <= position < end for start, end in ranges.values())
+
+
+def check_command_provenance(
+    stripped: str,
+    queue_ranges: dict[str, tuple[int, int]],
+    producer_ranges: dict[str, tuple[int, int]],
+) -> int:
+    # Every mutation of popupFileQueue itself must live inside one of the
+    # three verified canonical queue blocks - the queue has no other write
+    # path.
+    queue_assignments = list(POPUP_FILE_QUEUE_ASSIGN_RE.finditer(stripped))
+    for match in queue_assignments:
+        if not within_any(match.start(), queue_ranges):
+            fail(
+                f"line {line_of(stripped, match.start())}: popupFileQueue is mutated outside the "
+                "canonical enqueuePopupFileJob/enqueueHistoryRead/runNextPopupFileJob plumbing"
+            )
+
+    # Every call site must pass the bare `command` identifier (never a
+    # function call, property access, or any other expression), AND the
+    # call itself must live inside one of the six pinned producer blocks -
+    # the only lexical scope where that identifier's literal construction
+    # and this call are proven together. A file-global "nearest preceding
+    # construction" of `command` is not consulted anywhere: a producer
+    # block's own pinned text already fixes its single `command`
+    # construction and its own call, so no cross-scope search is needed or
+    # trusted.
+    checked_calls = 0
+    for call_start, args_text in find_enqueue_calls(stripped):
+        # A call site inside the canonical enqueuePopupFileJob definition
+        # itself is the recursive-looking `runNextPopupFileJob()` line, not
+        # a real enqueue call - enqueuePopupFileJob never calls itself, so
+        # every real match here is an external call site by construction.
+        args = args_text.strip()
+        context = f"line {line_of(stripped, call_start)}"
+        if not ENQUEUE_CALL_ARGS_RE.match(args):
+            fail(
+                f"{context}: enqueuePopupFileJob called with {args!r} - only the bare "
+                "identifier `command` (optionally with a second bare identifier for `done`) is allowed"
+            )
+
+        if not within_any(call_start, producer_ranges):
+            fail(
+                f"{context}: enqueuePopupFileJob(...) call site does not lie inside one of the six "
+                "pinned producer blocks (persistPopupFile/deletePopupFileFor/archivePopupFileFor/"
+                "writeHistoryFile/clearHistory/sweepOrphanImages) - a call outside its own reviewed "
+                "lexical producer scope cannot prove queue provenance"
+            )
+        checked_calls += 1
+
+    if checked_calls != len(producer_ranges):
+        fail(
+            f"expected exactly {len(producer_ranges)} enqueuePopupFileJob call site(s), one per pinned "
+            f"producer block, but found {checked_calls} - the producer-to-call-site pairing has drifted"
+        )
+
+    return checked_calls
+
+
+def scan(text: str) -> int:
+    try:
+        stripped = source_discovery.strip_comments(text, shell=False)
+        masked = source_discovery.mask_string_literals(stripped)
+    except source_discovery.UnsafeSource as exc:
+        fail(f"unsafe source, cannot prove executable surface is closed: {exc}")
+        raise  # unreachable, fail() always raises SystemExit
+
+    if "`" in masked:
+        fail("template literals are unsupported in security.notifications executable source")
+
+    # The queue-provenance machinery only applies to files that actually
+    # reference the queue at all - small, isolated fixtures exercising the
+    # executable/verb allowlist in isolation (this scanner's own test suite)
+    # have no queue to prove provenance over, and must not be forced to
+    # reproduce the entire canonical skeleton just to test an unrelated
+    # dimension. Any file that DOES mention enqueuePopupFileJob - by its
+    # exact reviewed name or a drifted/renamed variant containing it as a
+    # substring - is held to the full proof, with no partial credit for a
+    # rename.
+    has_queue = "enqueuePopupFileJob" in stripped
+    if has_queue:
+        queue_ranges = locate_pinned_blocks(stripped, CANONICAL_BLOCKS, "queue provenance block")
+        producer_ranges = locate_pinned_blocks(stripped, PRODUCER_CANONICAL_BLOCKS, "producer block")
+        checked_calls = check_command_provenance(stripped, queue_ranges, producer_ranges)
+        canonical_ranges = queue_ranges
+    else:
+        queue_ranges = {}
+        producer_ranges = {}
+        canonical_ranges = {}
+        checked_calls = 0
+
+    matches: list[tuple[int, str, re.Match[str]]] = []
+    for match in source_discovery.ARRAY_COMMAND_RE.finditer(masked):
+        matches.append((match.start(), "array", match))
+    for label, pattern in DYNAMIC_PATTERNS:
+        for match in pattern.finditer(masked):
+            matches.append((match.start(), label, match))
+    for match in EXEC_CALL_RE.finditer(masked):
+        matches.append((match.start(), "exec/execDetached call", match))
+    for match in RUN_CALL_RE.finditer(masked):
+        matches.append((match.start(), "run call", match))
+    for match in START_DETACHED_CALL_RE.finditer(masked):
+        matches.append((match.start(), "startDetached call", match))
+    # Sort exec/run/startDetached-call kinds first at a tied start position,
+    # mirroring scan-idle-executable-surface: a call wrapping an otherwise-
+    # allowlisted array argument must still be reported as an exec/run/
+    # startDetached violation, not masked by the array check.
+    exec_kinds = ("exec/execDetached call", "run call", "startDetached call")
+    matches.sort(key=lambda item: (item[0], item[1] not in exec_kinds))
+
+    if not matches:
+        fail("no command bindings of any shape found - the audited invariant is unverifiable")
+
+    allowed_count = 0
+    for start, kind, match in matches:
+        context = f"line {line_of(stripped, start)}"
+        if kind in exec_kinds:
+            found = stripped[match.start():match.end()].strip()
+            fail(f"{context}: {kind} found ({found!r}) - the notification daemon must never call exec/execDetached/run/startDetached")
+        if kind != "array":
+            # The two queue-plumbing shapes (`command: command` and
+            # `popupFileProc.command = job.command`) are only ever proven
+            # safe by falling inside one of the three verified canonical
+            # blocks above - never by bare text match anywhere in the file.
+            if within_any(start, canonical_ranges):
+                continue
+            found = stripped[match.start():match.end()].strip()
+            fail(f"{context}: {kind} ({found!r})")
+        real_body = stripped[match.start(1):match.end(1)]
+        check_command(tokenize(real_body), context)
+        allowed_count += 1
+
+    print(
+        f"notification executable surface: {allowed_count} command binding(s) passed, "
+        f"{len(producer_ranges)} canonical producer block(s) with proven producer-scope provenance, "
+        f"{checked_calls} enqueuePopupFileJob call site(s) accounted for, "
+        f"{len(queue_ranges)} canonical queue block(s) intact, "
+        f"executable always {ALLOWED_EXECUTABLE!r}, verb always one of the reviewed fixed-domain set, "
+        "0 exec/execDetached/run/startDetached calls found (expected)",
+        file=sys.stderr,
+    )
+    return 0
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) != 1:
+        print(f"usage: {sys.argv[0]} SERVICE_QML", file=sys.stderr)
+        return 2
+
+    path = Path(argv[0])
+    return scan(path.read_text())
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))
