@@ -10,7 +10,9 @@ on:
       - main
 
 permissions:
-  contents: read
+  contents: write
+  pull-requests: write
+  issues: write
 
 concurrency:
   group: release-main
@@ -30,15 +32,10 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
-          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
       - name: Verify validated main revision
         env:
           EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-      - name: Require release credential
-        env:
-          RELEASE_PLEASE_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
-        run: test -n "$RELEASE_PLEASE_TOKEN"
       - name: Verify current main identity
         id: main-identity
         env:
@@ -60,7 +57,6 @@ jobs:
         if: steps.main-identity.outputs.current == 'true'
         uses: googleapis/release-please-action@v5
         with:
-          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
           target-branch: main
@@ -68,7 +64,7 @@ jobs:
         id: release-pr
         if: steps.main-identity.outputs.current == 'true'
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           prs="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --base main --json number,headRefName,headRepository,baseRefName,labels --jq '[.[] | select(.baseRefName == "main" and .headRepository.nameWithOwner == env.GITHUB_REPOSITORY and ([.labels[].name] | index("autorelease: pending")) != null)]')"
           count="$(jq length <<< "$prs")"
@@ -85,7 +81,6 @@ jobs:
         with:
           ref: ${{ steps.release-pr.outputs.branch }}
           fetch-depth: 0
-          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
       - uses: DeterminateSystems/nix-installer-action@v22
         if: steps.main-identity.outputs.current == 'true' && steps.release-pr.outputs.found == 'true'
       - name: Write release context

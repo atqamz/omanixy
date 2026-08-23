@@ -143,13 +143,22 @@ Nix is installed for release-context --write and --check
 release-context --write and --check update the candidate changelog
         |
         v
-ordinary CI validates the Release PR
+GitHub creates approval-required CI for the current generated Release PR head
+        |
+        v
+a maintainer approves workflows to run
+        |
+        v
+ordinary CI validates that exact Release PR head
         |
         v
 human reviews context and migration guidance and may mark the PR ready
         |
         v
 later validated main changes update the same pending Release PR and its context
+        |
+        v
+the new current head requires fresh approved CI before merge
         |
         v
 human merges when release readiness is approved
@@ -172,35 +181,35 @@ It establishes the strongest practical stale-at-boundary guarantee available whi
 
 The release workflow has a single global `release-main` concurrency group with cancellation disabled.
 
-The workflow's built-in `GITHUB_TOKEN` is read-only.
+Release automation is repository-secretless.
+The release workflow uses GitHub's ephemeral repository-scoped `GITHUB_TOKEN` with explicit `contents: write`, `pull-requests: write`, and `issues: write` permissions.
+No personal access token, GitHub App credential, or custom release secret is required.
 
-Release writes use the repository secret `RELEASE_PLEASE_TOKEN` and never fall back to `GITHUB_TOKEN` or a developer's local CLI token.
+GitHub suppresses most recursive workflow events created by `GITHUB_TOKEN`, but `pull_request` `opened`, `synchronize`, and `reopened` events created by workflow automation produce approval-required workflow runs.
+A maintainer with write access approves those runs from the Release PR before CI executes.
+This explicit approval is part of the human release gate rather than a credential workaround.
 
-The required credential is a fine-grained personal access token limited to `atqamz/omanixy`.
+Only CI for the current Release PR head counts as release validation.
+Any Release Please update, compatibility-context commit, or human migration edit that changes the head invalidates older CI evidence and requires validation of the new head.
+Draft state and CI approval are independent: a draft candidate may have green CI, and a ready candidate may not merge with stale, pending, unapproved, or failed CI.
 
-Its required repository permissions are `Contents: Read and write`, `Pull requests: Read and write`, and `Issues: Read and write`.
-
-Metadata read is implicit.
-
-No Actions, Administration, Workflows, Secrets, Packages, Codespaces, organization, or classic broad `repo` permission is required by the current workflow.
-
-The repository secret must be provisioned before merging this infrastructure change.
-
-The release workflow fails closed when the secret is missing.
-
-The external token is required because GitHub's built-in token suppresses most follow-up workflow events and can leave automated pull-request workflows approval-gated.
-
-Using the external token lets a Release PR trigger the same ordinary CI as a human PR.
-
-No actor condition skips validation for generated Release PRs.
+The repository must allow GitHub Actions to create pull requests with `GITHUB_TOKEN` in its Actions workflow-permission setting.
+That repository setting is not a secret and does not introduce token provisioning or rotation.
+A separate credential may be introduced later only for a concrete capability that cannot be acceptably expressed with `GITHUB_TOKEN` and the existing human gate.
 
 ## Failure recovery
 
 If CI fails on `main`, the Release Please workflow does not run.
 
-If the Release Please API fails, the workflow is red and must be rerun after the transient or permission problem is corrected.
+If the successfully validated main revision is stale at the final mutation boundary, Release Please and all later release-context work are skipped.
+
+If the Release Please API fails, the workflow is red and must be rerun after the transient or repository-permission problem is corrected.
+
+If Release PR CI is awaiting approval, the candidate is not validated yet.
 
 If Release PR CI fails, the draft must not be merged.
+
+If a Release PR head changes after a green run, the previous CI evidence is stale and does not authorize the new head.
 
 If release context is stale, malformed, duplicated, or missing migration guidance, Release PR CI fails until the human-curated entry is corrected.
 
