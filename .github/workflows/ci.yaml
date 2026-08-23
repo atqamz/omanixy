@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate
+    runs-on: ubuntu-latest
+    env:
+      NIX_CONFIG: |
+        max-jobs = 2
+        cores = 2
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: DeterminateSystems/nix-installer-action@v22
+      - name: Format
+        run: |
+          nix fmt
+          git diff --exit-code
+      - name: Canonical checks
+        run: nix shell nixpkgs#just -c just check
+      - name: All systems evaluation
+        run: nix flake check --show-trace --print-build-logs --all-systems --no-build
+      - name: Release-owned files
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          changed="$(git diff --name-only "$BASE_SHA...$HEAD_SHA")"
+          release_candidate=false
+          while IFS= read -r path; do
+            case "$path" in
+              .release-please-manifest.json|version.txt|CHANGELOG.md)
+                release_candidate=true
+                ;;
+            esac
+          done <<< "$changed"
+          if [ "$release_candidate" = true ]; then
+            pyyaml_store="$(nix build --no-link --print-out-paths nixpkgs#python3Packages.pyyaml)"
+            pyyaml_site="$(find "$pyyaml_store/lib" -type d -name site-packages -print -quit)"
+            test -n "$pyyaml_site"
+            PYTHONPATH="$pyyaml_site" nix shell nixpkgs#python3 -c python3 scripts/release-context --check
+          fi

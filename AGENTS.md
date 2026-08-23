@@ -110,6 +110,15 @@ Formatting is performed with `just fmt`.
 Narrower checks are encouraged during development, but `just check` must pass
 before committing.
 
+## Release rules
+
+- Release semantics follow `docs/release.md`.
+- The final squash title is the release-significant Conventional Commit.
+- Do not manually edit version-managed files outside bootstrap or a Release PR.
+- Do not manually create release tags or GitHub Releases.
+- Breaking public changes require usable migration notes.
+- `v1.0.0` requires an explicit project stability decision.
+
 ## NixOS Module Principles
 
 - Use `lib.mkDefault` for opinionated defaults users should override.
