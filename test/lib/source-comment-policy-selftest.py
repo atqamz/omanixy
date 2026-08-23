@@ -86,6 +86,14 @@ def _assert_python_provenance_error(source):
     raise AssertionError("expected PythonEmbeddedStringError")
 
 
+def _assert_generator_python_provenance_error(source):
+    try:
+        _scan_registered_python("scripts/generate-postpatch-runtime-surface", source)
+    except PythonEmbeddedStringError:
+        return
+    raise AssertionError("expected PythonEmbeddedStringError")
+
+
 def _assert_nix_provenance_error(source):
     try:
         scan_nix(Path("x.nix"), source)
@@ -678,6 +686,80 @@ def test_nix_static_clean_source_fragment_interpolation_is_accepted():
   echo hello
 ''; in pkgs.writeShellScript "thing" ''
   ${fragment}
+''
+"""
+    assert scan_nix(Path("x.nix"), src) == []
+
+
+def test_nix_static_function_shell_comment_return_inherits_shell_language():
+    src = """let fragment = _: "# narrative\\n"; in pkgs.writeShellScript "thing" ''
+  ${fragment 1}
+  echo hello
+''
+"""
+    assert _kinds(scan_nix(Path("x.nix"), src)) == {"narrative-comment"}
+
+
+def test_nix_static_function_shell_clean_return_inherits_shell_language():
+    src = """let fragment = _: "echo safe\\n"; in pkgs.writeShellScript "thing" ''
+  ${fragment 1}
+''
+"""
+    assert scan_nix(Path("x.nix"), src) == []
+
+
+def test_nix_static_function_qml_comment_return_inherits_qml_language():
+    src = """let fragment = _: "// narrative\\n"; in pkgs.writeText "generated.qml" ''
+  import QtQuick
+  ${fragment 1}
+''
+"""
+    assert _kinds(scan_nix(Path("x.nix"), src)) == {"narrative-comment"}
+
+
+def test_nix_static_function_qml_clean_return_inherits_qml_language():
+    src = """let fragment = _: "property int count: 1\\n"; in pkgs.writeText "generated.qml" ''
+  import QtQuick
+  Item {
+    ${fragment 1}
+  }
+''
+"""
+    assert scan_nix(Path("x.nix"), src) == []
+
+
+def test_nix_dynamic_function_source_return_fails_closed():
+    src = """let fragment = dynamicFunction; in pkgs.writeShellScript "thing" ''
+  ${fragment 1}
+  echo hello
+''
+"""
+    _assert_nix_provenance_error(src)
+
+
+def test_nix_function_alias_source_return_fails_closed_without_proof():
+    src = """let
+  source = "# narrative\\n";
+  fragment = _: source;
+in
+pkgs.writeShellScript "thing" ''
+  ${fragment 1}
+''
+"""
+    _assert_nix_provenance_error(src)
+
+
+def test_nix_function_unproven_scalar_return_fails_closed():
+    src = """let fragment = _: 3; in pkgs.writeShellScript "thing" ''
+  echo ${fragment 1}
+''
+"""
+    _assert_nix_provenance_error(src)
+
+
+def test_nix_static_function_return_inside_python_string_is_data():
+    src = """let fragment = _: "echo safe\\n"; in pkgs.writeText "generated.py" ''
+  command = "${fragment 1}"
 ''
 """
     assert scan_nix(Path("x.nix"), src) == []
@@ -1439,6 +1521,138 @@ def test_python_generate_written_shell_source_scans_comments():
     src = (
         'def build(path):\n'
         '    path.write_text("#!/bin/sh\\n# narrative\\necho hi\\n")\n'
+    )
+    assert _kinds(_scan_registered_python("scripts/generate-postpatch-runtime-surface", src)) == {"narrative-comment"}
+
+
+def test_python_generated_write_text_unresolved_parameter_fails_closed():
+    src = (
+        'def build(harness_path, fragment):\n'
+        '    harness_path.write_text(f"""import QtQuick\\n'
+        'Item {{\\n'
+        '{fragment}\\n'
+        '}}\\n""")\n'
+    )
+    _assert_generator_python_provenance_error(src)
+
+
+def test_python_generated_write_text_dynamic_fragment_fails_closed():
+    src = (
+        'def build(harness_path):\n'
+        '    fragment = make_fragment()\n'
+        '    harness_path.write_text(f"""import QtQuick\\n'
+        'Item {{\\n'
+        '{fragment}\\n'
+        '}}\\n""")\n'
+    )
+    _assert_generator_python_provenance_error(src)
+
+
+def test_python_generated_write_text_static_qml_comment_is_rejected():
+    src = (
+        'def build(harness_path):\n'
+        '    fragment = "// narrative\\n"\n'
+        '    harness_path.write_text(f"""import QtQuick\\n'
+        'Item {{\\n'
+        '{fragment}\\n'
+        '}}\\n""")\n'
+    )
+    assert _kinds(_scan_registered_python("scripts/generate-postpatch-runtime-surface", src)) == {"narrative-comment"}
+
+
+def test_python_generated_write_text_static_qml_source_is_accepted():
+    src = (
+        'def build(harness_path):\n'
+        '    fragment = "property int count: 1\\n"\n'
+        '    harness_path.write_text(f"""import QtQuick\\n'
+        'Item {{\\n'
+        '{fragment}\\n'
+        '}}\\n""")\n'
+    )
+    assert _scan_registered_python("scripts/generate-postpatch-runtime-surface", src) == []
+
+
+def test_python_generated_write_text_static_shell_comment_is_rejected():
+    src = (
+        'def build(shell_path):\n'
+        '    fragment = "# narrative\\n"\n'
+        '    shell_path.write_text(f"#!/bin/sh\\n{fragment}echo safe\\n")\n'
+    )
+    assert _kinds(_scan_registered_python("scripts/generate-postpatch-runtime-surface", src)) == {"narrative-comment"}
+
+
+def test_python_generated_write_text_two_hop_alias_is_accepted():
+    src = (
+        'def build(harness_path):\n'
+        '    fragment = "property int count: 1\\n"\n'
+        '    source_fragment = fragment\n'
+        '    harness_path.write_text(f"""import QtQuick\\n'
+        'Item {{\\n'
+        '{source_fragment}\\n'
+        '}}\\n""")\n'
+    )
+    assert _scan_registered_python("scripts/generate-postpatch-runtime-surface", src) == []
+
+
+def test_python_generated_write_text_conditional_reassignment_fails_closed():
+    src = (
+        'def build(harness_path):\n'
+        '    fragment = "property int count: 1\\n"\n'
+        '    if condition:\n'
+        '        fragment = make_fragment()\n'
+        '    harness_path.write_text(f"""import QtQuick\\n'
+        'Item {{\\n'
+        '{fragment}\\n'
+        '}}\\n""")\n'
+    )
+    _assert_generator_python_provenance_error(src)
+
+
+def test_python_unclassified_write_text_data_remains_unresolved_data():
+    src = (
+        'def build(output, fragment):\n'
+        '    output.write_text(f"{fragment}\\n")\n'
+    )
+    assert _scan_registered_python("scripts/generate-postpatch-runtime-surface", src) == []
+
+
+def test_python_generated_write_text_renamed_fragment_is_still_classified():
+    src = (
+        'def build(harness_path):\n'
+        '    source_fragment = "// narrative\\n"\n'
+        '    harness_path.write_text(f"""import QtQuick\\n'
+        'Item {{\\n'
+        '{source_fragment}\\n'
+        '}}\\n""")\n'
+    )
+    assert _kinds(_scan_registered_python("scripts/generate-postpatch-runtime-surface", src)) == {"narrative-comment"}
+
+
+def test_python_generated_write_text_json_serialized_data_is_accepted():
+    src = (
+        'def build(shell_path, path):\n'
+        '    shell_path.write_text(f"#!/bin/sh\\nvalue={json.dumps(str(path))}\\necho safe\\n")\n'
+    )
+    assert _scan_registered_python("scripts/generate-postpatch-runtime-surface", src) == []
+
+
+def test_python_generated_write_text_unproven_serialization_fails_closed():
+    src = (
+        'def build(shell_path):\n'
+        '    shell_path.write_text(f"#!/bin/sh\\nvalue={json.dumps(str(make_fragment()))}\\necho safe\\n")\n'
+    )
+    _assert_generator_python_provenance_error(src)
+
+
+def test_python_generated_write_text_known_source_map_alias_is_scanned():
+    src = (
+        'CONSUMER_TRIGGERS = {"fixture": "// narrative\\n"}\n'
+        'def build(harness_path, helper):\n'
+        '    trigger = CONSUMER_TRIGGERS.get(helper)\n'
+        '    harness_path.write_text(f"""import QtQuick\\n'
+        'Item {{\\n'
+        '{trigger}\\n'
+        '}}\\n""")\n'
     )
     assert _kinds(_scan_registered_python("scripts/generate-postpatch-runtime-surface", src)) == {"narrative-comment"}
 

@@ -288,6 +288,68 @@ def _python_target_names(targets):
     }
 
 
+def _python_path_like_expression(node):
+    if isinstance(node, ast.Name):
+        return True
+    if isinstance(node, ast.Attribute):
+        return _python_path_like_expression(node.value)
+    return (
+        isinstance(node, ast.BinOp)
+        and isinstance(node.op, ast.Div)
+        and _python_path_like_expression(node.left)
+        and isinstance(node.right, ast.Constant)
+        and isinstance(node.right.value, str)
+    )
+
+
+def _python_proven_serialized_data(node):
+    if not (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "json"
+        and node.func.attr == "dumps"
+        and len(node.args) == 1
+        and not node.keywords
+    ):
+        return False
+    value = node.args[0]
+    if not (
+        isinstance(value, ast.Call)
+        and isinstance(value.func, ast.Name)
+        and value.func.id == "str"
+        and len(value.args) == 1
+        and not value.keywords
+    ):
+        return False
+    return _python_path_like_expression(value.args[0])
+
+
+def _python_proven_generated_source_lookup(node):
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "CONSUMER_TRIGGERS"
+        and node.func.attr == "get"
+        and len(node.args) == 1
+        and not node.keywords
+    )
+
+
+def _python_proven_generated_source_replacement(node):
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "replace"
+        and len(node.args) == 2
+        and not node.keywords
+        and isinstance(node.args[0], ast.Constant)
+        and isinstance(node.args[0].value, str)
+        and _python_proven_serialized_data(node.args[1])
+    )
+
+
 def _python_assignments(scope, module):
     def collect(owner):
         assignments = {}
@@ -378,9 +440,38 @@ def _python_assignments(scope, module):
 
 
 class _PythonStringResolver:
-    def __init__(self, scope, module, allow_dynamic=False):
+    def __init__(self, scope, module, allow_proven_data=False):
         self.assignments, self.paths = _python_assignments(scope, module)
-        self.allow_dynamic = allow_dynamic
+        self.allow_proven_data = allow_proven_data
+        self.generated_source_assignments = {
+            name
+            for name, assignment in _top_level_string_assignments(module)
+            if name == "CONSUMER_TRIGGERS" and isinstance(assignment.value, ast.Dict)
+        }
+
+    def _is_proven_generated_source_value(self, node, stack=None):
+        stack = [] if stack is None else stack
+        if (
+            _python_proven_generated_source_lookup(node)
+            and "CONSUMER_TRIGGERS" in self.generated_source_assignments
+        ):
+            return True
+        if not _python_proven_generated_source_replacement(node):
+            return False
+        receiver = node.func.value
+        if not isinstance(receiver, ast.Name):
+            return False
+        candidates = self.assignments.get(receiver.id, [])
+        return bool(candidates) and all(
+            candidate[1] is node
+            or (
+                candidate[0] <= node.lineno
+                and self._is_proven_generated_source_value(
+                    candidate[1], stack + [receiver.id]
+                )
+            )
+            for candidate in candidates
+        )
 
     def resolve(self, node, stack=None):
         stack = [] if stack is None else stack
@@ -398,10 +489,10 @@ class _PythonStringResolver:
                     try:
                         value, value_nodes = self.resolve(part.value, stack)
                     except PythonEmbeddedStringError:
-                        if not self.allow_dynamic:
+                        if not self.allow_proven_data or not _python_proven_serialized_data(part.value):
                             raise
-                        value = "value"
-                        value_nodes = set()
+                        value = '""'
+                        value_nodes = {part}
                     parts.append(value)
                     nodes.update(value_nodes)
                     nodes.add(part)
@@ -419,6 +510,12 @@ class _PythonStringResolver:
                 raise PythonEmbeddedStringError(f"cyclic Python string binding: {node.id}")
             use_path = self.paths.get(node, ())
             candidates = self.assignments.get(node.id, [])
+            if self.allow_proven_data and candidates and all(
+                candidate[0] <= node.lineno
+                and self._is_proven_generated_source_value(candidate[1], [node.id])
+                for candidate in candidates
+            ):
+                return "", {node}
             active = [
                 candidate
                 for candidate in candidates
@@ -429,6 +526,8 @@ class _PythonStringResolver:
             if inactive or len(active) != 1 or active[0][0] > node.lineno:
                 raise PythonEmbeddedStringError(f"unresolved Python string binding: {node.id}")
             _, value, _ = active[0]
+            if self.allow_proven_data and _python_proven_generated_source_lookup(value):
+                return "", {node}
             return self.resolve(value, stack + [node.id])
         if (
             isinstance(node, ast.Call)
@@ -592,7 +691,7 @@ def _scan_python_registered_file(path, rel_path, text, tree):
                 if language is None:
                     continue
                 function = _python_function_for(node, functions)
-                resolver = _PythonStringResolver(function, tree, allow_dynamic=True)
+                resolver = _PythonStringResolver(function, tree, allow_proven_data=True)
                 value, string_nodes = resolver.resolve(node.args[0])
                 _mark_python_nodes(roles, string_nodes, "generated-source")
                 violations.extend(_scan_python_generated_value(path, value, language))
@@ -2099,6 +2198,59 @@ def _nix_interpolation_expressions(raw):
         position = cursor
 
 
+def _nix_target_string_context(raw, interpolation_start, language):
+    prefix = raw[:interpolation_start]
+    ignored = list(prefix)
+    for expression, start in _nix_interpolation_expressions(prefix):
+        end = start + len(expression) + 3
+        for index in range(start, min(end, len(ignored))):
+            if ignored[index] != "\n":
+                ignored[index] = " "
+    body_start = 2 if raw.startswith("''") else 1 if raw.startswith('"') else 0
+    quote = None
+    triple = False
+    index = body_start
+    while index < len(ignored):
+        if quote is not None:
+            if triple and "".join(ignored[index:index + 3]) == quote * 3:
+                quote = None
+                triple = False
+                index += 3
+                continue
+            if not triple and ignored[index] == quote:
+                quote = None
+                index += 1
+                continue
+            if ignored[index] == "\\":
+                index += 2
+                continue
+            index += 1
+            continue
+        if language in {"python", "shell", "yaml", "toml"} and ignored[index] == "#":
+            newline = "".join(ignored).find("\n", index)
+            index = len(ignored) if newline == -1 else newline + 1
+            continue
+        if language in {"qml", "js"} and "".join(ignored[index:index + 2]) == "//":
+            newline = "".join(ignored).find("\n", index)
+            index = len(ignored) if newline == -1 else newline + 1
+            continue
+        if language in {"qml", "js"} and "".join(ignored[index:index + 2]) == "/*":
+            end = "".join(ignored).find("*/", index + 2)
+            index = len(ignored) if end == -1 else end + 2
+            continue
+        if language == "python" and "".join(ignored[index:index + 3]) in {"'''", '"""'}:
+            quote = ignored[index]
+            triple = True
+            index += 3
+            continue
+        if ignored[index] in {"'", '"', "`"}:
+            quote = ignored[index]
+            index += 1
+            continue
+        index += 1
+    return quote is not None
+
+
 def _infer_nix_embedded_language(value):
     if value.lstrip().startswith("#!") or re.search(
         r"\b(?:echo|mkdir|export|set -[eu]|case|esac)\b", value
@@ -2732,6 +2884,7 @@ def _nix_classify_raw_interpolation(
     source_positions,
     data_positions,
     expression_start=None,
+    target_string_context=False,
 ):
     expression = _nix_outer_parentheses(expression)
     if not expression:
@@ -2748,6 +2901,7 @@ def _nix_classify_raw_interpolation(
                 source_positions,
                 data_positions,
                 None if expression_start is None else expression_start + child_start + 2,
+                target_string_context,
             )
         expression = re.sub(r"\$\{[^{}]*\}", "path", expression)
     if _nix_interpolation_is_data_expression(expression):
@@ -2879,16 +3033,10 @@ def _nix_classify_raw_interpolation(
             )
         except NixLexError as error:
             raise NixLexError(f"unresolved Nix interpolation source: {expression}") from error
-        returned = tokens[result_index].value
-        returned_language = _infer_nix_embedded_language(returned)
-        if returned_language is None:
+        if target_string_context:
             data_positions.add(tokens[result_index].start)
         else:
-            _mark_nix_position(
-                source_positions,
-                tokens[result_index],
-                returned_language,
-            )
+            _mark_nix_position(source_positions, tokens[result_index], language)
         return
     if expression.startswith(("pkgs.", "nixpkgs.", "self.")):
         if re.search(
@@ -2980,6 +3128,7 @@ def _scan_nix_interpolated_source_bindings(text, tokens, bindings, source_positi
                 source_positions,
                 data_positions,
                 token.start + local_start + 2,
+                _nix_target_string_context(raw, local_start, language),
             )
             for position, value in source_positions.items():
                 if position not in tokens_by_start:
