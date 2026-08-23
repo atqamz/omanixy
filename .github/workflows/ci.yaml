@@ -39,7 +39,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -eu -o pipefail
-          merged_pr_count="$(gh api "repos/$GITHUB_REPOSITORY/commits/$EXPECTED_SHA/pulls" --jq '[.[] | select(.base.ref == "main" and .merged_at != null and .merge_commit_sha == env.EXPECTED_SHA)] | length')"
+          prs="$(gh api "repos/$GITHUB_REPOSITORY/commits/$EXPECTED_SHA/pulls")"
+          merged_pr_count="$(jq --arg sha "$EXPECTED_SHA" '[.[] | select(.base.ref == "main" and .merged_at != null and .merge_commit_sha == $sha)] | length' <<< "$prs")"
           test "$merged_pr_count" = "1"
       - uses: DeterminateSystems/determinate-nix-action@527f17dd63d2d60d3e5552934bc84b9a33a14d11
         with:
