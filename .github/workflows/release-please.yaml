@@ -154,7 +154,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          prs="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --base main --label "autorelease: pending" --limit 100 --json number,headRefName,headRepository,baseRefName,labels,author --jq '[.[] | select(.baseRefName == "main" and .headRepository.nameWithOwner == env.GITHUB_REPOSITORY and .author.login == "github-actions[bot]" and ([.labels[].name] | index("autorelease: pending")) != null)]')"
+          raw_prs="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --base main --label "autorelease: pending" --limit 100 --json number,headRefName,headRepository,baseRefName,labels,author)"
+          prs="$(jq --arg repo "$GITHUB_REPOSITORY" '[.[] | select(.baseRefName == "main" and .headRepository.nameWithOwner == $repo and .author.login == "github-actions[bot]" and ([.labels[].name] | index("autorelease: pending")) != null)]' <<< "$raw_prs")"
           count="$(jq length <<< "$prs")"
           test "$count" -le 1
           if [ "$count" = 1 ]; then
