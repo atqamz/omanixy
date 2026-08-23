@@ -52,6 +52,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
           PENDING_RELEASE: ${{ contains(github.event.pull_request.labels.*.name, 'autorelease: pending') }}
         run: |
           set -eu -o pipefail
@@ -77,6 +78,7 @@ jobs:
               done
             else
               test "$HEAD_REPOSITORY" = "$GITHUB_REPOSITORY"
+              test "$PR_AUTHOR" = "github-actions[bot]"
               test "$PENDING_RELEASE" = true
             fi
             pyyaml_store="$(nix build --no-link --print-out-paths nixpkgs#python3Packages.pyyaml)"
