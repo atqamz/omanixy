@@ -27,10 +27,10 @@ jobs:
       MAKEFLAGS: -j1
       NINJAFLAGS: -j1
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
-      - uses: DeterminateSystems/nix-installer-action@v22
+      - uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25
       - name: Configure swap
         run: |
           swap_path="$RUNNER_TEMP/omanixy.swap"
