@@ -28,7 +28,7 @@ jobs:
         max-jobs = 2
         cores = 2
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
@@ -55,7 +55,7 @@ jobs:
       - name: Run Release Please
         id: release
         if: steps.main-identity.outputs.current == 'true'
-        uses: googleapis/release-please-action@v5
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
@@ -66,7 +66,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          prs="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --base main --json number,headRefName,headRepository,baseRefName,labels --jq '[.[] | select(.baseRefName == "main" and .headRepository.nameWithOwner == env.GITHUB_REPOSITORY and ([.labels[].name] | index("autorelease: pending")) != null)]')"
+          prs="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --base main --json number,headRefName,headRepository,baseRefName,labels,author --jq '[.[] | select(.baseRefName == "main" and .headRepository.nameWithOwner == env.GITHUB_REPOSITORY and .author.login == "github-actions[bot]" and ([.labels[].name] | index("autorelease: pending")) != null)]')"
           count="$(jq length <<< "$prs")"
           test "$count" -le 1
           if [ "$count" = 1 ]; then
@@ -91,12 +91,12 @@ jobs:
           printf 'validated_sha=%s\ncurrent_main_sha=%s\nrelease_pr_base_sha=%s\n' "$EXPECTED_SHA" "$current_sha" "$base_sha"
           test "$current_sha" = "$EXPECTED_SHA"
           test "$base_sha" = "$EXPECTED_SHA"
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         if: steps.main-identity.outputs.current == 'true' && steps.release-pr.outputs.found == 'true'
         with:
           ref: ${{ steps.release-pr.outputs.branch }}
           fetch-depth: 0
-      - uses: DeterminateSystems/nix-installer-action@v22
+      - uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25
         if: steps.main-identity.outputs.current == 'true' && steps.release-pr.outputs.found == 'true'
       - name: Write release context
         if: steps.main-identity.outputs.current == 'true' && steps.release-pr.outputs.found == 'true'
