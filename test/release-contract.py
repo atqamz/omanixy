@@ -67,6 +67,58 @@ def all_strings(value):
         yield value
 
 
+def pending_release_prs(pull_requests, repository):
+    matches = []
+    for pull_request in pull_requests:
+        head_repository = pull_request.get("headRepository") or {}
+        labels = {label["name"] for label in pull_request.get("labels", [])}
+        if (
+            pull_request.get("state") == "OPEN"
+            and pull_request.get("baseRefName") == "main"
+            and head_repository.get("nameWithOwner") == repository
+            and "autorelease: pending" in labels
+        ):
+            matches.append(pull_request)
+    assert len(matches) <= 1
+    return matches
+
+
+def main_identity_is_current(validated_sha, current_sha):
+    return bool(validated_sha) and validated_sha == current_sha
+
+
+def assert_main_identity_cases():
+    assert main_identity_is_current("A", "A")
+    assert not main_identity_is_current("A", "B")
+    assert not main_identity_is_current("", "A")
+
+
+def assert_pending_release_pr_identity():
+    repository = "atqamz/omanixy"
+
+    def pull_request(draft=True, pending=True, base="main", head_repository=repository):
+        labels = [{"name": "autorelease: pending"}] if pending else []
+        return {
+            "state": "OPEN",
+            "baseRefName": base,
+            "headRepository": {"nameWithOwner": head_repository},
+            "labels": labels,
+            "isDraft": draft,
+        }
+
+    assert len(pending_release_prs([pull_request(draft=True)], repository)) == 1
+    assert len(pending_release_prs([pull_request(draft=False)], repository)) == 1
+    assert pending_release_prs([pull_request(draft=False, pending=False)], repository) == []
+    assert pending_release_prs([pull_request(base="develop")], repository) == []
+    assert pending_release_prs([pull_request(head_repository="someone/else")], repository) == []
+    try:
+        pending_release_prs([pull_request(), pull_request()], repository)
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError("duplicate pending Release PRs must fail closed")
+
+
 def assert_release_files(root):
     config = load_json(root / "release-please-config.json")
     manifest = load_json(root / ".release-please-manifest.json")
@@ -153,7 +205,30 @@ def assert_workflows(root):
     assert release_steps["Require release credential"]["env"] == {
         "RELEASE_PLEASE_TOKEN": "${{ secrets.RELEASE_PLEASE_TOKEN }}"
     }
+    main_guard = release_steps["Verify current main identity"]
+    assert main_guard["id"] == "main-identity"
+    assert main_guard["env"] == {
+        "EXPECTED_SHA": "${{ github.event.workflow_run.head_sha }}"
+    }
+    guard_lines = main_guard["run"].strip().splitlines()
+    assert guard_lines[0] == "set -eu -o pipefail"
+    assert guard_lines[1] == 'current_sha="$(git ls-remote --refs origin refs/heads/main | cut -f1)"'
+    assert guard_lines[2] == 'test -n "$current_sha"'
+    assert "validated_sha" in guard_lines[3]
+    assert guard_lines[4] == 'if [ "$current_sha" = "$EXPECTED_SHA" ]; then'
+    assert "current=true\\n" in guard_lines[5]
+    assert any("current=false\\n" in line for line in guard_lines)
+    assert any("stale workflow" in line for line in guard_lines)
+    current_condition = "steps.main-identity.outputs.current == 'true'"
+    assert release_steps["Run Release Please"]["if"] == current_condition
+    assert release_steps["Find pending Release PR"]["if"] == current_condition
     assert release_steps["Run Release Please"]["with"]["token"] == "${{ secrets.RELEASE_PLEASE_TOKEN }}"
+    pending_query = release_steps["Find pending Release PR"]["run"]
+    assert "autorelease: pending" in pending_query
+    assert "headRepository.nameWithOwner == env.GITHUB_REPOSITORY" in pending_query
+    assert "isDraft == true" not in pending_query
+    release_pr_condition = current_condition + " && steps.release-pr.outputs.found == 'true'"
+    assert release_steps["Write release context"]["if"] == release_pr_condition
     assert release_steps["Write release context"]["run"].strip().splitlines()[-1] == 'git push origin "HEAD:${{ steps.release-pr.outputs.branch }}"'
     assert has_command_suffix(release_steps["Write release context"], ("scripts/release-context", "--write"))
     assert has_command_suffix(release_steps["Write release context"], ("scripts/release-context", "--check"))
@@ -179,6 +254,7 @@ def assert_workflows(root):
     checkouts = [step for step in release_all_steps if step.get("uses") == "actions/checkout@v7"]
     assert checkouts[0]["with"]["ref"] == "${{ github.event.workflow_run.head_sha }}"
     assert checkouts[1]["with"]["ref"] == "${{ steps.release-pr.outputs.branch }}"
+    assert checkouts[1]["if"] == release_pr_condition
 
     release_action = release_steps["Run Release Please"]
     assert release_action["uses"] == "googleapis/release-please-action@v5"
@@ -199,6 +275,8 @@ def main():
     root = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
     assert_release_files(root)
     assert_workflows(root)
+    assert_main_identity_cases()
+    assert_pending_release_pr_identity()
 
 
 if __name__ == "__main__":

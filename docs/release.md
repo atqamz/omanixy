@@ -106,11 +106,14 @@ Non-breaking candidates may omit the section or use an explicit `None.` statemen
 
 ## Release-owned files
 
-Release Please owns `version.txt`, `.release-please-manifest.json`, and release entries in `CHANGELOG.md` after bootstrap.
+The release workflow owns release-file mutation.
+Release Please owns version calculation, manifest and version updates, release-note generation, tags, and GitHub Releases.
+The `scripts/release-context` tool owns only the deterministic `Upstream` and `Compatibility` sections.
+Humans own reviewed `Migration` guidance.
 
 Normal feature, fix, and documentation pull requests must not casually edit those files.
 
-The only intentional human-curated release-file change is migration guidance inside the draft Release PR.
+The intentional human-curated release-file change is migration guidance inside the pending Release PR.
 
 No runtime QML, Nix module option, flake metadata, README version, or package metadata mirrors the release version.
 
@@ -125,10 +128,10 @@ It requires the validated Omarchy Quattro and Quickshell pair, renders their exa
 The normal flow is:
 
 ```text
-successful main CI
+successful main CI for the current main SHA
         |
         v
-Release Please creates or updates a draft Release PR
+Release Please creates or updates a pending Release PR, initially as a draft
         |
         v
 release-context --write and --check update the candidate changelog
@@ -137,10 +140,13 @@ release-context --write and --check update the candidate changelog
 ordinary CI validates the Release PR
         |
         v
-human reviews context and migration guidance
+human reviews context and migration guidance and may mark the PR ready
         |
         v
-human marks the draft ready and merges when release readiness is approved
+later validated main changes update the same pending Release PR and its context
+        |
+        v
+human merges when release readiness is approved
 ```
 
 The context writer is idempotent and owns exactly one `Upstream` and one `Compatibility` section in the candidate entry.
@@ -153,7 +159,8 @@ CI runs on pull requests targeting `main` and pushes to `main` with `contents: r
 
 CI runs formatting, `just check`, all-system flake evaluation, source-comment policy, release contract checks, release-context selftests, actionlint, and the release-owned-file context check when those files change.
 
-Release Please runs only from a successful `CI` `workflow_run` for a push to the current `main` SHA.
+Release Please runs only from a successful `CI` `workflow_run` for a push whose SHA still equals the live `main` SHA.
+The workflow skips all release discovery and mutation when that identity check is stale.
 
 The release workflow has a single global `release-main` concurrency group with cancellation disabled.
 
@@ -202,7 +209,5 @@ The introduced actions are `actions/checkout@v7`, `DeterminateSystems/nix-instal
 The release action currently runs on Node 24 and uses the current manifest configuration contract.
 
 Action majors and required permissions are checked by repository actionlint and the release contract test.
-
-Release Please alone owns the Release PR, version files, changelog, tag, and GitHub Release.
 
 No npm, PyPI, crates.io, Cachix, Nixpkgs, Nix registry, Homebrew, AUR, binary archive, or install-script publication exists here.

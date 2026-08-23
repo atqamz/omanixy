@@ -39,21 +39,39 @@ jobs:
         env:
           EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - name: Verify current main identity
+        id: main-identity
+        env:
+          EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -eu -o pipefail
+          current_sha="$(git ls-remote --refs origin refs/heads/main | cut -f1)"
+          test -n "$current_sha"
+          printf 'validated_sha=%s\ncurrent_main_sha=%s\n' "$EXPECTED_SHA" "$current_sha"
+          if [ "$current_sha" = "$EXPECTED_SHA" ]; then
+            printf 'current=true\n' >> "$GITHUB_OUTPUT"
+            printf 'validated main is current\n'
+          else
+            printf 'current=false\n' >> "$GITHUB_OUTPUT"
+            printf 'stale workflow: current main is %s, validated SHA is %s\n' "$current_sha" "$EXPECTED_SHA"
+          fi
       - uses: DeterminateSystems/nix-installer-action@v22
       - name: Run Release Please
         id: release
+        if: steps.main-identity.outputs.current == 'true'
         uses: googleapis/release-please-action@v5
         with:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
           target-branch: main
-      - name: Find draft Release PR
+      - name: Find pending Release PR
         id: release-pr
+        if: steps.main-identity.outputs.current == 'true'
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
         run: |
-          prs="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --base main --json number,headRefName,headRepository,baseRefName,isDraft,labels --jq '[.[] | select(.baseRefName == "main" and .isDraft == true and .headRepository.nameWithOwner == env.GITHUB_REPOSITORY and ([.labels[].name] | index("autorelease: pending")) != null)]')"
+          prs="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --base main --json number,headRefName,headRepository,baseRefName,labels --jq '[.[] | select(.baseRefName == "main" and .headRepository.nameWithOwner == env.GITHUB_REPOSITORY and ([.labels[].name] | index("autorelease: pending")) != null)]')"
           count="$(jq length <<< "$prs")"
           test "$count" -le 1
           if [ "$count" = 1 ]; then
@@ -64,13 +82,13 @@ jobs:
             printf 'found=false\n' >> "$GITHUB_OUTPUT"
           fi
       - uses: actions/checkout@v7
-        if: steps.release-pr.outputs.found == 'true'
+        if: steps.main-identity.outputs.current == 'true' && steps.release-pr.outputs.found == 'true'
         with:
           ref: ${{ steps.release-pr.outputs.branch }}
           fetch-depth: 0
           token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
       - name: Write release context
-        if: steps.release-pr.outputs.found == 'true'
+        if: steps.main-identity.outputs.current == 'true' && steps.release-pr.outputs.found == 'true'
         run: |
           pyyaml_store="$(nix build --no-link --print-out-paths nixpkgs#python3Packages.pyyaml)"
           pyyaml_site="$(find "$pyyaml_store/lib" -type d -name site-packages -print -quit)"
