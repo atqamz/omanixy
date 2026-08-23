@@ -38,15 +38,22 @@ for item in security:
     assert item["target"]["classification"] in classifications
     assert item["target"]["support"] in support_states
     assert item["evidence"]["available"]
-    assert item["evidence"]["required_before_promotion"]
     promoted = (
         item["classification"] == item["target"]["classification"]
         and item["support"] == item["target"]["support"]
     )
     if promoted:
         assert item.get("promoted_at_layer") is not None
+        # Layer 8 (Section 6): required_before_promotion is a gate on
+        # reaching the declared target, not a permanent to-do list. Once an
+        # entry has reached its target classification/support, that gate is
+        # satisfied and must be empty or absent - remaining hardware- or
+        # environment-specific evidence for a hypothetical future move to
+        # "supported" belongs under required_before_supported instead.
+        assert not item["evidence"].get("required_before_promotion")
     else:
         assert "promoted_at_layer" not in item
+        assert item["evidence"]["required_before_promotion"]
 
 promoted_ids = {item["id"] for item in security if "promoted_at_layer" in item}
 assert promoted_ids == {
@@ -56,7 +63,24 @@ assert promoted_ids == {
     "security.polkit-agent",
     "security.idle",
     "security.notification-daemon",
+    "security.recovery",
 }
+
+security_recovery = next(item for item in security if item["id"] == "security.recovery")
+assert security_recovery["classification"] == "adapted"
+assert security_recovery["support"] == "experimental"
+assert security_recovery["target"] == {"classification": "adapted", "support": "experimental"}
+assert security_recovery["promoted_at_layer"] == "8/8"
+
+# Section 60: an entry may still carry required_before_supported once
+# promoted - that vocabulary names real hardware/environment breadth still
+# outstanding for a hypothetical future move to "supported", never a reason
+# to withhold promotion to "experimental", and it must never be silently
+# reported as passed evidence.
+for item in security:
+    if "required_before_supported" in item["evidence"]:
+        assert isinstance(item["evidence"]["required_before_supported"], list)
+        assert item["evidence"]["required_before_supported"]
 
 lock = next(item for item in security if item["id"] == "security.lock")
 assert lock["classification"] == "adapted"
@@ -211,12 +235,13 @@ if rg -n 'omarchy-launch-screensaver|omarchy-screensaver|\bttfx\b|\bsocat\b' \
   exit 1
 fi
 
-# Pre-suspend locking and sleep-monitor services are explicitly deferred to
-# Layer 8 (Section 11) - none of that vocabulary may appear as live wiring
-# in the Home Manager module yet.
+# Pre-suspend locking and sleep-monitor services are permanently, by design,
+# not owned by Omanixy (Section 11/61 of issue #4; confirmed final at
+# Layer 8, not merely deferred to it) - none of that vocabulary may appear as
+# live wiring in the Home Manager module.
 if rg -n 'omarchy-system-sleep-monitor|omarchy-sleep-lock\.service|systemd-inhibit|omarchy-system-lock\b' \
   "$repo/modules/home"; then
-  printf '%s\n' 'sleep/suspend-monitor vocabulary leaked into the Home Manager module - deferred to Layer 8' >&2
+  printf '%s\n' 'sleep/suspend-monitor vocabulary leaked into the Home Manager module - intentionally omitted, consumer-owned suspend policy' >&2
   exit 1
 fi
 

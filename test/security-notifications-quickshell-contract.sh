@@ -13,8 +13,11 @@
 # this test is to catch drift in our own understanding (or in the pinned
 # revision itself) against the exact ABI evidence recorded in the ADR and
 # ledger, not to modify or re-implement any of it. Real live D-Bus
-# collision/takeover-after-owner-exits evidence is explicitly deferred to
-# Layer 8.
+# collision/takeover-after-owner-exits evidence is now proven by Layer 8
+# (test/security-recovery-notifications-vm.nix's collision-reclaim scenario,
+# upstream/security-recovery-matrix.yaml's
+# recovery.notifications-unknown-owner-collision), not merely deferred to
+# it.
 set -euo pipefail
 
 quickshell_src=${1:?pinned Quickshell source root required}
