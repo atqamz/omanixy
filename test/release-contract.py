@@ -14,7 +14,7 @@ CHECKOUT_ACTION = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
 NIX_ACTION = "DeterminateSystems/determinate-nix-action@527f17dd63d2d60d3e5552934bc84b9a33a14d11"
 RELEASE_PLEASE_ACTION = "googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7"
 RELEASE_FILES = [".release-please-manifest.json", "CHANGELOG.md", "version.txt"]
-SEMVER_IDENTIFIER = r"(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)"
+SEMVER_IDENTIFIER = r"(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)"
 SEMVER = re.compile(
     rf"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
     rf"(?:-{SEMVER_IDENTIFIER}(?:\.{SEMVER_IDENTIFIER})*)?"
@@ -132,10 +132,12 @@ def assert_release_context(root):
             'group.add_argument("--check"',
             'group.add_argument("--release-notes"',
             'group.add_argument("--render-pr-body"',
+            "SEMVER_IDENTIFIER",
             "RELEASE_PR_HEADER",
             "RELEASE_PR_FOOTER",
             "candidate_entry(",
             "render_release_pr_body(",
+            'f"v{version}/upstream/porting-matrix.yaml"',
             'sys.stdout.write(candidate_entry(changelog, version) + "\\n")',
             "sys.stdout.write(render_release_pr_body(changelog, version))",
         ),
@@ -277,6 +279,9 @@ def assert_release_workflow(release, release_text):
             '.merge_commit_sha == $sha',
             'test "$(jq length <<< "$matches")" = "1"',
             '[ "$author" = "github-actions[bot]" ]',
+            'parent_count="$(git rev-list --parents -n 1 "$EXPECTED_SHA"',
+            'test "$parent_count" = 1',
+            'git diff --name-only "$EXPECTED_SHA^1" "$EXPECTED_SHA"',
             'test "$actual_release_files" = "$expected_release_files"',
             'expected_title="chore(main): release $(cat version.txt)"',
             'test "$title" = "$expected_title"',
@@ -290,8 +295,8 @@ def assert_release_workflow(release, release_text):
     assert_contains_all(
         release_state["run"],
         (
-            'test "$(jq -r \' .object.type\' <<< "$tag_json")" = commit'.replace("' .", "'."),
-            'test "$(jq -r \' .object.sha\' <<< "$tag_json")" = "$EXPECTED_SHA"'.replace("' .", "'."),
+            "'.object.type'",
+            "'.object.sha'",
             'test "$target" = "$EXPECTED_SHA"',
             'test "$tag_target" = "$EXPECTED_SHA"',
             'test "$name" = "$tag"',
@@ -301,14 +306,43 @@ def assert_release_workflow(release, release_text):
         ),
     )
 
+    exclusive = named["Verify exclusive publish candidate"]
+    assert_contains_all(
+        exclusive["run"],
+        (
+            'test "$current_sha" = "$EXPECTED_SHA"',
+            '--state merged',
+            '--base main',
+            '--label "autorelease: pending"',
+            '--limit 200',
+            'test "$(jq length <<< "$pending_prs")" = 1',
+            'test "$(jq -r \'.[0].number\' <<< "$pending_prs")" = "$RELEASE_PR_NUMBER"',
+            'test "$(jq -r \'.[0].author.login\' <<< "$pending_prs")" = "github-actions[bot]"',
+        ),
+    )
+
     canonical = named["Canonicalize merged Release PR body"]
-    assert "--render-pr-body" in canonical["run"]
-    assert "--method PATCH" in canonical["run"]
-    assert 'test "$actual_body" = "$expected_body"' in canonical["run"]
+    assert_contains_all(
+        canonical["run"],
+        (
+            'test "$current_sha" = "$EXPECTED_SHA"',
+            "--render-pr-body",
+            "--method PATCH",
+            'test "$actual_body" = "$expected_body"',
+        ),
+    )
+    assert canonical["run"].count('test "$current_sha" = "$EXPECTED_SHA"') >= 2
 
     publish = named["Publish merged Release PR"]
     assert publish["uses"] == RELEASE_PLEASE_ACTION
-    assert publish["with"]["skip-github-pull-request"] is True
+    assert publish["with"] == {
+        "release-type": "simple",
+        "include-component-in-tag": False,
+        "target-branch": "main",
+        "skip-github-pull-request": True,
+    }
+    assert "config-file" not in publish["with"]
+    assert "manifest-file" not in publish["with"]
     assert "steps.merged-pr.outputs.release_commit == 'true'" in publish["if"]
     assert "steps.merged-pr.outputs.pending == 'true'" in publish["if"]
     assert "steps.release-state.outputs.exists != 'true'" in publish["if"]
@@ -326,12 +360,20 @@ def assert_release_workflow(release, release_text):
             "'.body'",
             "'.draft'",
             "'.prerelease'",
+            'select(. == "autorelease: pending")',
+            'select(. == "autorelease: tagged")',
         ),
     )
-    assert 'test "$current_sha" = "$EXPECTED_SHA"' not in published["run"]
 
     tagged = named["Verify tagged release identity"]
     assert_release_artifact_shape(tagged)
+    assert_contains_all(
+        tagged["run"],
+        (
+            'select(. == "autorelease: pending")',
+            'select(. == "autorelease: tagged")',
+        ),
+    )
 
     maintenance = named["Recheck current main for maintenance"]
     assert maintenance["id"] == "maintenance-main"
@@ -350,8 +392,12 @@ def assert_release_workflow(release, release_text):
     maintain = named["Maintain Release PR"]
     assert maintain["uses"] == RELEASE_PLEASE_ACTION
     assert maintain["if"] == maintenance_current
-    assert maintain["with"]["skip-github-release"] is True
-    assert index_of(ordered, named, "Recheck current main for maintenance") < index_of(ordered, named, "Maintain Release PR")
+    assert maintain["with"] == {
+        "config-file": "release-please-config.json",
+        "manifest-file": ".release-please-manifest.json",
+        "target-branch": "main",
+        "skip-github-release": True,
+    }
 
     query = named["Find pending Release PR"]
     assert query["if"] == maintenance_current
@@ -421,16 +467,23 @@ def assert_release_workflow(release, release_text):
             'python3 "$TRUSTED_ROOT/scripts/release-context" --check',
             'python3 "$TRUSTED_ROOT/scripts/release-context" --render-pr-body',
             'test "$remote_candidate_sha" = "$candidate_sha"',
+            'test "$pr_head_sha" = "$candidate_sha"',
             "gh auth setup-git",
             'git push origin "HEAD:refs/heads/$RELEASE_BRANCH"',
             "--method PATCH",
             'test "$actual_body" = "$expected_body"',
         ),
     )
+    assert writer_source.count('test "$current_sha" = "$EXPECTED_SHA"') >= 2
+    assert writer_source.count('test "$remote_candidate_sha" = "$candidate_sha"') >= 2
+    assert writer_source.count('test "$pr_head_sha" = "$candidate_sha"') >= 2
     assert "python3 scripts/release-context" not in writer_source
 
+    assert index_of(ordered, named, "Inspect merged release state") < index_of(ordered, named, "Verify exclusive publish candidate")
+    assert index_of(ordered, named, "Verify exclusive publish candidate") < index_of(ordered, named, "Canonicalize merged Release PR body")
     assert index_of(ordered, named, "Canonicalize merged Release PR body") < index_of(ordered, named, "Publish merged Release PR")
     assert index_of(ordered, named, "Publish merged Release PR") < index_of(ordered, named, "Verify published release identity")
+    assert index_of(ordered, named, "Recheck current main for maintenance") < index_of(ordered, named, "Maintain Release PR")
     assert index_of(ordered, named, "Maintain Release PR") < index_of(ordered, named, "Verify pending Release PR identity")
     assert index_of(ordered, named, "Verify pending Release PR identity") < ordered.index(candidate_checkout)
     assert ordered.index(candidate_checkout) < index_of(ordered, named, "Verify Release PR file boundary")
