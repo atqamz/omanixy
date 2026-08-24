@@ -126,6 +126,7 @@
         adoption-contract = pkgs.runCommand "omanixy-standalone-adoption-contract"
           {
             inherit pamService nixosToplevel;
+            omanixySource = omanixy.outPath;
             activationStorePaths = "${standaloneActivationClosure}/store-paths";
             serviceContract = if serviceContractOk then "true" else "false";
             safeOwnership = if safeOwnershipOk then "true" else "false";
@@ -150,12 +151,12 @@
           if grep -R -n -E '/home/atqa|sfx14|pavg15|~/dotfiles|atqamz/universe|Hand|private paths' ${./.}; then
             exit 1
           fi
-          grep -Fq '## What Omanixy is' ${omanixy.outPath}/README.md
-          grep -Fq '## Prerequisites and session assumptions' ${omanixy.outPath}/README.md
-          grep -Fq '## Install with flakes' ${omanixy.outPath}/README.md
-          grep -Fq '## Feature and support matrix' ${omanixy.outPath}/README.md
-          grep -Fq '## Troubleshooting' ${omanixy.outPath}/README.md
-          grep -Fq '## Upgrades and releases' ${omanixy.outPath}/README.md
+          grep -Fq '## What Omanixy is' "$omanixySource/README.md"
+          grep -Fq '## Prerequisites and session assumptions' "$omanixySource/README.md"
+          grep -Fq '## Install with flakes' "$omanixySource/README.md"
+          grep -Fq '## Feature and support matrix' "$omanixySource/README.md"
+          grep -Fq '## Troubleshooting' "$omanixySource/README.md"
+          grep -Fq '## Upgrades and releases' "$omanixySource/README.md"
           touch "$out"
         '';
       };
