@@ -7,34 +7,89 @@ quickshell=${3:?selected Quickshell executable required}
 runtime_path=$(sed -n 's/^export PATH="\(.*\)"$/\1/p' "$runtime/bin/omanixy-shell-runtime")
 test -n "$runtime_path"
 
-uwsm_app=$(PATH="$runtime_path" command -v uwsm-app)
-test -n "$uwsm_app"
-case "$uwsm_app" in
-  /nix/store/*-uwsm-*/bin/uwsm-app) ;;
-  *) printf 'selected UWSM executable is not the packaged binary: %s\n' "$uwsm_app" >&2; exit 1 ;;
+uwsm=$(PATH="$runtime_path" command -v uwsm)
+test -n "$uwsm"
+case "$uwsm" in
+  /nix/store/*-uwsm-*/bin/uwsm) ;;
+  *) printf 'selected UWSM executable is not the packaged binary: %s\n' "$uwsm" >&2; exit 1 ;;
 esac
 uwsm_help_status=0
-uwsm_help=$(PATH="$runtime_path" uwsm-app --help 2>&1) || uwsm_help_status=$?
+uwsm_help=$(PATH="$runtime_path" uwsm app --help 2>&1) || uwsm_help_status=$?
 if ((uwsm_help_status == 0)); then
   grep -Fq 'usage: uwsm app' <<<"$uwsm_help"
 else
   grep -Fq 'DBUS_SESSION_BUS_ADDRESS' <<<"$uwsm_help"
 fi
-node - "$compatibility_root/shell/services/AppLibrarySupport.js" <<'NODE'
+
+support="$compatibility_root/shell/services/AppLibrarySupport.js"
+app_library="$compatibility_root/shell/services/AppLibrary.qml"
+node - "$support" <<'NODE'
 const support = require(process.argv[2]);
+
 for (const id of ["org.example.User", "org.example.User.desktop"]) {
-  if (support.launchCommand(id) !== "uwsm-app -- gtk-launch 'org.example.User.desktop'") {
-    throw new Error(`unexpected UWSM command for ${id}`);
+  if (support.launchCommand(id) !== "uwsm app -- gtk-launch 'org.example.User.desktop'") {
+    throw new Error(`unexpected direct UWSM command for ${id}`);
   }
 }
-if (support.launchCommand("../escape") !== "") {
-  throw new Error("invalid desktop id produced a launch command");
+if (support.launchCommand("Example App") !== "uwsm app -- gtk-launch 'Example App.desktop'") {
+  throw new Error("desktop id containing a space was not preserved");
+}
+for (const id of ["../escape", "bad;id", "bad/id", ""]) {
+  if (support.launchCommand(id) !== "") {
+    throw new Error(`invalid desktop id produced a launch command: ${id}`);
+  }
+}
+
+const exact = { appId: "org.example.User", title: "irrelevant" };
+if (support.findMatchingToplevel({ id: "org.example.User", startupClass: "" }, [exact]) !== exact) {
+  throw new Error("desktop id did not exactly match appId");
+}
+
+const startup = { appId: "ExampleStartup", title: "irrelevant" };
+if (support.findMatchingToplevel({ id: "org.example.User", startupClass: "ExampleStartup" }, [startup]) !== startup) {
+  throw new Error("StartupWMClass did not exactly match appId");
+}
+
+const folded = { appId: "org.example.case", title: "irrelevant" };
+if (support.findMatchingToplevel({ id: "Org.Example.Case.desktop", startupClass: "" }, [folded]) !== folded) {
+  throw new Error("unique ASCII case-normalized identity did not match");
+}
+
+const exactPreferred = { appId: "Org.Example.Case", title: "irrelevant" };
+if (support.findMatchingToplevel({ id: "Org.Example.Case", startupClass: "" }, [folded, exactPreferred]) !== exactPreferred) {
+  throw new Error("exact identity did not outrank case-normalized identity");
+}
+
+const duplicateA = { appId: "org.example.Duplicate", title: "first" };
+const duplicateB = { appId: "org.example.Duplicate", title: "second" };
+if (support.findMatchingToplevel({ id: "org.example.Duplicate", startupClass: "" }, [duplicateA, duplicateB]) !== null) {
+  throw new Error("ambiguous matching selected an arbitrary toplevel");
+}
+
+const titleOnly = { appId: "org.example.Other", title: "org.example.User" };
+if (support.findMatchingToplevel({ id: "org.example.User", startupClass: "" }, [titleOnly]) !== null) {
+  throw new Error("window title incorrectly participated in application identity");
+}
+
+if (support.findMatchingToplevel({ id: "org.example.User", startupClass: "" }, []) !== null) {
+  throw new Error("empty toplevel set produced a match");
 }
 NODE
+
+grep -Fq 'AppLibrarySupport.findMatchingToplevel(entry, ToplevelManager.toplevels.values || [])' "$app_library"
+grep -Fq 'toplevel.activate()' "$app_library"
+grep -Fq 'root.launchTargetToplevel.activated' "$app_library"
+grep -Fq 'uwsm app -- gtk-launch ' "$support"
+if grep -Fq 'uwsm-app -- gtk-launch' "$app_library" "$support"; then
+  printf '%s\n' 'built launcher still depends on uwsm-app daemon path' >&2
+  exit 1
+fi
+
 if [[ ${OMANIXY_LIVE_UWSM:-0} != 1 ]]; then
   printf '%s\n' 'LIVE_UWSM_UNCLAIMED: optional live smoke was not requested'
   exit 0
 fi
+
 test_root=$(mktemp -d)
 trap 'rm -rf "$test_root"' EXIT
 fixture_bin="$test_root/bin"
@@ -108,7 +163,7 @@ LAUNCH_LOG="$test_root/launch.log" \
   PATH="$fixture_bin:$runtime_path" \
   timeout 10s "$quickshell" -n -p "$config_root" || launch_status=$?
 if ((launch_status == 124)); then
-  printf '%s\n' 'live AppLibrary/UWSM launch timed out' >&2
+  printf '%s\n' 'live AppLibrary/direct-UWSM launch timed out' >&2
   exit 1
 fi
 for _ in {1..20}; do
@@ -118,8 +173,8 @@ done
 if test -f "$test_root/launch.log"; then
   grep -Fxq 'org.example.User.desktop' "$test_root/launch.log"
 else
-  printf '%s\n' 'real AppLibrary/UWSM launch produced no evidence' >&2
+  printf '%s\n' 'real AppLibrary/direct-UWSM launch produced no evidence' >&2
   exit 1
 fi
 
-printf '%s\n' 'LIVE_SMOKE_CLAIMED: real UWSM launch recorder observed the desktop id'
+printf '%s\n' 'LIVE_SMOKE_CLAIMED: real direct UWSM launch recorder observed the desktop id'
