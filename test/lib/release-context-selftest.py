@@ -57,6 +57,11 @@ CHANGELOG = """# Changelog
 
 None.
 """
+PR_HEADER = ":robot: I have created a release *beep* *boop*"
+PR_FOOTER = (
+    "This PR was generated with [Release Please](https://github.com/googleapis/release-please). "
+    "See [documentation](https://github.com/googleapis/release-please#release-please)."
+)
 
 
 def write(path, content):
@@ -92,10 +97,20 @@ def make_repo(tmp_path, tool, version="0.1.0", changelog=CHANGELOG):
     return root
 
 
+def make_release_only_repo(tmp_path, version="0.1.0", changelog=CHANGELOG):
+    root = tmp_path / "repo"
+    write(root / ".release-please-manifest.json", json.dumps({".": version}) + "\n")
+    write(root / "version.txt", version + "\n")
+    write(root / "CHANGELOG.md", changelog)
+    return root
+
+
 def test_bootstrap_check(tool):
     with tempfile.TemporaryDirectory() as temp:
         root = make_repo(Path(temp), tool, version="0.0.0", changelog="# Changelog\n")
         assert_ok(run_tool(tool, root, "--check"))
+        assert_failed(run_tool(tool, root, "--release-notes"))
+        assert_failed(run_tool(tool, root, "--render-pr-body"))
 
 
 def test_write_and_check_render_exact_context(tool):
@@ -114,6 +129,22 @@ def test_write_and_check_render_exact_context(tool):
         assert content.count("### Upstream\n") == 1
         assert content.count("### Compatibility\n") == 1
         assert_ok(run_tool(tool, root, "--check"))
+
+
+def test_release_renderers_are_canonical_and_upstream_independent(tool):
+    with tempfile.TemporaryDirectory() as temp:
+        root = make_release_only_repo(Path(temp))
+        notes = run_tool(tool, root, "--release-notes")
+        assert_ok(notes)
+        expected_notes = CHANGELOG.split("## 0.1.0", 1)[1]
+        expected_notes = "## 0.1.0" + expected_notes
+        expected_notes = expected_notes.strip()
+        assert notes.stdout == expected_notes + "\n"
+
+        body = run_tool(tool, root, "--render-pr-body")
+        assert_ok(body)
+        expected_body = f"{PR_HEADER}\n---\n\n\n{expected_notes}\n\n---\n{PR_FOOTER}\n"
+        assert body.stdout == expected_body
 
 
 def test_write_repairs_duplicates_and_is_idempotent(tool):
@@ -190,12 +221,17 @@ def test_linked_release_heading_passes(tool):
         root = make_repo(Path(temp), tool, changelog=changelog)
         assert_ok(run_tool(tool, root, "--write"))
         assert_ok(run_tool(tool, root, "--check"))
+        notes = run_tool(tool, root, "--release-notes")
+        assert_ok(notes)
+        assert notes.stdout.startswith("## [0.1.0](https://github.com/atqamz/omanixy/releases/tag/v0.1.0)")
 
 
 def test_version_heading_mismatch_fails(tool):
     with tempfile.TemporaryDirectory() as temp:
         root = make_repo(Path(temp), tool, changelog=CHANGELOG.replace("## 0.1.0", "## 0.2.0"))
         assert_failed(run_tool(tool, root, "--check"))
+        assert_failed(run_tool(tool, root, "--release-notes"))
+        assert_failed(run_tool(tool, root, "--render-pr-body"))
 
 
 def test_manifest_version_mismatch_fails(tool):
@@ -203,6 +239,7 @@ def test_manifest_version_mismatch_fails(tool):
         root = make_repo(Path(temp), tool)
         write(root / ".release-please-manifest.json", '{".": "0.2.0"}\n')
         assert_failed(run_tool(tool, root, "--check"))
+        assert_failed(run_tool(tool, root, "--release-notes"))
 
 
 def main():
@@ -210,6 +247,7 @@ def main():
     tests = [
         test_bootstrap_check,
         test_write_and_check_render_exact_context,
+        test_release_renderers_are_canonical_and_upstream_independent,
         test_write_repairs_duplicates_and_is_idempotent,
         test_malformed_omarchy_fails_closed,
         test_missing_runtime_pair_fails_closed,
