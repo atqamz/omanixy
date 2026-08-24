@@ -245,13 +245,15 @@ def test_manifest_version_mismatch_fails(tool):
         assert_failed(run_tool(tool, root, "--release-notes"))
 
 
-def test_invalid_semver_fails_closed(tool):
+def test_invalid_release_versions_fail_closed(tool):
     invalid_versions = (
         "01.2.3",
         "1.02.3",
         "1.2.03",
+        "1.2.3-alpha.1",
         "1.2.3-01",
         "1.2.3-alpha.01",
+        "1.2.3+build.1",
         "1.2.3-",
     )
     for version in invalid_versions:
@@ -277,7 +279,7 @@ def main():
         test_linked_release_heading_passes,
         test_version_heading_mismatch_fails,
         test_manifest_version_mismatch_fails,
-        test_invalid_semver_fails_closed,
+        test_invalid_release_versions_fail_closed,
     ]
     failures = []
     for test in tests:
