@@ -166,6 +166,10 @@ def main() -> int:
     ])
     feedback_new = block([
         '  function beginLaunchFeedback(name, entry, target, initialMatches) {',
+        '    if (root.launchOsdOpen) {',
+        '      Quickshell.execDetached(["omarchy-shell", "osd", "close"])',
+        '      root.launchOsdOpen = false',
+        '    }',
         '    root.launchSerial++',
         '    root.launchExpectedEntry = entry',
         '    root.launchTargetToplevel = target',
