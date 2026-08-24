@@ -57,7 +57,9 @@ jobs:
           tagged="$(jq '[.[0].labels[].name | select(. == "autorelease: tagged")] | length == 1' <<< "$matches")"
           release_commit=false
           if [ "$author" = "github-actions[bot]" ] && { [ "$pending" = true ] || [ "$tagged" = true ]; }; then
-            actual_release_files="$(git diff-tree --no-commit-id --name-only -r "$EXPECTED_SHA" | LC_ALL=C sort)"
+            parent_count="$(git rev-list --parents -n 1 "$EXPECTED_SHA" | awk '{print NF - 1}')"
+            test "$parent_count" = 1
+            actual_release_files="$(git diff --name-only "$EXPECTED_SHA^1" "$EXPECTED_SHA" | LC_ALL=C sort)"
             expected_release_files="$(printf '%s\n' .release-please-manifest.json CHANGELOG.md version.txt | LC_ALL=C sort)"
             test "$actual_release_files" = "$expected_release_files"
             for path in .release-please-manifest.json CHANGELOG.md version.txt; do
@@ -120,14 +122,32 @@ jobs:
           else
             printf 'exists=false\ntag=%s\n' "$tag" >> "$GITHUB_OUTPUT"
           fi
+      - name: Verify exclusive publish candidate
+        if: steps.main-identity.outputs.current == 'true' && steps.merged-pr.outputs.release_commit == 'true' && steps.merged-pr.outputs.pending == 'true' && steps.release-state.outputs.exists != 'true'
+        working-directory: trusted-main
+        env:
+          EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
+          RELEASE_PR_NUMBER: ${{ steps.merged-pr.outputs.number }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu -o pipefail
+          current_sha="$(git ls-remote --refs origin refs/heads/main | cut -f1)"
+          test "$current_sha" = "$EXPECTED_SHA"
+          pending_prs="$(gh pr list --repo "$GITHUB_REPOSITORY" --state merged --base main --label "autorelease: pending" --limit 200 --json number,author)"
+          test "$(jq length <<< "$pending_prs")" = 1
+          test "$(jq -r '.[0].number' <<< "$pending_prs")" = "$RELEASE_PR_NUMBER"
+          test "$(jq -r '.[0].author.login' <<< "$pending_prs")" = "github-actions[bot]"
       - name: Canonicalize merged Release PR body
         if: steps.main-identity.outputs.current == 'true' && steps.merged-pr.outputs.release_commit == 'true' && steps.merged-pr.outputs.pending == 'true' && steps.release-state.outputs.exists != 'true'
         working-directory: trusted-main
         env:
+          EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
           GH_TOKEN: ${{ github.token }}
           RELEASE_PR_NUMBER: ${{ steps.merged-pr.outputs.number }}
         run: |
           set -eu -o pipefail
+          current_sha="$(git ls-remote --refs origin refs/heads/main | cut -f1)"
+          test "$current_sha" = "$EXPECTED_SHA"
           version="$(cat version.txt)"
           expected_title="chore(main): release $version"
           current_title="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$RELEASE_PR_NUMBER" --jq '.title')"
@@ -137,13 +157,15 @@ jobs:
             gh api --method PATCH "repos/$GITHUB_REPOSITORY/pulls/$RELEASE_PR_NUMBER" --input - >/dev/null
           actual_body="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$RELEASE_PR_NUMBER" --jq '.body')"
           test "$actual_body" = "$expected_body"
+          current_sha="$(git ls-remote --refs origin refs/heads/main | cut -f1)"
+          test "$current_sha" = "$EXPECTED_SHA"
       - name: Publish merged Release PR
         id: publish
         if: steps.main-identity.outputs.current == 'true' && steps.merged-pr.outputs.release_commit == 'true' && steps.merged-pr.outputs.pending == 'true' && steps.release-state.outputs.exists != 'true'
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7
         with:
-          config-file: release-please-config.json
-          manifest-file: .release-please-manifest.json
+          release-type: simple
+          include-component-in-tag: false
           target-branch: main
           skip-github-pull-request: true
       - name: Verify published release identity
@@ -155,6 +177,7 @@ jobs:
           RELEASE_SHA: ${{ steps.publish.outputs.sha }}
           RELEASE_TAG: ${{ steps.publish.outputs.tag_name }}
           RELEASE_BODY: ${{ steps.publish.outputs.body }}
+          RELEASE_PR_NUMBER: ${{ steps.merged-pr.outputs.number }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -eu -o pipefail
@@ -172,6 +195,9 @@ jobs:
           test "$(jq -r '.body' <<< "$release_json")" = "$expected_notes"
           test "$(jq -r '.draft' <<< "$release_json")" = false
           test "$(jq -r '.prerelease' <<< "$release_json")" = false
+          pr_json="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$RELEASE_PR_NUMBER")"
+          test "$(jq '[.labels[].name | select(. == "autorelease: pending")] | length' <<< "$pr_json")" = 0
+          test "$(jq '[.labels[].name | select(. == "autorelease: tagged")] | length' <<< "$pr_json")" = 1
       - name: Reconcile exact existing release labels
         if: steps.main-identity.outputs.current == 'true' && steps.merged-pr.outputs.release_commit == 'true' && steps.merged-pr.outputs.pending == 'true' && steps.release-state.outputs.exists == 'true'
         working-directory: trusted-main
@@ -185,6 +211,7 @@ jobs:
         working-directory: trusted-main
         env:
           EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
+          RELEASE_PR_NUMBER: ${{ steps.merged-pr.outputs.number }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -eu -o pipefail
@@ -197,6 +224,9 @@ jobs:
           test "$(jq -r '.body' <<< "$release_json")" = "$expected_notes"
           test "$(jq -r '.draft' <<< "$release_json")" = false
           test "$(jq -r '.prerelease' <<< "$release_json")" = false
+          pr_json="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$RELEASE_PR_NUMBER")"
+          test "$(jq '[.labels[].name | select(. == "autorelease: pending")] | length' <<< "$pr_json")" = 0
+          test "$(jq '[.labels[].name | select(. == "autorelease: tagged")] | length' <<< "$pr_json")" = 1
       - name: Recheck current main for maintenance
         id: maintenance-main
         if: steps.main-identity.outputs.current == 'true'
@@ -330,8 +360,17 @@ jobs:
             gh auth setup-git
             git push origin "HEAD:refs/heads/$RELEASE_BRANCH"
           fi
+          current_sha="$(git -C "$TRUSTED_ROOT" ls-remote --refs origin refs/heads/main | cut -f1)"
+          test "$current_sha" = "$EXPECTED_SHA"
+          candidate_sha="$(git rev-parse HEAD)"
+          remote_candidate_sha="$(git ls-remote --refs origin "refs/heads/$RELEASE_BRANCH" | cut -f1)"
+          test "$remote_candidate_sha" = "$candidate_sha"
+          pr_head_sha="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$RELEASE_PR_NUMBER" --jq '.head.sha')"
+          test "$pr_head_sha" = "$candidate_sha"
           expected_body="$(python3 "$TRUSTED_ROOT/scripts/release-context" --render-pr-body)"
           jq -n --arg body "$expected_body" '{body: $body}' |
             gh api --method PATCH "repos/$GITHUB_REPOSITORY/pulls/$RELEASE_PR_NUMBER" --input - >/dev/null
           actual_body="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$RELEASE_PR_NUMBER" --jq '.body')"
           test "$actual_body" = "$expected_body"
+          pr_head_sha="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$RELEASE_PR_NUMBER" --jq '.head.sha')"
+          test "$pr_head_sha" = "$candidate_sha"
