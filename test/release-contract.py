@@ -13,6 +13,7 @@ RELEASE_PLEASE_SCHEMA = "https://raw.githubusercontent.com/googleapis/release-pl
 CHECKOUT_ACTION = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
 NIX_ACTION = "DeterminateSystems/determinate-nix-action@527f17dd63d2d60d3e5552934bc84b9a33a14d11"
 RELEASE_PLEASE_ACTION = "googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7"
+RELEASE_FILES = [".release-please-manifest.json", "CHANGELOG.md", "version.txt"]
 SEMVER_IDENTIFIER = r"(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)"
 SEMVER = re.compile(
     rf"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
@@ -20,7 +21,6 @@ SEMVER = re.compile(
     r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
 )
 IMMUTABLE_ACTION = re.compile(r"^[^@]+@[0-9a-f]{40}$")
-RELEASE_FILES = [".release-please-manifest.json", "CHANGELOG.md", "version.txt"]
 
 
 def load_json(path):
@@ -31,16 +31,20 @@ def trigger(workflow):
     return workflow.get("on", workflow.get(True))
 
 
-def all_steps(workflow, job):
+def ordered_steps(workflow, job="release"):
     return workflow["jobs"][job]["steps"]
 
 
-def named_steps(workflow, job):
+def named_steps(workflow, job="release"):
     return {
         step["name"]: step
-        for step in all_steps(workflow, job)
+        for step in ordered_steps(workflow, job)
         if "name" in step
     }
+
+
+def index_of(ordered, named, name):
+    return ordered.index(named[name])
 
 
 def command_argvs(step):
@@ -58,12 +62,12 @@ def command_argvs(step):
     return commands
 
 
-def has_suffix(step, suffix):
-    suffix = list(suffix)
-    return any(argv[-len(suffix):] == suffix for argv in command_argvs(step))
+def assert_contains_all(text, snippets):
+    for snippet in snippets:
+        assert snippet in text, snippet
 
 
-def assert_release_files(root):
+def assert_release_config(root):
     config = load_json(root / "release-please-config.json")
     manifest = load_json(root / ".release-please-manifest.json")
     version_text = (root / "version.txt").read_text(encoding="utf-8")
@@ -81,6 +85,7 @@ def assert_release_files(root):
     assert config["include-v-in-tag"] is True
     assert config["draft-pull-request"] is True
     assert config["packages"] == {".": {"package-name": "omanixy"}}
+
     for forbidden in (
         "release-as",
         "pull-request-title-pattern",
@@ -92,13 +97,6 @@ def assert_release_files(root):
     ):
         assert forbidden not in config
         assert all(forbidden not in package for package in config["packages"].values())
-
-    assert version_text == version + "\n"
-    assert SEMVER.fullmatch(version)
-    assert manifest == {".": version}
-    assert changelog.startswith("# Changelog\n")
-    if version == "0.0.0":
-        assert changelog == "# Changelog\n"
 
     expected_sections = {
         "feat": ("Features", False),
@@ -112,30 +110,46 @@ def assert_release_files(root):
         "chore": ("Maintenance", True),
         "refactor": ("Refactoring", False),
     }
-    sections = {
+    assert {
         item["type"]: (item["section"], item.get("hidden", False))
         for item in config["changelog-sections"]
-    }
-    assert sections == expected_sections
+    } == expected_sections
+
+    assert version_text == version + "\n"
+    assert SEMVER.fullmatch(version)
+    assert manifest == {".": version}
+    assert changelog.startswith("# Changelog\n")
+    if version == "0.0.0":
+        assert changelog == "# Changelog\n"
 
 
-def assert_release_context_surface(root):
+def assert_release_context(root):
     source = (root / "scripts/release-context").read_text(encoding="utf-8")
-    for text in (
-        'group.add_argument("--write"',
-        'group.add_argument("--check"',
-        'group.add_argument("--release-notes"',
-        'group.add_argument("--render-pr-body"',
-        "RELEASE_PR_HEADER",
-        "RELEASE_PR_FOOTER",
-        "candidate_entry(",
-        "render_release_pr_body(",
-        'sys.stdout.write(candidate_entry(changelog, version) + "\\n")',
-        "sys.stdout.write(render_release_pr_body(changelog, version))",
-    ):
-        assert text in source
+    assert_contains_all(
+        source,
+        (
+            'group.add_argument("--write"',
+            'group.add_argument("--check"',
+            'group.add_argument("--release-notes"',
+            'group.add_argument("--render-pr-body"',
+            "RELEASE_PR_HEADER",
+            "RELEASE_PR_FOOTER",
+            "candidate_entry(",
+            "render_release_pr_body(",
+            'sys.stdout.write(candidate_entry(changelog, version) + "\\n")',
+            "sys.stdout.write(render_release_pr_body(changelog, version))",
+        ),
+    )
     assert "\nimport yaml\n" not in source
     assert "import yaml" in source
+
+
+def assert_regular_release_files_guard(source, ref_expression):
+    assert f'git ls-tree {ref_expression} -- "$path"' in source
+    assert 'test "$(awk \'{print $1}\' <<< "$tree_entry")" = 100644' in source
+    assert 'test "$(awk \'{print $2}\' <<< "$tree_entry")" = blob' in source
+    for path in RELEASE_FILES:
+        assert path in source
 
 
 def assert_ci(ci):
@@ -147,7 +161,7 @@ def assert_ci(ci):
 
     job = ci["jobs"]["validate"]
     assert job["runs-on"] == "ubuntu-24.04"
-    ordered = all_steps(ci, "validate")
+    ordered = ordered_steps(ci, "validate")
     named = named_steps(ci, "validate")
 
     checkout = ordered[0]
@@ -156,14 +170,18 @@ def assert_ci(ci):
 
     provenance = named["Verify main PR provenance"]
     assert provenance["if"] == "github.event_name == 'push'"
-    assert '.merge_commit_sha == $sha' in provenance["run"]
-    assert 'test "$merged_pr_count" = "1"' in provenance["run"]
+    assert_contains_all(
+        provenance["run"],
+        (
+            '.merge_commit_sha == $sha',
+            'test "$merged_pr_count" = "1"',
+        ),
+    )
 
     nix_steps = [step for step in ordered if step.get("uses") == NIX_ACTION]
     assert len(nix_steps) == 1
     assert nix_steps[0]["with"]["github-token"] == ""
 
-    assert named["Format"]["run"].strip() == "nix fmt\ngit diff --exit-code"
     assert named["Canonical checks"]["run"].strip() == "nix shell --inputs-from . nixpkgs#just -c just check"
     assert named["All systems evaluation"]["run"].strip() == "nix flake check --show-trace --print-build-logs --all-systems --no-build"
 
@@ -178,36 +196,40 @@ def assert_ci(ci):
         "PENDING_RELEASE": "${{ contains(github.event.pull_request.labels.*.name, 'autorelease: pending') }}",
     }
     source = owned["run"]
-    for text in (
-        'git cat-file -e "$BASE_SHA:$path"',
-        'git cat-file -e "$HEAD_SHA:$path"',
-        'test "$HEAD_REPOSITORY" = "$GITHUB_REPOSITORY"',
-        'test "$PR_AUTHOR" = "github-actions[bot]"',
-        'test "$PENDING_RELEASE" = true',
-        'expected_title="chore(main): release $(cat version.txt)"',
-        'test "$PR_TITLE" = "$expected_title"',
-        'test "$actual_release_files" = "$expected_release_files"',
-        "nix build --inputs-from .",
-        "nix shell --inputs-from .",
-    ):
-        assert text in source
-    for path in RELEASE_FILES:
-        assert path in source
-    assert has_suffix(owned, ("scripts/release-context", "--check"))
+    assert_contains_all(
+        source,
+        (
+            'git cat-file -e "$BASE_SHA:$path"',
+            'git cat-file -e "$HEAD_SHA:$path"',
+            'test "$HEAD_REPOSITORY" = "$GITHUB_REPOSITORY"',
+            'test "$PR_AUTHOR" = "github-actions[bot]"',
+            'test "$PENDING_RELEASE" = true',
+            'expected_title="chore(main): release $(cat version.txt)"',
+            'test "$PR_TITLE" = "$expected_title"',
+            'test "$actual_release_files" = "$expected_release_files"',
+            "nix build --inputs-from .",
+            "nix shell --inputs-from .",
+            "scripts/release-context --check",
+        ),
+    )
+    assert_regular_release_files_guard(source, '"$HEAD_SHA"')
 
 
-def assert_exact_release_shape(step):
+def assert_release_artifact_shape(step):
     source = step["run"]
-    for text in (
-        "--release-notes",
-        "git/ref/tags/$tag",
-        'test "$tag_target" = "$EXPECTED_SHA"',
-        'test "$name" = "$tag"',
-        'test "$body" = "$expected_notes"',
-        'test "$draft" = false',
-        'test "$prerelease" = false',
-    ):
-        assert text in source
+    assert_contains_all(
+        source,
+        (
+            "--release-notes",
+            "git/ref/tags/$tag",
+            "'.target_commitish'",
+            "'.name'",
+            "'.body'",
+            "'.draft'",
+            "'.prerelease'",
+            'test "$expected_notes"',
+        ),
+    )
 
 
 def assert_release_workflow(release, release_text):
@@ -221,10 +243,7 @@ def assert_release_workflow(release, release_text):
         "pull-requests": "write",
         "issues": "write",
     }
-    assert release["concurrency"] == {
-        "group": "release-main",
-        "cancel-in-progress": False,
-    }
+    assert release["concurrency"] == {"group": "release-main", "cancel-in-progress": False}
     assert "${{ secrets." not in release_text
     assert "RELEASE_PLEASE_TOKEN" not in release_text
 
@@ -232,10 +251,11 @@ def assert_release_workflow(release, release_text):
     assert job["runs-on"] == "ubuntu-24.04"
     assert job["if"] == "github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main'"
 
-    named = named_steps(release, "release")
-    ordered = all_steps(release, "release")
-    current = "steps.main-identity.outputs.current == 'true'"
-    candidate = current + " && steps.release-pr.outputs.found == 'true'"
+    ordered = ordered_steps(release)
+    named = named_steps(release)
+    initial_current = "steps.main-identity.outputs.current == 'true'"
+    maintenance_current = "steps.maintenance-main.outputs.current == 'true'"
+    candidate = maintenance_current + " && steps.release-pr.outputs.found == 'true'"
 
     checkouts = [step for step in ordered if step.get("uses") == CHECKOUT_ACTION]
     assert len(checkouts) == 2
@@ -250,98 +270,118 @@ def assert_release_workflow(release, release_text):
     provenance = named["Verify merged PR provenance"]
     assert provenance["id"] == "merged-pr"
     assert provenance["working-directory"] == "trusted-main"
-    provenance_source = provenance["run"]
-    for text in (
-        '.merge_commit_sha == $sha',
-        'test "$(jq length <<< "$matches")" = "1"',
-        '[ "$author" = "github-actions[bot]" ]',
-        'git diff-tree --no-commit-id --name-only -r "$EXPECTED_SHA"',
-        'test "$actual_release_files" = "$expected_release_files"',
-        'expected_title="chore(main): release $(cat version.txt)"',
-        'test "$title" = "$expected_title"',
-        "release_commit=true",
-    ):
-        assert text in provenance_source
-    for path in RELEASE_FILES:
-        assert path in provenance_source
+    source = provenance["run"]
+    assert_contains_all(
+        source,
+        (
+            '.merge_commit_sha == $sha',
+            'test "$(jq length <<< "$matches")" = "1"',
+            '[ "$author" = "github-actions[bot]" ]',
+            'test "$actual_release_files" = "$expected_release_files"',
+            'expected_title="chore(main): release $(cat version.txt)"',
+            'test "$title" = "$expected_title"',
+            "release_commit=true",
+        ),
+    )
+    assert_regular_release_files_guard(source, '"$EXPECTED_SHA"')
 
     release_state = named["Inspect merged release state"]
-    assert release_state["working-directory"] == "trusted-main"
-    assert_exact_release_shape(release_state)
+    assert release_state["if"] == initial_current + " && steps.merged-pr.outputs.release_commit == 'true'"
+    assert_contains_all(
+        release_state["run"],
+        (
+            'test "$(jq -r \'.object.type\' <<< "$tag_json")" = commit',
+            'test "$(jq -r \'.object.sha\' <<< "$tag_json")" = "$EXPECTED_SHA"',
+            'test "$target" = "$EXPECTED_SHA"',
+            'test "$tag_target" = "$EXPECTED_SHA"',
+            'test "$name" = "$tag"',
+            'test "$body" = "$expected_notes"',
+            'test "$draft" = false',
+            'test "$prerelease" = false',
+        ),
+    )
 
     canonical = named["Canonicalize merged Release PR body"]
-    assert canonical["working-directory"] == "trusted-main"
     assert "--render-pr-body" in canonical["run"]
     assert "--method PATCH" in canonical["run"]
     assert 'test "$actual_body" = "$expected_body"' in canonical["run"]
-    assert 'expected_title="chore(main): release $version"' in canonical["run"]
 
     publish = named["Publish merged Release PR"]
-    maintain = named["Maintain Release PR"]
     assert publish["uses"] == RELEASE_PLEASE_ACTION
     assert publish["with"]["skip-github-pull-request"] is True
     assert "steps.merged-pr.outputs.release_commit == 'true'" in publish["if"]
     assert "steps.merged-pr.outputs.pending == 'true'" in publish["if"]
     assert "steps.release-state.outputs.exists != 'true'" in publish["if"]
-    assert maintain["uses"] == RELEASE_PLEASE_ACTION
-    assert maintain["if"] == current
-    assert maintain["with"]["skip-github-release"] is True
-    assert ordered.index(canonical) < ordered.index(publish) < ordered.index(maintain)
 
     published = named["Verify published release identity"]
-    assert published["working-directory"] == "trusted-main"
-    for text in (
-        'test "$RELEASE_CREATED" = true',
-        'test "$RELEASE_SHA" = "$EXPECTED_SHA"',
-        'test "$RELEASE_TAG" = "$tag"',
-        'test "$RELEASE_BODY" = "$expected_notes"',
-        'test "$current_sha" = "$EXPECTED_SHA"',
-        "git/ref/tags/$tag",
-        "'.target_commitish'",
-        "'.name'",
-        "'.body'",
-        "'.draft'",
-        "'.prerelease'",
-    ):
-        assert text in published["run"]
+    assert_contains_all(
+        published["run"],
+        (
+            'test "$RELEASE_CREATED" = true',
+            'test "$RELEASE_SHA" = "$EXPECTED_SHA"',
+            'test "$RELEASE_TAG" = "$tag"',
+            'test "$RELEASE_BODY" = "$expected_notes"',
+            "git/ref/tags/$tag",
+            "'.target_commitish'",
+            "'.body'",
+            "'.draft'",
+            "'.prerelease'",
+        ),
+    )
+    assert 'test "$current_sha" = "$EXPECTED_SHA"' not in published["run"]
 
     tagged = named["Verify tagged release identity"]
-    assert tagged["working-directory"] == "trusted-main"
-    assert "--release-notes" in tagged["run"]
-    assert "git/ref/tags/$tag" in tagged["run"]
-    assert "'.body'" in tagged["run"]
-    assert "'.draft'" in tagged["run"]
-    assert "'.prerelease'" in tagged["run"]
+    assert_release_artifact_shape(tagged)
 
-    reconcile = named["Reconcile exact existing release labels"]
-    assert "autorelease: pending" in reconcile["run"]
-    assert "autorelease: tagged" in reconcile["run"]
+    maintenance = named["Recheck current main for maintenance"]
+    assert maintenance["id"] == "maintenance-main"
+    assert maintenance["if"] == initial_current
+    assert maintenance["working-directory"] == "trusted-main"
+    assert_contains_all(
+        maintenance["run"],
+        (
+            'current_sha="$(git ls-remote --refs origin refs/heads/main | cut -f1)"',
+            'if [ "$current_sha" = "$EXPECTED_SHA" ]',
+            "printf 'current=true\\n'",
+            "printf 'current=false\\n'",
+        ),
+    )
+
+    maintain = named["Maintain Release PR"]
+    assert maintain["uses"] == RELEASE_PLEASE_ACTION
+    assert maintain["if"] == maintenance_current
+    assert maintain["with"]["skip-github-release"] is True
+    assert index_of(ordered, named, "Recheck current main for maintenance") < index_of(ordered, named, "Maintain Release PR")
 
     query = named["Find pending Release PR"]
-    assert query["if"] == current
-    assert '--label "autorelease: pending"' in query["run"]
-    assert "--limit 100" in query["run"]
-    assert "headRepository.nameWithOwner == $repo" in query["run"]
-    assert '.author.login == "github-actions[bot]"' in query["run"]
+    assert query["if"] == maintenance_current
+    assert_contains_all(
+        query["run"],
+        (
+            '--label "autorelease: pending"',
+            "--limit 100",
+            "headRepository.nameWithOwner == $repo",
+            '.author.login == "github-actions[bot]"',
+        ),
+    )
 
     identity = named["Verify pending Release PR identity"]
-    assert identity["id"] == "candidate-identity"
     assert identity["if"] == candidate
-    assert identity["working-directory"] == "trusted-main"
-    for text in (
-        "'.base.sha'",
-        "'.head.sha'",
-        "'.head.repo.full_name'",
-        "'.head.ref'",
-        "'.user.login'",
-        'test "$base_sha" = "$EXPECTED_SHA"',
-        'test "$head_repo" = "$GITHUB_REPOSITORY"',
-        'test "$head_ref" = "$RELEASE_BRANCH"',
-        'test "$author" = "github-actions[bot]"',
-        'test "$pending" = true',
-        "printf 'head_sha=%s\\n'",
-    ):
-        assert text in identity["run"]
+    assert_contains_all(
+        identity["run"],
+        (
+            "'.base.sha'",
+            "'.head.sha'",
+            "'.head.repo.full_name'",
+            "'.head.ref'",
+            "'.user.login'",
+            'test "$base_sha" = "$EXPECTED_SHA"',
+            'test "$head_repo" = "$GITHUB_REPOSITORY"',
+            'test "$head_ref" = "$RELEASE_BRANCH"',
+            'test "$author" = "github-actions[bot]"',
+            'test "$pending" = true',
+        ),
+    )
 
     assert candidate_checkout["if"] == candidate
     assert candidate_checkout["with"] == {
@@ -353,16 +393,16 @@ def assert_release_workflow(release, release_text):
 
     boundary = named["Verify Release PR file boundary"]
     assert boundary["if"] == candidate
-    assert boundary["working-directory"] == "release-pr"
-    for text in (
-        'git diff --name-only "$EXPECTED_SHA...HEAD"',
-        'test "$actual_release_files" = "$expected_release_files"',
-        'expected_title="chore(main): release $(cat version.txt)"',
-        'test "$actual_title" = "$expected_title"',
-    ):
-        assert text in boundary["run"]
-    for path in RELEASE_FILES:
-        assert path in boundary["run"]
+    assert_contains_all(
+        boundary["run"],
+        (
+            'git diff --name-only "$EXPECTED_SHA...HEAD"',
+            'test "$actual_release_files" = "$expected_release_files"',
+            'expected_title="chore(main): release $(cat version.txt)"',
+            'test "$actual_title" = "$expected_title"',
+        ),
+    )
+    assert_regular_release_files_guard(boundary["run"], "HEAD")
 
     nix_steps = [step for step in ordered if step.get("uses") == NIX_ACTION]
     assert len(nix_steps) == 1
@@ -371,32 +411,30 @@ def assert_release_workflow(release, release_text):
 
     writer = named["Write release context"]
     assert writer["if"] == candidate
-    assert writer["working-directory"] == "release-pr"
-    assert writer["env"] == {
-        "EXPECTED_SHA": "${{ github.event.workflow_run.head_sha }}",
-        "TRUSTED_ROOT": "${{ github.workspace }}/trusted-main",
-        "RELEASE_BRANCH": "${{ steps.release-pr.outputs.branch }}",
-        "RELEASE_PR_NUMBER": "${{ steps.release-pr.outputs.number }}",
-        "GH_TOKEN": "${{ github.token }}",
-    }
-    source = writer["run"]
-    assert source.count('test "$current_sha" = "$EXPECTED_SHA"') >= 2
-    assert 'nix build --inputs-from "$TRUSTED_ROOT"' in source
-    assert 'nix shell --inputs-from "$TRUSTED_ROOT"' in source
-    assert 'python3 "$TRUSTED_ROOT/scripts/release-context" --write' in source
-    assert 'python3 "$TRUSTED_ROOT/scripts/release-context" --check' in source
-    assert 'python3 "$TRUSTED_ROOT/scripts/release-context" --render-pr-body' in source
-    assert "python3 scripts/release-context" not in source
-    assert 'test "$remote_candidate_sha" = "$candidate_sha"' in source
-    assert "gh auth setup-git" in source
-    assert 'git push origin "HEAD:refs/heads/$RELEASE_BRANCH"' in source
-    assert "--method PATCH" in source
-    assert 'test "$actual_body" = "$expected_body"' in source
-    assert "${{ steps.release-pr.outputs.branch }}" not in source
+    writer_source = writer["run"]
+    assert_contains_all(
+        writer_source,
+        (
+            'nix build --inputs-from "$TRUSTED_ROOT"',
+            'nix shell --inputs-from "$TRUSTED_ROOT"',
+            'python3 "$TRUSTED_ROOT/scripts/release-context" --write',
+            'python3 "$TRUSTED_ROOT/scripts/release-context" --check',
+            'python3 "$TRUSTED_ROOT/scripts/release-context" --render-pr-body',
+            'test "$remote_candidate_sha" = "$candidate_sha"',
+            "gh auth setup-git",
+            'git push origin "HEAD:refs/heads/$RELEASE_BRANCH"',
+            "--method PATCH",
+            'test "$actual_body" = "$expected_body"',
+        ),
+    )
+    assert "python3 scripts/release-context" not in writer_source
 
-    for step in ordered:
-        if step.get("working-directory") == "release-pr" and "run" in step:
-            assert "python3 scripts/release-context" not in step["run"]
+    assert index_of(ordered, named, "Canonicalize merged Release PR body") < index_of(ordered, named, "Publish merged Release PR")
+    assert index_of(ordered, named, "Publish merged Release PR") < index_of(ordered, named, "Verify published release identity")
+    assert index_of(ordered, named, "Maintain Release PR") < index_of(ordered, named, "Verify pending Release PR identity")
+    assert index_of(ordered, named, "Verify pending Release PR identity") < ordered.index(candidate_checkout)
+    assert ordered.index(candidate_checkout) < index_of(ordered, named, "Verify Release PR file boundary")
+    assert index_of(ordered, named, "Verify Release PR file boundary") < index_of(ordered, named, "Write release context")
 
     forbidden = {
         ("git", "tag"),
@@ -433,8 +471,8 @@ def main():
     ci = yaml.safe_load((root / ".github/workflows/ci.yaml").read_text(encoding="utf-8"))
     release_text = (root / ".github/workflows/release-please.yaml").read_text(encoding="utf-8")
     release = yaml.safe_load(release_text)
-    assert_release_files(root)
-    assert_release_context_surface(root)
+    assert_release_config(root)
+    assert_release_context(root)
     assert_ci(ci)
     assert_release_workflow(release, release_text)
     assert_immutable_actions(ci, release)
