@@ -1,9 +1,13 @@
+function semanticDesktopId(value) {
+  return String(value || "")
+}
+
 function normalizeDesktopId(value) {
-  return String(value || "").trim()
+  return semanticDesktopId(value).trim()
 }
 
 function desktopFileId(value) {
-  var id = normalizeDesktopId(value)
+  var id = semanticDesktopId(value)
   if (id.slice(-8) === ".desktop") id = id.slice(0, -8)
   return id
 }
@@ -29,8 +33,8 @@ function shellQuote(value) {
 }
 
 function launchCommand(value) {
-  var id = normalizeDesktopId(value)
-  if (!isValidDesktopId(id)) return ""
+  var id = semanticDesktopId(value)
+  if (!id) return ""
   return "uwsm app -- gtk-launch " + shellQuote(id + ".desktop")
 }
 
@@ -39,14 +43,14 @@ function entryIdentities(entry) {
   var values = [entry.id, entry.startupClass]
   var identities = []
   for (var i = 0; i < values.length; i++) {
-    var identity = normalizeDesktopId(values[i])
+    var identity = semanticDesktopId(values[i])
     if (identity && identities.indexOf(identity) === -1) identities.push(identity)
   }
   return identities
 }
 
 function matchStrength(entry, appId) {
-  var candidate = normalizeDesktopId(appId)
+  var candidate = semanticDesktopId(appId)
   if (!candidate) return 0
   var identities = entryIdentities(entry)
   for (var i = 0; i < identities.length; i++) {
@@ -94,6 +98,7 @@ function coldLaunchSucceeded(entry, toplevels, initialMatches, initialActiveTopl
 
 if (typeof module !== "undefined") {
   module.exports = {
+    semanticDesktopId,
     normalizeDesktopId,
     desktopFileId,
     isValidDesktopId,
