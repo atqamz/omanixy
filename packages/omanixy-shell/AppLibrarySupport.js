@@ -1,5 +1,9 @@
 function normalizeDesktopId(value) {
-  var id = String(value || "").trim()
+  return String(value || "").trim()
+}
+
+function desktopFileId(value) {
+  var id = normalizeDesktopId(value)
   if (id.slice(-8) === ".desktop") id = id.slice(0, -8)
   return id
 }
@@ -55,7 +59,7 @@ function matchStrength(entry, appId) {
   return 0
 }
 
-function findMatchingToplevel(entry, toplevels) {
+function matchingToplevels(entry, toplevels) {
   var values = toplevels || []
   var exact = []
   var folded = []
@@ -65,19 +69,41 @@ function findMatchingToplevel(entry, toplevels) {
     if (strength === 2) exact.push(toplevel)
     else if (strength === 1) folded.push(toplevel)
   }
-  if (exact.length === 1) return exact[0]
-  if (exact.length > 1) return null
-  return folded.length === 1 ? folded[0] : null
+  return exact.length > 0 ? exact : folded
+}
+
+function findMatchingToplevel(entry, toplevels) {
+  var matches = matchingToplevels(entry, toplevels)
+  return matches.length === 1 ? matches[0] : null
+}
+
+function activationSucceeded(target, activeToplevel) {
+  return !!target && (!!target.activated || activeToplevel === target)
+}
+
+function coldLaunchSucceeded(entry, toplevels, initialMatches, initialActiveToplevel, activeToplevel) {
+  var matches = matchingToplevels(entry, toplevels)
+  var initial = initialMatches || []
+  for (var i = 0; i < matches.length; i++) {
+    if (initial.indexOf(matches[i]) === -1) return true
+  }
+  return !!activeToplevel
+    && activeToplevel !== initialActiveToplevel
+    && matches.indexOf(activeToplevel) !== -1
 }
 
 if (typeof module !== "undefined") {
   module.exports = {
     normalizeDesktopId,
+    desktopFileId,
     isValidDesktopId,
     canRemove,
     launchCommand,
     entryIdentities,
     matchStrength,
-    findMatchingToplevel
+    matchingToplevels,
+    findMatchingToplevel,
+    activationSucceeded,
+    coldLaunchSucceeded
   }
 }
