@@ -67,6 +67,7 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
           PENDING_RELEASE: ${{ contains(github.event.pull_request.labels.*.name, 'autorelease: pending') }}
         run: |
           set -eu -o pipefail
@@ -94,6 +95,8 @@ jobs:
               test "$HEAD_REPOSITORY" = "$GITHUB_REPOSITORY"
               test "$PR_AUTHOR" = "github-actions[bot]"
               test "$PENDING_RELEASE" = true
+              expected_title="chore(main): release $(cat version.txt)"
+              test "$PR_TITLE" = "$expected_title"
               actual_release_files="$(printf '%s\n' "$changed" | LC_ALL=C sort)"
               expected_release_files="$(printf '%s\n' .release-please-manifest.json CHANGELOG.md version.txt | LC_ALL=C sort)"
               test "$actual_release_files" = "$expected_release_files"
