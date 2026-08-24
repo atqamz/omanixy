@@ -31,16 +31,16 @@ def trigger(workflow):
     return workflow.get("on", workflow.get(True))
 
 
+def all_steps(workflow, job):
+    return workflow["jobs"][job]["steps"]
+
+
 def named_steps(workflow, job):
     return {
         step["name"]: step
-        for step in workflow["jobs"][job]["steps"]
+        for step in all_steps(workflow, job)
         if "name" in step
     }
-
-
-def all_steps(workflow, job):
-    return workflow["jobs"][job]["steps"]
 
 
 def command_argvs(step):
@@ -60,7 +60,7 @@ def command_argvs(step):
 
 def has_suffix(step, suffix):
     suffix = list(suffix)
-    return any(argv[-len(suffix) :] == suffix for argv in command_argvs(step))
+    return any(argv[-len(suffix):] == suffix for argv in command_argvs(step))
 
 
 def assert_release_files(root):
@@ -81,8 +81,18 @@ def assert_release_files(root):
     assert config["include-v-in-tag"] is True
     assert config["draft-pull-request"] is True
     assert config["packages"] == {".": {"package-name": "omanixy"}}
-    assert "release-as" not in config
-    assert all("release-as" not in item for item in config["packages"].values())
+    for forbidden in (
+        "release-as",
+        "pull-request-title-pattern",
+        "pull-request-header",
+        "pull-request-footer",
+        "draft",
+        "prerelease",
+        "force-tag-creation",
+    ):
+        assert forbidden not in config
+        assert all(forbidden not in package for package in config["packages"].values())
+
     assert version_text == version + "\n"
     assert SEMVER.fullmatch(version)
     assert manifest == {".": version}
@@ -109,6 +119,25 @@ def assert_release_files(root):
     assert sections == expected_sections
 
 
+def assert_release_context_surface(root):
+    source = (root / "scripts/release-context").read_text(encoding="utf-8")
+    for text in (
+        'group.add_argument("--write"',
+        'group.add_argument("--check"',
+        'group.add_argument("--release-notes"',
+        'group.add_argument("--render-pr-body"',
+        "RELEASE_PR_HEADER",
+        "RELEASE_PR_FOOTER",
+        "candidate_entry(",
+        "render_release_pr_body(",
+        'sys.stdout.write(candidate_entry(changelog, version) + "\\n")',
+        "sys.stdout.write(render_release_pr_body(changelog, version))",
+    ):
+        assert text in source
+    assert "\nimport yaml\n" not in source
+    assert "import yaml" in source
+
+
 def assert_ci(ci):
     ci_on = trigger(ci)
     assert ci["name"] == "CI"
@@ -123,8 +152,7 @@ def assert_ci(ci):
 
     checkout = ordered[0]
     assert checkout["uses"] == CHECKOUT_ACTION
-    assert checkout["with"]["fetch-depth"] == 0
-    assert checkout["with"]["persist-credentials"] is False
+    assert checkout["with"] == {"fetch-depth": 0, "persist-credentials": False}
 
     provenance = named["Verify main PR provenance"]
     assert provenance["if"] == "github.event_name == 'push'"
@@ -146,6 +174,7 @@ def assert_ci(ci):
         "HEAD_SHA": "${{ github.event.pull_request.head.sha }}",
         "HEAD_REPOSITORY": "${{ github.event.pull_request.head.repo.full_name }}",
         "PR_AUTHOR": "${{ github.event.pull_request.user.login }}",
+        "PR_TITLE": "${{ github.event.pull_request.title }}",
         "PENDING_RELEASE": "${{ contains(github.event.pull_request.labels.*.name, 'autorelease: pending') }}",
     }
     source = owned["run"]
@@ -155,6 +184,8 @@ def assert_ci(ci):
         'test "$HEAD_REPOSITORY" = "$GITHUB_REPOSITORY"',
         'test "$PR_AUTHOR" = "github-actions[bot]"',
         'test "$PENDING_RELEASE" = true',
+        'expected_title="chore(main): release $(cat version.txt)"',
+        'test "$PR_TITLE" = "$expected_title"',
         'test "$actual_release_files" = "$expected_release_files"',
         "nix build --inputs-from .",
         "nix shell --inputs-from .",
@@ -163,6 +194,20 @@ def assert_ci(ci):
     for path in RELEASE_FILES:
         assert path in source
     assert has_suffix(owned, ("scripts/release-context", "--check"))
+
+
+def assert_exact_release_shape(step):
+    source = step["run"]
+    for text in (
+        "--release-notes",
+        "git/ref/tags/$tag",
+        'test "$tag_target" = "$EXPECTED_SHA"',
+        'test "$name" = "$tag"',
+        'test "$body" = "$expected_notes"',
+        'test "$draft" = false',
+        'test "$prerelease" = false',
+    ):
+        assert text in source
 
 
 def assert_release_workflow(release, release_text):
@@ -186,6 +231,7 @@ def assert_release_workflow(release, release_text):
     job = release["jobs"]["release"]
     assert job["runs-on"] == "ubuntu-24.04"
     assert job["if"] == "github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main'"
+
     named = named_steps(release, "release")
     ordered = all_steps(release, "release")
     current = "steps.main-identity.outputs.current == 'true'"
@@ -208,14 +254,27 @@ def assert_release_workflow(release, release_text):
     for text in (
         '.merge_commit_sha == $sha',
         'test "$(jq length <<< "$matches")" = "1"',
-        '$author" = "github-actions[bot]"',
+        '[ "$author" = "github-actions[bot]" ]',
         'git diff-tree --no-commit-id --name-only -r "$EXPECTED_SHA"',
         'test "$actual_release_files" = "$expected_release_files"',
+        'expected_title="chore(main): release $(cat version.txt)"',
+        'test "$title" = "$expected_title"',
         "release_commit=true",
     ):
         assert text in provenance_source
     for path in RELEASE_FILES:
         assert path in provenance_source
+
+    release_state = named["Inspect merged release state"]
+    assert release_state["working-directory"] == "trusted-main"
+    assert_exact_release_shape(release_state)
+
+    canonical = named["Canonicalize merged Release PR body"]
+    assert canonical["working-directory"] == "trusted-main"
+    assert "--render-pr-body" in canonical["run"]
+    assert "--method PATCH" in canonical["run"]
+    assert 'test "$actual_body" = "$expected_body"' in canonical["run"]
+    assert 'expected_title="chore(main): release $version"' in canonical["run"]
 
     publish = named["Publish merged Release PR"]
     maintain = named["Maintain Release PR"]
@@ -227,20 +286,36 @@ def assert_release_workflow(release, release_text):
     assert maintain["uses"] == RELEASE_PLEASE_ACTION
     assert maintain["if"] == current
     assert maintain["with"]["skip-github-release"] is True
-    assert ordered.index(publish) < ordered.index(maintain)
+    assert ordered.index(canonical) < ordered.index(publish) < ordered.index(maintain)
 
-    release_state = named["Inspect merged release state"]
-    assert release_state["working-directory"] == "trusted-main"
-    assert 'test "$target" = "$EXPECTED_SHA"' in release_state["run"]
     published = named["Verify published release identity"]
     assert published["working-directory"] == "trusted-main"
     for text in (
         'test "$RELEASE_CREATED" = true',
         'test "$RELEASE_SHA" = "$EXPECTED_SHA"',
-        'test "$RELEASE_TAG" = "v$(cat version.txt)"',
+        'test "$RELEASE_TAG" = "$tag"',
+        'test "$RELEASE_BODY" = "$expected_notes"',
         'test "$current_sha" = "$EXPECTED_SHA"',
+        "git/ref/tags/$tag",
+        "'.target_commitish'",
+        "'.name'",
+        "'.body'",
+        "'.draft'",
+        "'.prerelease'",
     ):
         assert text in published["run"]
+
+    tagged = named["Verify tagged release identity"]
+    assert tagged["working-directory"] == "trusted-main"
+    assert "--release-notes" in tagged["run"]
+    assert "git/ref/tags/$tag" in tagged["run"]
+    assert "'.body'" in tagged["run"]
+    assert "'.draft'" in tagged["run"]
+    assert "'.prerelease'" in tagged["run"]
+
+    reconcile = named["Reconcile exact existing release labels"]
+    assert "autorelease: pending" in reconcile["run"]
+    assert "autorelease: tagged" in reconcile["run"]
 
     query = named["Find pending Release PR"]
     assert query["if"] == current
@@ -253,7 +328,6 @@ def assert_release_workflow(release, release_text):
     assert identity["id"] == "candidate-identity"
     assert identity["if"] == candidate
     assert identity["working-directory"] == "trusted-main"
-    identity_source = identity["run"]
     for text in (
         "'.base.sha'",
         "'.head.sha'",
@@ -267,7 +341,7 @@ def assert_release_workflow(release, release_text):
         'test "$pending" = true',
         "printf 'head_sha=%s\\n'",
     ):
-        assert text in identity_source
+        assert text in identity["run"]
 
     assert candidate_checkout["if"] == candidate
     assert candidate_checkout["with"] == {
@@ -280,8 +354,13 @@ def assert_release_workflow(release, release_text):
     boundary = named["Verify Release PR file boundary"]
     assert boundary["if"] == candidate
     assert boundary["working-directory"] == "release-pr"
-    assert 'git diff --name-only "$EXPECTED_SHA...HEAD"' in boundary["run"]
-    assert 'test "$actual_release_files" = "$expected_release_files"' in boundary["run"]
+    for text in (
+        'git diff --name-only "$EXPECTED_SHA...HEAD"',
+        'test "$actual_release_files" = "$expected_release_files"',
+        'expected_title="chore(main): release $(cat version.txt)"',
+        'test "$actual_title" = "$expected_title"',
+    ):
+        assert text in boundary["run"]
     for path in RELEASE_FILES:
         assert path in boundary["run"]
 
@@ -297,19 +376,27 @@ def assert_release_workflow(release, release_text):
         "EXPECTED_SHA": "${{ github.event.workflow_run.head_sha }}",
         "TRUSTED_ROOT": "${{ github.workspace }}/trusted-main",
         "RELEASE_BRANCH": "${{ steps.release-pr.outputs.branch }}",
+        "RELEASE_PR_NUMBER": "${{ steps.release-pr.outputs.number }}",
         "GH_TOKEN": "${{ github.token }}",
     }
     source = writer["run"]
     assert source.count('test "$current_sha" = "$EXPECTED_SHA"') >= 2
-    assert "nix build --inputs-from \"$TRUSTED_ROOT\"" in source
-    assert "nix shell --inputs-from \"$TRUSTED_ROOT\"" in source
+    assert 'nix build --inputs-from "$TRUSTED_ROOT"' in source
+    assert 'nix shell --inputs-from "$TRUSTED_ROOT"' in source
     assert 'python3 "$TRUSTED_ROOT/scripts/release-context" --write' in source
     assert 'python3 "$TRUSTED_ROOT/scripts/release-context" --check' in source
-    assert 'python3 scripts/release-context' not in source
+    assert 'python3 "$TRUSTED_ROOT/scripts/release-context" --render-pr-body' in source
+    assert "python3 scripts/release-context" not in source
     assert 'test "$remote_candidate_sha" = "$candidate_sha"' in source
     assert "gh auth setup-git" in source
     assert 'git push origin "HEAD:refs/heads/$RELEASE_BRANCH"' in source
+    assert "--method PATCH" in source
+    assert 'test "$actual_body" = "$expected_body"' in source
     assert "${{ steps.release-pr.outputs.branch }}" not in source
+
+    for step in ordered:
+        if step.get("working-directory") == "release-pr" and "run" in step:
+            assert "python3 scripts/release-context" not in step["run"]
 
     forbidden = {
         ("git", "tag"),
@@ -347,6 +434,7 @@ def main():
     release_text = (root / ".github/workflows/release-please.yaml").read_text(encoding="utf-8")
     release = yaml.safe_load(release_text)
     assert_release_files(root)
+    assert_release_context_surface(root)
     assert_ci(ci)
     assert_release_workflow(release, release_text)
     assert_immutable_actions(ci, release)
