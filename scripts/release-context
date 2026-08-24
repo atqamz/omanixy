@@ -10,9 +10,10 @@ from pathlib import Path
 CLASSIFICATIONS = ("exact", "adapted", "omitted", "blocked")
 SUPPORT_STATES = ("supported", "experimental", "omitted", "blocked")
 REVISION_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+SEMVER_IDENTIFIER = r"(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)"
 SEMVER_PATTERN = re.compile(
-    r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
-    r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
+    rf"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
+    rf"(?:-{SEMVER_IDENTIFIER}(?:\.{SEMVER_IDENTIFIER})*)?"
     r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
 )
 RELEASE_HEADING_PATTERN = re.compile(
@@ -209,7 +210,7 @@ def format_counts(counter, names):
     return "\n".join(f"- {name}: {counter.get(name, 0)}" for name in names)
 
 
-def render_context(data):
+def render_context(data, version):
     nixpkgs_line = []
     if data["nixpkgs_revision"]:
         nixpkgs_line = [f"- nixpkgs: `{data['nixpkgs_revision']}`", ""]
@@ -217,6 +218,10 @@ def render_context(data):
         "- Security posture: "
         f"{data['security_count']} security/session entries remain experimental, opt-in, and disabled by default; "
         "none are supported."
+    )
+    ledger_url = (
+        "https://github.com/atqamz/omanixy/blob/"
+        f"v{version}/upstream/porting-matrix.yaml"
     )
     lines = [
         "### Upstream",
@@ -231,7 +236,7 @@ def render_context(data):
         "- Support counts:",
         format_counts(data["support_states"], SUPPORT_STATES),
         security_line,
-        "- Full ledger: [upstream/porting-matrix.yaml](upstream/porting-matrix.yaml)",
+        f"- Full ledger: [upstream/porting-matrix.yaml]({ledger_url})",
     ]
     return "\n".join(lines).rstrip() + "\n"
 
@@ -343,7 +348,7 @@ def run(mode, root):
         if release_entries(changelog.splitlines(keepends=True)):
             raise ReleaseContextError("bootstrap 0.0.0 changelog must not contain a release entry")
         return
-    context = render_context(data)
+    context = render_context(data, version)
     if mode == "--write":
         updated = update_changelog(changelog, version, context)
         (root / "CHANGELOG.md").write_text(updated, encoding="utf-8")
