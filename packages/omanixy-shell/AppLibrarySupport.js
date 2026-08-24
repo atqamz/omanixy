@@ -3,18 +3,19 @@ function semanticDesktopId(value) {
 }
 
 function normalizeDesktopId(value) {
-  return semanticDesktopId(value).trim()
+  var id = semanticDesktopId(value).trim()
+  if (id.slice(-8) === ".desktop") id = id.slice(0, -8)
+  return id
 }
 
 function desktopFileId(value) {
-  var id = semanticDesktopId(value)
+  var id = semanticDesktopId(value).trim()
   if (id.slice(-8) === ".desktop") id = id.slice(0, -8)
   return id
 }
 
 function isValidDesktopId(value) {
-  var id = normalizeDesktopId(value)
-  return /^[A-Za-z0-9][A-Za-z0-9 _.@+-]*$/.test(id)
+  return /^[A-Za-z0-9][A-Za-z0-9 _.@+-]*$/.test(semanticDesktopId(value))
 }
 
 function hasEntry(entries, id) {
@@ -24,7 +25,7 @@ function hasEntry(entries, id) {
 }
 
 function canRemove(value, entries) {
-  var id = normalizeDesktopId(value)
+  var id = semanticDesktopId(value)
   return isValidDesktopId(id) && hasEntry(entries, id)
 }
 
