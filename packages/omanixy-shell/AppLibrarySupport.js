@@ -28,14 +28,10 @@ function canRemove(value, entries) {
   return isValidDesktopId(id) && hasEntry(entries, id)
 }
 
-function shellQuote(value) {
-  return "'" + String(value).replace(/'/g, "'\\''") + "'"
-}
-
 function launchCommand(value) {
   var id = semanticDesktopId(value)
-  if (!id) return ""
-  return "uwsm app -- gtk-launch " + shellQuote(id + ".desktop")
+  if (!id) return []
+  return ["uwsm", "app", "--", "gtk-launch", id + ".desktop"]
 }
 
 function entryIdentities(entry) {
@@ -76,11 +72,6 @@ function matchingToplevels(entry, toplevels) {
   return exact.length > 0 ? exact : folded
 }
 
-function findMatchingToplevel(entry, toplevels) {
-  var matches = matchingToplevels(entry, toplevels)
-  return matches.length === 1 ? matches[0] : null
-}
-
 function activationSucceeded(target, activeToplevel) {
   return !!target && (!!target.activated || activeToplevel === target)
 }
@@ -107,7 +98,6 @@ if (typeof module !== "undefined") {
     entryIdentities,
     matchStrength,
     matchingToplevels,
-    findMatchingToplevel,
     activationSucceeded,
     coldLaunchSucceeded
   }
