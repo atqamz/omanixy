@@ -29,8 +29,8 @@ const support = require(process.argv[2]);
 if (support.semanticDesktopId(" org.telegram.desktop ") !== " org.telegram.desktop ") {
   throw new Error("semantic desktop id was mutated");
 }
-if (support.normalizeDesktopId(" org.telegram.desktop ") !== "org.telegram.desktop") {
-  throw new Error("configuration/deletion normalization drifted");
+if (support.normalizeDesktopId(" org.example.User.desktop ") !== "org.example.User") {
+  throw new Error("legacy hide/config normalization drifted");
 }
 if (support.desktopFileId("org.telegram.desktop.desktop") !== "org.telegram.desktop") {
   throw new Error("desktop filename was not converted to its semantic id");
@@ -59,30 +59,34 @@ if (support.launchCommand("") !== "") {
 }
 
 const exact = { appId: "org.example.User", title: "irrelevant" };
-if (support.findMatchingToplevel({ id: "org.example.User", startupClass: "" }, [exact]) !== exact) {
+if (support.matchingToplevels({ id: "org.example.User", startupClass: "" }, [exact]).length !== 1 || support.matchingToplevels({ id: "org.example.User", startupClass: "" }, [exact])[0] !== exact) {
   throw new Error("desktop id did not exactly match appId");
 }
 
 const startup = { appId: "ExampleStartup", title: "irrelevant" };
-if (support.findMatchingToplevel({ id: "org.example.User", startupClass: "ExampleStartup" }, [startup]) !== startup) {
+const startupMatches = support.matchingToplevels({ id: "org.example.User", startupClass: "ExampleStartup" }, [startup]);
+if (startupMatches.length !== 1 || startupMatches[0] !== startup) {
   throw new Error("StartupWMClass did not exactly match appId");
 }
 
 const suffixId = { appId: "org.telegram.desktop", title: "irrelevant" };
-if (support.findMatchingToplevel({ id: "org.telegram.desktop", startupClass: "" }, [suffixId]) !== suffixId) {
+const suffixMatches = support.matchingToplevels({ id: "org.telegram.desktop", startupClass: "" }, [suffixId]);
+if (suffixMatches.length !== 1 || suffixMatches[0] !== suffixId) {
   throw new Error("semantic desktop suffix was not preserved for toplevel matching");
 }
-if (support.findMatchingToplevel({ id: "org.telegram.desktop", startupClass: "" }, [{ appId: "org.telegram" }]) !== null) {
+if (support.matchingToplevels({ id: "org.telegram.desktop", startupClass: "" }, [{ appId: "org.telegram" }]).length !== 0) {
   throw new Error("semantic .desktop suffix was incorrectly stripped during matching");
 }
 
 const folded = { appId: "org.example.case", title: "irrelevant" };
-if (support.findMatchingToplevel({ id: "Org.Example.Case", startupClass: "" }, [folded]) !== folded) {
+const foldedMatches = support.matchingToplevels({ id: "Org.Example.Case", startupClass: "" }, [folded]);
+if (foldedMatches.length !== 1 || foldedMatches[0] !== folded) {
   throw new Error("unique case-normalized identity did not match");
 }
 
 const exactPreferred = { appId: "Org.Example.Case", title: "irrelevant" };
-if (support.findMatchingToplevel({ id: "Org.Example.Case", startupClass: "" }, [folded, exactPreferred]) !== exactPreferred) {
+const preferredMatches = support.matchingToplevels({ id: "Org.Example.Case", startupClass: "" }, [folded, exactPreferred]);
+if (preferredMatches.length !== 1 || preferredMatches[0] !== exactPreferred) {
   throw new Error("exact identity did not outrank case-normalized identity");
 }
 
@@ -92,16 +96,13 @@ const duplicateEntry = { id: "org.example.Duplicate", startupClass: "" };
 if (support.matchingToplevels(duplicateEntry, [duplicateA, duplicateB]).length !== 2) {
   throw new Error("matching set lost a valid multi-window application");
 }
-if (support.findMatchingToplevel(duplicateEntry, [duplicateA, duplicateB]) !== null) {
-  throw new Error("ambiguous matching selected an arbitrary toplevel");
-}
 
 const titleOnly = { appId: "org.example.Other", title: "org.example.User" };
-if (support.findMatchingToplevel({ id: "org.example.User", startupClass: "" }, [titleOnly]) !== null) {
+if (support.matchingToplevels({ id: "org.example.User", startupClass: "" }, [titleOnly]).length !== 0) {
   throw new Error("window title incorrectly participated in application identity");
 }
 
-if (support.findMatchingToplevel({ id: "org.example.User", startupClass: "" }, []) !== null) {
+if (support.matchingToplevels({ id: "org.example.User", startupClass: "" }, []).length !== 0) {
   throw new Error("empty toplevel set produced a match");
 }
 
