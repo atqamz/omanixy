@@ -28,10 +28,14 @@ function canRemove(value, entries) {
   return isValidDesktopId(id) && hasEntry(entries, id)
 }
 
+function shellQuote(value) {
+  return "'" + String(value).replace(/'/g, "'\\''") + "'"
+}
+
 function launchCommand(value) {
   var id = semanticDesktopId(value)
-  if (!id) return []
-  return ["uwsm", "app", "--", "gtk-launch", id + ".desktop"]
+  if (!id) return ""
+  return "uwsm app -- gtk-launch " + shellQuote(id + ".desktop")
 }
 
 function entryIdentities(entry) {
