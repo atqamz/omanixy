@@ -136,6 +136,7 @@ def assert_release_context(root):
             'f"v{version}/upstream/porting-matrix.yaml"',
         ),
     )
+    assert "SEMVER_IDENTIFIER" not in source
     assert "\nimport yaml\n" not in source
     assert "import yaml" in source
 
