@@ -241,8 +241,8 @@ branch deletion -> rejected
 ```
 
 Release tags are public consumer addresses and also require repository-state immutability.
-An active tag ruleset targeting `v*` must allow the release path to create a new tag while rejecting ordinary updates and deletions of existing release tags.
-Any bypass must be narrowly scoped to creation required by the release automation, not a general ability to retarget or delete published versions.
+An active tag ruleset targeting `v*` must leave tag creation unrestricted for the normal release path while restricting updates and deletions of existing release tags.
+No tag-update or tag-deletion bypass should be granted to ordinary humans or generic automation.
 GitHub supports tag rulesets with update/deletion restrictions; this state must be verified rather than inferred from workflow code.
 
 A `protected: true` API field alone is not evidence.
