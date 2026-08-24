@@ -101,6 +101,11 @@ jobs:
               expected_release_files="$(printf '%s\n' .release-please-manifest.json CHANGELOG.md version.txt | LC_ALL=C sort)"
               test "$actual_release_files" = "$expected_release_files"
             fi
+            for path in .release-please-manifest.json version.txt CHANGELOG.md; do
+              tree_entry="$(git ls-tree "$HEAD_SHA" -- "$path")"
+              test "$(awk '{print $1}' <<< "$tree_entry")" = 100644
+              test "$(awk '{print $2}' <<< "$tree_entry")" = blob
+            done
             pyyaml_store="$(nix build --inputs-from . --no-link --print-out-paths nixpkgs#python3Packages.pyyaml)"
             pyyaml_site="$(find "$pyyaml_store/lib" -type d -name site-packages -print -quit)"
             test -n "$pyyaml_site"
