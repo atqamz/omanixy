@@ -227,7 +227,7 @@ def assert_release_artifact_shape(step):
             "'.body'",
             "'.draft'",
             "'.prerelease'",
-            'test "$expected_notes"',
+            ' = "$expected_notes"',
         ),
     )
 
@@ -290,8 +290,8 @@ def assert_release_workflow(release, release_text):
     assert_contains_all(
         release_state["run"],
         (
-            'test "$(jq -r \'.object.type\' <<< "$tag_json")" = commit',
-            'test "$(jq -r \'.object.sha\' <<< "$tag_json")" = "$EXPECTED_SHA"',
+            'test "$(jq -r \' .object.type\' <<< "$tag_json")" = commit'.replace("' .", "'."),
+            'test "$(jq -r \' .object.sha\' <<< "$tag_json")" = "$EXPECTED_SHA"'.replace("' .", "'."),
             'test "$target" = "$EXPECTED_SHA"',
             'test "$tag_target" = "$EXPECTED_SHA"',
             'test "$name" = "$tag"',
