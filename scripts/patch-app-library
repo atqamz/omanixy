@@ -61,6 +61,8 @@ def main() -> int:
             '    if (!AppLibrarySupport.isValidDesktopId(id)) return',
             '    var entry = DesktopEntries.byId(id)',
             '    if (!entry) return',
+            '    id = AppLibrarySupport.normalizeDesktopId(entry.id)',
+            '    if (!AppLibrarySupport.isValidDesktopId(id)) return',
             '    var matches = AppLibrarySupport.matchingToplevels(entry, ToplevelManager.toplevels.values || [])',
             '    var toplevel = matches.length === 1 ? matches[0] : null',
             '    if (toplevel) {',
