@@ -26,8 +26,11 @@ app_library="$compatibility_root/shell/services/AppLibrary.qml"
 node - "$support" <<'NODE'
 const support = require(process.argv[2]);
 
+if (support.semanticDesktopId(" org.telegram.desktop ") !== " org.telegram.desktop ") {
+  throw new Error("semantic desktop id was mutated");
+}
 if (support.normalizeDesktopId(" org.telegram.desktop ") !== "org.telegram.desktop") {
-  throw new Error("semantic desktop id lost its .desktop suffix");
+  throw new Error("configuration/deletion normalization drifted");
 }
 if (support.desktopFileId("org.telegram.desktop.desktop") !== "org.telegram.desktop") {
   throw new Error("desktop filename was not converted to its semantic id");
@@ -45,10 +48,14 @@ if (support.launchCommand("org.telegram.desktop") !== "uwsm app -- gtk-launch 'o
 if (support.launchCommand("Example App") !== "uwsm app -- gtk-launch 'Example App.desktop'") {
   throw new Error("desktop id containing a space was not preserved");
 }
-for (const id of ["../escape", "bad;id", "bad/id", ""]) {
-  if (support.launchCommand(id) !== "") {
-    throw new Error(`invalid desktop id produced a launch command: ${id}`);
-  }
+if (support.launchCommand("bad;id") !== "uwsm app -- gtk-launch 'bad;id.desktop'") {
+  throw new Error("shell metacharacter was not contained as one quoted desktop id argument");
+}
+if (support.launchCommand("odd'id") !== "uwsm app -- gtk-launch 'odd'\\''id.desktop'") {
+  throw new Error("single quote was not escaped as one desktop id argument");
+}
+if (support.launchCommand("") !== "") {
+  throw new Error("empty desktop id produced a launch command");
 }
 
 const exact = { appId: "org.example.User", title: "irrelevant" };
@@ -130,7 +137,10 @@ if (support.activationSucceeded(activationTarget, unrelated)) {
 }
 NODE
 
-grep -Fq 'id = AppLibrarySupport.normalizeDesktopId(entry.id)' "$app_library"
+grep -Fq 'var id = AppLibrarySupport.semanticDesktopId(desktopId)' "$app_library"
+grep -Fq 'var entry = DesktopEntries.byId(id)' "$app_library"
+grep -Fq 'if (!entry) return' "$app_library"
+grep -Fq 'id = AppLibrarySupport.semanticDesktopId(entry.id)' "$app_library"
 grep -Fq 'AppLibrarySupport.matchingToplevels(entry, ToplevelManager.toplevels.values || [])' "$app_library"
 grep -Fq 'toplevel.activate()' "$app_library"
 grep -Fq 'AppLibrarySupport.activationSucceeded(root.launchTargetToplevel, active)' "$app_library"
