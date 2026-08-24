@@ -159,6 +159,31 @@ jobs:
           test "$actual_body" = "$expected_body"
           current_sha="$(git ls-remote --refs origin refs/heads/main | cut -f1)"
           test "$current_sha" = "$EXPECTED_SHA"
+      - name: Verify publish preconditions
+        if: steps.main-identity.outputs.current == 'true' && steps.merged-pr.outputs.release_commit == 'true' && steps.merged-pr.outputs.pending == 'true' && steps.release-state.outputs.exists != 'true'
+        working-directory: trusted-main
+        env:
+          EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
+          RELEASE_PR_NUMBER: ${{ steps.merged-pr.outputs.number }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu -o pipefail
+          current_sha="$(git ls-remote --refs origin refs/heads/main | cut -f1)"
+          test "$current_sha" = "$EXPECTED_SHA"
+          version="$(cat version.txt)"
+          expected_title="chore(main): release $version"
+          expected_body="$(python3 scripts/release-context --render-pr-body)"
+          pr_json="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$RELEASE_PR_NUMBER")"
+          test "$(jq -r '.merged_at' <<< "$pr_json")" != null
+          test "$(jq -r '.merge_commit_sha' <<< "$pr_json")" = "$EXPECTED_SHA"
+          test "$(jq -r '.user.login' <<< "$pr_json")" = "github-actions[bot]"
+          test "$(jq -r '.title' <<< "$pr_json")" = "$expected_title"
+          test "$(jq -r '.body' <<< "$pr_json")" = "$expected_body"
+          test "$(jq '[.labels[].name | select(. == "autorelease: pending")] | length' <<< "$pr_json")" = 1
+          test "$(jq '[.labels[].name | select(. == "autorelease: tagged")] | length' <<< "$pr_json")" = 0
+          pending_prs="$(gh pr list --repo "$GITHUB_REPOSITORY" --state merged --base main --label "autorelease: pending" --limit 200 --json number)"
+          test "$(jq length <<< "$pending_prs")" = 1
+          test "$(jq -r '.[0].number' <<< "$pending_prs")" = "$RELEASE_PR_NUMBER"
       - name: Publish merged Release PR
         id: publish
         if: steps.main-identity.outputs.current == 'true' && steps.merged-pr.outputs.release_commit == 'true' && steps.merged-pr.outputs.pending == 'true' && steps.release-state.outputs.exists != 'true'
@@ -345,7 +370,6 @@ jobs:
           pyyaml_site="$(find "$pyyaml_store/lib" -type d -name site-packages -print -quit)"
           test -n "$pyyaml_site"
           PYTHONPATH="$pyyaml_site" nix shell --inputs-from "$TRUSTED_ROOT" nixpkgs#python3 -c python3 "$TRUSTED_ROOT/scripts/release-context" --write
-          PYTHONPATH="$pyyaml_site" nix shell --inputs-from "$TRUSTED_ROOT" nixpkgs#python3 -c python3 "$TRUSTED_ROOT/scripts/release-context" --check
           if ! git diff --quiet -- CHANGELOG.md; then
             test "$(git diff --name-only)" = "CHANGELOG.md"
             current_sha="$(git -C "$TRUSTED_ROOT" ls-remote --refs origin refs/heads/main | cut -f1)"
@@ -374,3 +398,4 @@ jobs:
           test "$actual_body" = "$expected_body"
           pr_head_sha="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$RELEASE_PR_NUMBER" --jq '.head.sha')"
           test "$pr_head_sha" = "$candidate_sha"
+          PYTHONPATH="$pyyaml_site" nix shell --inputs-from "$TRUSTED_ROOT" nixpkgs#python3 -c python3 "$TRUSTED_ROOT/scripts/release-context" --check
