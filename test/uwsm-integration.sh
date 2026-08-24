@@ -26,10 +26,17 @@ app_library="$compatibility_root/shell/services/AppLibrary.qml"
 node - "$support" <<'NODE'
 const support = require(process.argv[2]);
 
-for (const id of ["org.example.User", "org.example.User.desktop"]) {
-  if (support.launchCommand(id) !== "uwsm app -- gtk-launch 'org.example.User.desktop'") {
-    throw new Error(`unexpected direct UWSM command for ${id}`);
-  }
+if (support.normalizeDesktopId(" org.telegram.desktop ") !== "org.telegram.desktop") {
+  throw new Error("semantic desktop id lost its .desktop suffix");
+}
+if (support.desktopFileId("org.telegram.desktop.desktop") !== "org.telegram.desktop") {
+  throw new Error("desktop filename was not converted to its semantic id");
+}
+if (support.launchCommand("org.example.User") !== "uwsm app -- gtk-launch 'org.example.User.desktop'") {
+  throw new Error("unexpected direct UWSM command for ordinary desktop id");
+}
+if (support.launchCommand("org.telegram.desktop") !== "uwsm app -- gtk-launch 'org.telegram.desktop.desktop'") {
+  throw new Error("semantic id ending in .desktop was truncated before gtk-launch");
 }
 if (support.launchCommand("Example App") !== "uwsm app -- gtk-launch 'Example App.desktop'") {
   throw new Error("desktop id containing a space was not preserved");
@@ -50,9 +57,17 @@ if (support.findMatchingToplevel({ id: "org.example.User", startupClass: "Exampl
   throw new Error("StartupWMClass did not exactly match appId");
 }
 
+const suffixId = { appId: "org.telegram.desktop", title: "irrelevant" };
+if (support.findMatchingToplevel({ id: "org.telegram.desktop", startupClass: "" }, [suffixId]) !== suffixId) {
+  throw new Error("semantic desktop suffix was not preserved for toplevel matching");
+}
+if (support.findMatchingToplevel({ id: "org.telegram.desktop", startupClass: "" }, [{ appId: "org.telegram" }]) !== null) {
+  throw new Error("semantic .desktop suffix was incorrectly stripped during matching");
+}
+
 const folded = { appId: "org.example.case", title: "irrelevant" };
-if (support.findMatchingToplevel({ id: "Org.Example.Case.desktop", startupClass: "" }, [folded]) !== folded) {
-  throw new Error("unique ASCII case-normalized identity did not match");
+if (support.findMatchingToplevel({ id: "Org.Example.Case", startupClass: "" }, [folded]) !== folded) {
+  throw new Error("unique case-normalized identity did not match");
 }
 
 const exactPreferred = { appId: "Org.Example.Case", title: "irrelevant" };
@@ -62,7 +77,11 @@ if (support.findMatchingToplevel({ id: "Org.Example.Case", startupClass: "" }, [
 
 const duplicateA = { appId: "org.example.Duplicate", title: "first" };
 const duplicateB = { appId: "org.example.Duplicate", title: "second" };
-if (support.findMatchingToplevel({ id: "org.example.Duplicate", startupClass: "" }, [duplicateA, duplicateB]) !== null) {
+const duplicateEntry = { id: "org.example.Duplicate", startupClass: "" };
+if (support.matchingToplevels(duplicateEntry, [duplicateA, duplicateB]).length !== 2) {
+  throw new Error("matching set lost a valid multi-window application");
+}
+if (support.findMatchingToplevel(duplicateEntry, [duplicateA, duplicateB]) !== null) {
   throw new Error("ambiguous matching selected an arbitrary toplevel");
 }
 
@@ -74,11 +93,45 @@ if (support.findMatchingToplevel({ id: "org.example.User", startupClass: "" }, [
 if (support.findMatchingToplevel({ id: "org.example.User", startupClass: "" }, []) !== null) {
   throw new Error("empty toplevel set produced a match");
 }
+
+const entry = { id: "org.example.User", startupClass: "" };
+const unrelated = { appId: "org.example.Other", title: "irrelevant" };
+const launchedA = { appId: "org.example.User", title: "new-a" };
+const launchedB = { appId: "org.example.User", title: "new-b" };
+if (!support.coldLaunchSucceeded(entry, [launchedA], [], unrelated, unrelated)) {
+  throw new Error("new matching toplevel did not complete cold-launch feedback");
+}
+if (!support.coldLaunchSucceeded(entry, [launchedA, launchedB], [], unrelated, unrelated)) {
+  throw new Error("multi-window cold launch incorrectly required a unique toplevel");
+}
+if (support.coldLaunchSucceeded(entry, [launchedA, launchedB], [launchedA, launchedB], unrelated, unrelated)) {
+  throw new Error("pre-existing matching toplevels falsely completed cold-launch feedback");
+}
+if (!support.coldLaunchSucceeded(entry, [launchedA, launchedB], [launchedA, launchedB], unrelated, launchedB)) {
+  throw new Error("single-instance handoff focus did not complete cold-launch feedback");
+}
+if (support.coldLaunchSucceeded(entry, [unrelated], [], unrelated, unrelated)) {
+  throw new Error("unrelated toplevel incorrectly completed cold-launch feedback");
+}
+
+const activationTarget = { appId: "org.example.User", activated: false };
+if (!support.activationSucceeded(activationTarget, activationTarget)) {
+  throw new Error("active target did not complete activation feedback");
+}
+if (!support.activationSucceeded({ appId: "org.example.User", activated: true }, unrelated)) {
+  throw new Error("activated target property did not complete activation feedback");
+}
+if (support.activationSucceeded(activationTarget, unrelated)) {
+  throw new Error("unfocused target incorrectly completed activation feedback");
+}
 NODE
 
-grep -Fq 'AppLibrarySupport.findMatchingToplevel(entry, ToplevelManager.toplevels.values || [])' "$app_library"
+grep -Fq 'AppLibrarySupport.matchingToplevels(entry, ToplevelManager.toplevels.values || [])' "$app_library"
 grep -Fq 'toplevel.activate()' "$app_library"
-grep -Fq 'root.launchTargetToplevel.activated' "$app_library"
+grep -Fq 'AppLibrarySupport.activationSucceeded(root.launchTargetToplevel, active)' "$app_library"
+grep -Fq 'AppLibrarySupport.coldLaunchSucceeded(' "$app_library"
+grep -Fq 'root.launchInitialMatches' "$app_library"
+grep -Fq 'AppLibrarySupport.desktopFileId(lines[i])' "$app_library"
 grep -Fq 'uwsm app -- gtk-launch ' "$support"
 if grep -Fq 'uwsm-app -- gtk-launch' "$app_library" "$support"; then
   printf '%s\n' 'built launcher still depends on uwsm-app daemon path' >&2
