@@ -148,6 +148,9 @@ grep -Fq 'AppLibrarySupport.activationSucceeded(root.launchTargetToplevel, activ
 grep -Fq 'AppLibrarySupport.coldLaunchSucceeded(' "$app_library"
 grep -Fq 'root.launchInitialMatches' "$app_library"
 grep -Fq 'AppLibrarySupport.desktopFileId(lines[i])' "$app_library"
+launch_feedback=$(sed -n '/function beginLaunchFeedback/,/launchTimeout.restart()/p' "$app_library")
+grep -Fq 'Quickshell.execDetached(["omarchy-shell", "osd", "close"])' <<<"$launch_feedback"
+grep -Fq 'root.launchOsdOpen = false' <<<"$launch_feedback"
 grep -Fq 'uwsm app -- gtk-launch ' "$support"
 if grep -Fq 'uwsm-app -- gtk-launch' "$app_library" "$support"; then
   printf '%s\n' 'built launcher still depends on uwsm-app daemon path' >&2
