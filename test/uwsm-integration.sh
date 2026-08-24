@@ -32,6 +32,10 @@ if (support.normalizeDesktopId(" org.telegram.desktop ") !== "org.telegram.deskt
 if (support.desktopFileId("org.telegram.desktop.desktop") !== "org.telegram.desktop") {
   throw new Error("desktop filename was not converted to its semantic id");
 }
+const ownedSuffix = { "org.telegram.desktop": true };
+if (!support.canRemove("org.telegram.desktop", ownedSuffix) || support.canRemove("org.telegram", ownedSuffix)) {
+  throw new Error("launcher deletion ownership confused a semantic .desktop suffix with a filename suffix");
+}
 if (support.launchCommand("org.example.User") !== "uwsm app -- gtk-launch 'org.example.User.desktop'") {
   throw new Error("unexpected direct UWSM command for ordinary desktop id");
 }
@@ -126,6 +130,7 @@ if (support.activationSucceeded(activationTarget, unrelated)) {
 }
 NODE
 
+grep -Fq 'id = AppLibrarySupport.normalizeDesktopId(entry.id)' "$app_library"
 grep -Fq 'AppLibrarySupport.matchingToplevels(entry, ToplevelManager.toplevels.values || [])' "$app_library"
 grep -Fq 'toplevel.activate()' "$app_library"
 grep -Fq 'AppLibrarySupport.activationSucceeded(root.launchTargetToplevel, active)' "$app_library"
