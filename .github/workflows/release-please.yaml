@@ -52,6 +52,7 @@ jobs:
           test "$(jq length <<< "$matches")" = "1"
           number="$(jq -r '.[0].number' <<< "$matches")"
           author="$(jq -r '.[0].user.login' <<< "$matches")"
+          title="$(jq -r '.[0].title' <<< "$matches")"
           pending="$(jq '[.[0].labels[].name | select(. == "autorelease: pending")] | length == 1' <<< "$matches")"
           tagged="$(jq '[.[0].labels[].name | select(. == "autorelease: tagged")] | length == 1' <<< "$matches")"
           release_commit=false
@@ -59,6 +60,8 @@ jobs:
             actual_release_files="$(git diff-tree --no-commit-id --name-only -r "$EXPECTED_SHA" | LC_ALL=C sort)"
             expected_release_files="$(printf '%s\n' .release-please-manifest.json CHANGELOG.md version.txt | LC_ALL=C sort)"
             test "$actual_release_files" = "$expected_release_files"
+            expected_title="chore(main): release $(cat version.txt)"
+            test "$title" = "$expected_title"
             release_commit=true
           fi
           printf 'number=%s\nrelease_commit=%s\npending=%s\ntagged=%s\n' "$number" "$release_commit" "$pending" "$tagged" >> "$GITHUB_OUTPUT"
@@ -90,13 +93,41 @@ jobs:
           set -eu -o pipefail
           version="$(cat version.txt)"
           tag="v$version"
+          expected_notes="$(python3 scripts/release-context --release-notes)"
           if release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" 2>/dev/null)"; then
             target="$(jq -r '.target_commitish' <<< "$release_json")"
+            name="$(jq -r '.name' <<< "$release_json")"
+            body="$(jq -r '.body' <<< "$release_json")"
+            draft="$(jq -r '.draft' <<< "$release_json")"
+            prerelease="$(jq -r '.prerelease' <<< "$release_json")"
+            tag_target="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq '.object.sha')"
             test "$target" = "$EXPECTED_SHA"
+            test "$tag_target" = "$EXPECTED_SHA"
+            test "$name" = "$tag"
+            test "$body" = "$expected_notes"
+            test "$draft" = false
+            test "$prerelease" = false
             printf 'exists=true\ntag=%s\n' "$tag" >> "$GITHUB_OUTPUT"
           else
             printf 'exists=false\ntag=%s\n' "$tag" >> "$GITHUB_OUTPUT"
           fi
+      - name: Canonicalize merged Release PR body
+        if: steps.main-identity.outputs.current == 'true' && steps.merged-pr.outputs.release_commit == 'true' && steps.merged-pr.outputs.pending == 'true' && steps.release-state.outputs.exists != 'true'
+        working-directory: trusted-main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_PR_NUMBER: ${{ steps.merged-pr.outputs.number }}
+        run: |
+          set -eu -o pipefail
+          version="$(cat version.txt)"
+          expected_title="chore(main): release $version"
+          current_title="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$RELEASE_PR_NUMBER" --jq '.title')"
+          test "$current_title" = "$expected_title"
+          expected_body="$(python3 scripts/release-context --render-pr-body)"
+          jq -n --arg body "$expected_body" '{body: $body}' |
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/pulls/$RELEASE_PR_NUMBER" --input - >/dev/null
+          actual_body="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$RELEASE_PR_NUMBER" --jq '.body')"
+          test "$actual_body" = "$expected_body"
       - name: Publish merged Release PR
         id: publish
         if: steps.main-identity.outputs.current == 'true' && steps.merged-pr.outputs.release_commit == 'true' && steps.merged-pr.outputs.pending == 'true' && steps.release-state.outputs.exists != 'true'
@@ -114,20 +145,34 @@ jobs:
           RELEASE_CREATED: ${{ steps.publish.outputs.release_created }}
           RELEASE_SHA: ${{ steps.publish.outputs.sha }}
           RELEASE_TAG: ${{ steps.publish.outputs.tag_name }}
+          RELEASE_BODY: ${{ steps.publish.outputs.body }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -eu -o pipefail
+          version="$(cat version.txt)"
+          tag="v$version"
+          expected_notes="$(python3 scripts/release-context --release-notes)"
           test "$RELEASE_CREATED" = true
           test "$RELEASE_SHA" = "$EXPECTED_SHA"
-          test "$RELEASE_TAG" = "v$(cat version.txt)"
+          test "$RELEASE_TAG" = "$tag"
+          test "$RELEASE_BODY" = "$expected_notes"
           current_sha="$(git ls-remote --refs origin refs/heads/main | cut -f1)"
           test "$current_sha" = "$EXPECTED_SHA"
+          release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag")"
+          test "$(jq -r '.target_commitish' <<< "$release_json")" = "$EXPECTED_SHA"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq '.object.sha')" = "$EXPECTED_SHA"
+          test "$(jq -r '.name' <<< "$release_json")" = "$tag"
+          test "$(jq -r '.body' <<< "$release_json")" = "$expected_notes"
+          test "$(jq -r '.draft' <<< "$release_json")" = false
+          test "$(jq -r '.prerelease' <<< "$release_json")" = false
       - name: Reconcile exact existing release labels
         if: steps.main-identity.outputs.current == 'true' && steps.merged-pr.outputs.release_commit == 'true' && steps.merged-pr.outputs.pending == 'true' && steps.release-state.outputs.exists == 'true'
         working-directory: trusted-main
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_PR_NUMBER: ${{ steps.merged-pr.outputs.number }}
-        run: gh pr edit "$RELEASE_PR_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label "autorelease: pending" --add-label "autorelease: tagged"
+        run: |
+          gh pr edit "$RELEASE_PR_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label "autorelease: pending" --add-label "autorelease: tagged"
       - name: Verify tagged release identity
         if: steps.main-identity.outputs.current == 'true' && steps.merged-pr.outputs.release_commit == 'true' && (steps.merged-pr.outputs.tagged == 'true' || steps.release-state.outputs.exists == 'true')
         working-directory: trusted-main
@@ -137,8 +182,14 @@ jobs:
         run: |
           set -eu -o pipefail
           tag="v$(cat version.txt)"
-          target="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" --jq '.target_commitish')"
-          test "$target" = "$EXPECTED_SHA"
+          expected_notes="$(python3 scripts/release-context --release-notes)"
+          release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag")"
+          test "$(jq -r '.target_commitish' <<< "$release_json")" = "$EXPECTED_SHA"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq '.object.sha')" = "$EXPECTED_SHA"
+          test "$(jq -r '.name' <<< "$release_json")" = "$tag"
+          test "$(jq -r '.body' <<< "$release_json")" = "$expected_notes"
+          test "$(jq -r '.draft' <<< "$release_json")" = false
+          test "$(jq -r '.prerelease' <<< "$release_json")" = false
       - name: Maintain Release PR
         id: maintain
         if: steps.main-identity.outputs.current == 'true'
@@ -206,11 +257,16 @@ jobs:
         working-directory: release-pr
         env:
           EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_PR_NUMBER: ${{ steps.release-pr.outputs.number }}
         run: |
           set -eu -o pipefail
           actual_release_files="$(git diff --name-only "$EXPECTED_SHA...HEAD" | LC_ALL=C sort)"
           expected_release_files="$(printf '%s\n' .release-please-manifest.json CHANGELOG.md version.txt | LC_ALL=C sort)"
           test "$actual_release_files" = "$expected_release_files"
+          expected_title="chore(main): release $(cat version.txt)"
+          actual_title="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$RELEASE_PR_NUMBER" --jq '.title')"
+          test "$actual_title" = "$expected_title"
       - uses: DeterminateSystems/determinate-nix-action@527f17dd63d2d60d3e5552934bc84b9a33a14d11
         if: steps.main-identity.outputs.current == 'true' && steps.release-pr.outputs.found == 'true'
         with:
@@ -222,6 +278,7 @@ jobs:
           EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
           TRUSTED_ROOT: ${{ github.workspace }}/trusted-main
           RELEASE_BRANCH: ${{ steps.release-pr.outputs.branch }}
+          RELEASE_PR_NUMBER: ${{ steps.release-pr.outputs.number }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -eu -o pipefail
@@ -232,18 +289,22 @@ jobs:
           test -n "$pyyaml_site"
           PYTHONPATH="$pyyaml_site" nix shell --inputs-from "$TRUSTED_ROOT" nixpkgs#python3 -c python3 "$TRUSTED_ROOT/scripts/release-context" --write
           PYTHONPATH="$pyyaml_site" nix shell --inputs-from "$TRUSTED_ROOT" nixpkgs#python3 -c python3 "$TRUSTED_ROOT/scripts/release-context" --check
-          if git diff --quiet -- CHANGELOG.md; then
-            exit 0
+          if ! git diff --quiet -- CHANGELOG.md; then
+            test "$(git diff --name-only)" = "CHANGELOG.md"
+            current_sha="$(git -C "$TRUSTED_ROOT" ls-remote --refs origin refs/heads/main | cut -f1)"
+            test "$current_sha" = "$EXPECTED_SHA"
+            candidate_sha="$(git rev-parse HEAD)"
+            remote_candidate_sha="$(git ls-remote --refs origin "refs/heads/$RELEASE_BRANCH" | cut -f1)"
+            test "$remote_candidate_sha" = "$candidate_sha"
+            git config user.name "release-please[bot]"
+            git config user.email "49699333+release-please[bot]@users.noreply.github.com"
+            git add CHANGELOG.md
+            git commit -m "chore(release): add compatibility context"
+            gh auth setup-git
+            git push origin "HEAD:refs/heads/$RELEASE_BRANCH"
           fi
-          test "$(git diff --name-only)" = "CHANGELOG.md"
-          current_sha="$(git -C "$TRUSTED_ROOT" ls-remote --refs origin refs/heads/main | cut -f1)"
-          test "$current_sha" = "$EXPECTED_SHA"
-          candidate_sha="$(git rev-parse HEAD)"
-          remote_candidate_sha="$(git ls-remote --refs origin "refs/heads/$RELEASE_BRANCH" | cut -f1)"
-          test "$remote_candidate_sha" = "$candidate_sha"
-          git config user.name "release-please[bot]"
-          git config user.email "49699333+release-please[bot]@users.noreply.github.com"
-          git add CHANGELOG.md
-          git commit -m "chore(release): add compatibility context"
-          gh auth setup-git
-          git push origin "HEAD:refs/heads/$RELEASE_BRANCH"
+          expected_body="$(python3 "$TRUSTED_ROOT/scripts/release-context" --render-pr-body)"
+          jq -n --arg body "$expected_body" '{body: $body}' |
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/pulls/$RELEASE_PR_NUMBER" --input - >/dev/null
+          actual_body="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$RELEASE_PR_NUMBER" --jq '.body')"
+          test "$actual_body" = "$expected_body"
