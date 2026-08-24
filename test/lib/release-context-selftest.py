@@ -125,7 +125,10 @@ def test_write_and_check_render_exact_context(tool):
         assert "omitted: 1" in content
         assert "blocked: 1" in content
         assert "experimental: 1" in content
-        assert "upstream/porting-matrix.yaml" in content
+        assert (
+            "https://github.com/atqamz/omanixy/blob/v0.1.0/upstream/porting-matrix.yaml"
+            in content
+        )
         assert content.count("### Upstream\n") == 1
         assert content.count("### Compatibility\n") == 1
         assert_ok(run_tool(tool, root, "--check"))
@@ -242,6 +245,23 @@ def test_manifest_version_mismatch_fails(tool):
         assert_failed(run_tool(tool, root, "--release-notes"))
 
 
+def test_invalid_semver_fails_closed(tool):
+    invalid_versions = (
+        "01.2.3",
+        "1.02.3",
+        "1.2.03",
+        "1.2.3-01",
+        "1.2.3-alpha.01",
+        "1.2.3-",
+    )
+    for version in invalid_versions:
+        with tempfile.TemporaryDirectory() as temp:
+            root = make_repo(Path(temp), tool, version=version)
+            assert_failed(run_tool(tool, root, "--check"))
+            assert_failed(run_tool(tool, root, "--release-notes"))
+            assert_failed(run_tool(tool, root, "--render-pr-body"))
+
+
 def main():
     tool = Path(sys.argv[1]).resolve()
     tests = [
@@ -257,6 +277,7 @@ def main():
         test_linked_release_heading_passes,
         test_version_heading_mismatch_fails,
         test_manifest_version_mismatch_fails,
+        test_invalid_semver_fails_closed,
     ]
     failures = []
     for test in tests:
