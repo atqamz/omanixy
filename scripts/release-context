@@ -6,8 +6,6 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-import yaml
-
 
 CLASSIFICATIONS = ("exact", "adapted", "omitted", "blocked")
 SUPPORT_STATES = ("supported", "experimental", "omitted", "blocked")
@@ -21,6 +19,11 @@ RELEASE_HEADING_PATTERN = re.compile(
     r"^## (?:\[)?(v?[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)(?:\])?(?:\([^)]*\))?(?:\s|$)"
 )
 SECTION_HEADING_PATTERN = re.compile(r"^### (.+?)\s*$")
+RELEASE_PR_HEADER = ":robot: I have created a release *beep* *boop*"
+RELEASE_PR_FOOTER = (
+    "This PR was generated with [Release Please](https://github.com/googleapis/release-please). "
+    "See [documentation](https://github.com/googleapis/release-please#release-please)."
+)
 
 
 class ReleaseContextError(ValueError):
@@ -47,6 +50,10 @@ def require_revision(value, label):
 
 
 def load_yaml(path):
+    try:
+        import yaml
+    except ImportError as error:
+        raise ReleaseContextError("PyYAML is required for upstream compatibility checks") from error
     try:
         value = yaml.safe_load(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, yaml.YAMLError) as error:
@@ -167,6 +174,22 @@ def entry_end(lines, start):
         if lines[index].startswith("## "):
             return index
     return len(lines)
+
+
+def candidate_entry(changelog, version):
+    lines = changelog.splitlines(keepends=True)
+    entries = release_entries(lines)
+    if not entries:
+        raise ReleaseContextError("CHANGELOG.md has no candidate release entry")
+    start, candidate_version = entries[0]
+    if candidate_version != version:
+        raise ReleaseContextError("CHANGELOG.md candidate heading does not match version.txt")
+    return "".join(lines[start:entry_end(lines, start)]).strip()
+
+
+def render_release_pr_body(changelog, version):
+    notes = candidate_entry(changelog, version)
+    return f"{RELEASE_PR_HEADER}\n---\n\n\n{notes}\n\n---\n{RELEASE_PR_FOOTER}\n"
 
 
 def section_blocks(lines):
@@ -303,8 +326,19 @@ def check_candidate(changelog, version, context):
 
 
 def run(mode, root):
-    data = load_upstream(root)
     version, changelog = load_release_state(root)
+    if mode == "--release-notes":
+        if version == "0.0.0":
+            raise ReleaseContextError("bootstrap 0.0.0 has no release notes")
+        sys.stdout.write(candidate_entry(changelog, version) + "\n")
+        return
+    if mode == "--render-pr-body":
+        if version == "0.0.0":
+            raise ReleaseContextError("bootstrap 0.0.0 has no Release PR body")
+        sys.stdout.write(render_release_pr_body(changelog, version))
+        return
+
+    data = load_upstream(root)
     if version == "0.0.0":
         if release_entries(changelog.splitlines(keepends=True)):
             raise ReleaseContextError("bootstrap 0.0.0 changelog must not contain a release entry")
@@ -322,9 +356,16 @@ def main():
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--write", action="store_true")
     group.add_argument("--check", action="store_true")
+    group.add_argument("--release-notes", action="store_true")
+    group.add_argument("--render-pr-body", action="store_true")
     args = parser.parse_args()
+    mode = next(
+        name
+        for name in ("--write", "--check", "--release-notes", "--render-pr-body")
+        if getattr(args, name[2:].replace("-", "_"))
+    )
     try:
-        run("--write" if args.write else "--check", Path.cwd())
+        run(mode, Path.cwd())
     except (OSError, UnicodeError, ReleaseContextError) as error:
         print(f"release-context: {error}", file=sys.stderr)
         return 1
