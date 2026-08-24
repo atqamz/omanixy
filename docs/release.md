@@ -24,7 +24,7 @@ While the current major version is zero:
 - breaking changes are next-minor because `bump-minor-pre-major` is enabled;
 - `bump-patch-for-minor-pre-major` is disabled;
 - `revert:` and configured visible `refactor:` changes are patch-level unless they carry a stronger semantic signal;
-- `docs`, `test`, `build`, `ci`, and `chore` are hidden and do not independently justify a release.
+- `docs`, `test`, `build`, `ci`, and `chore` are hidden from generated notes and do not independently create a Release PR because the pinned strategy suppresses candidates whose user-facing changelog is empty.
 
 No ordinary Conventional Commit can produce `1.0.0` while the current version is `0.x.y`.
 `v1.0.0` requires an explicit project stability decision and a `Release-As: 1.0.0` commit footer or the current equivalent Release Please mechanism.
