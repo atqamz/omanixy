@@ -60,6 +60,11 @@ jobs:
             actual_release_files="$(git diff-tree --no-commit-id --name-only -r "$EXPECTED_SHA" | LC_ALL=C sort)"
             expected_release_files="$(printf '%s\n' .release-please-manifest.json CHANGELOG.md version.txt | LC_ALL=C sort)"
             test "$actual_release_files" = "$expected_release_files"
+            for path in .release-please-manifest.json CHANGELOG.md version.txt; do
+              tree_entry="$(git ls-tree "$EXPECTED_SHA" -- "$path")"
+              test "$(awk '{print $1}' <<< "$tree_entry")" = 100644
+              test "$(awk '{print $2}' <<< "$tree_entry")" = blob
+            done
             expected_title="chore(main): release $(cat version.txt)"
             test "$title" = "$expected_title"
             release_commit=true
@@ -94,6 +99,10 @@ jobs:
           version="$(cat version.txt)"
           tag="v$version"
           expected_notes="$(python3 scripts/release-context --release-notes)"
+          if tag_json="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" 2>/dev/null)"; then
+            test "$(jq -r '.object.type' <<< "$tag_json")" = commit
+            test "$(jq -r '.object.sha' <<< "$tag_json")" = "$EXPECTED_SHA"
+          fi
           if release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" 2>/dev/null)"; then
             target="$(jq -r '.target_commitish' <<< "$release_json")"
             name="$(jq -r '.name' <<< "$release_json")"
@@ -156,8 +165,6 @@ jobs:
           test "$RELEASE_SHA" = "$EXPECTED_SHA"
           test "$RELEASE_TAG" = "$tag"
           test "$RELEASE_BODY" = "$expected_notes"
-          current_sha="$(git ls-remote --refs origin refs/heads/main | cut -f1)"
-          test "$current_sha" = "$EXPECTED_SHA"
           release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag")"
           test "$(jq -r '.target_commitish' <<< "$release_json")" = "$EXPECTED_SHA"
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq '.object.sha')" = "$EXPECTED_SHA"
@@ -190,9 +197,24 @@ jobs:
           test "$(jq -r '.body' <<< "$release_json")" = "$expected_notes"
           test "$(jq -r '.draft' <<< "$release_json")" = false
           test "$(jq -r '.prerelease' <<< "$release_json")" = false
+      - name: Recheck current main for maintenance
+        id: maintenance-main
+        if: steps.main-identity.outputs.current == 'true'
+        working-directory: trusted-main
+        env:
+          EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -eu -o pipefail
+          current_sha="$(git ls-remote --refs origin refs/heads/main | cut -f1)"
+          test -n "$current_sha"
+          if [ "$current_sha" = "$EXPECTED_SHA" ]; then
+            printf 'current=true\n' >> "$GITHUB_OUTPUT"
+          else
+            printf 'current=false\n' >> "$GITHUB_OUTPUT"
+          fi
       - name: Maintain Release PR
         id: maintain
-        if: steps.main-identity.outputs.current == 'true'
+        if: steps.maintenance-main.outputs.current == 'true'
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7
         with:
           config-file: release-please-config.json
@@ -201,7 +223,7 @@ jobs:
           skip-github-release: true
       - name: Find pending Release PR
         id: release-pr
-        if: steps.main-identity.outputs.current == 'true'
+        if: steps.maintenance-main.outputs.current == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -218,7 +240,7 @@ jobs:
           fi
       - name: Verify pending Release PR identity
         id: candidate-identity
-        if: steps.main-identity.outputs.current == 'true' && steps.release-pr.outputs.found == 'true'
+        if: steps.maintenance-main.outputs.current == 'true' && steps.release-pr.outputs.found == 'true'
         working-directory: trusted-main
         env:
           EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
@@ -246,14 +268,14 @@ jobs:
           test "$pending" = true
           printf 'head_sha=%s\n' "$head_sha" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        if: steps.main-identity.outputs.current == 'true' && steps.release-pr.outputs.found == 'true'
+        if: steps.maintenance-main.outputs.current == 'true' && steps.release-pr.outputs.found == 'true'
         with:
           ref: ${{ steps.candidate-identity.outputs.head_sha }}
           fetch-depth: 0
           path: release-pr
           persist-credentials: false
       - name: Verify Release PR file boundary
-        if: steps.main-identity.outputs.current == 'true' && steps.release-pr.outputs.found == 'true'
+        if: steps.maintenance-main.outputs.current == 'true' && steps.release-pr.outputs.found == 'true'
         working-directory: release-pr
         env:
           EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
@@ -264,15 +286,20 @@ jobs:
           actual_release_files="$(git diff --name-only "$EXPECTED_SHA...HEAD" | LC_ALL=C sort)"
           expected_release_files="$(printf '%s\n' .release-please-manifest.json CHANGELOG.md version.txt | LC_ALL=C sort)"
           test "$actual_release_files" = "$expected_release_files"
+          for path in .release-please-manifest.json CHANGELOG.md version.txt; do
+            tree_entry="$(git ls-tree HEAD -- "$path")"
+            test "$(awk '{print $1}' <<< "$tree_entry")" = 100644
+            test "$(awk '{print $2}' <<< "$tree_entry")" = blob
+          done
           expected_title="chore(main): release $(cat version.txt)"
           actual_title="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$RELEASE_PR_NUMBER" --jq '.title')"
           test "$actual_title" = "$expected_title"
       - uses: DeterminateSystems/determinate-nix-action@527f17dd63d2d60d3e5552934bc84b9a33a14d11
-        if: steps.main-identity.outputs.current == 'true' && steps.release-pr.outputs.found == 'true'
+        if: steps.maintenance-main.outputs.current == 'true' && steps.release-pr.outputs.found == 'true'
         with:
           github-token: ""
       - name: Write release context
-        if: steps.main-identity.outputs.current == 'true' && steps.release-pr.outputs.found == 'true'
+        if: steps.maintenance-main.outputs.current == 'true' && steps.release-pr.outputs.found == 'true'
         working-directory: release-pr
         env:
           EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
