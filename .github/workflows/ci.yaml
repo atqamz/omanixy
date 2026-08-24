@@ -1,0 +1,113 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate
+    runs-on: ubuntu-24.04
+    env:
+      NIX_CONFIG: |
+        max-jobs = 1
+        cores = 1
+      CMAKE_BUILD_PARALLEL_LEVEL: 1
+      MAKEFLAGS: -j1
+      NINJAFLAGS: -j1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify main PR provenance
+        if: github.event_name == 'push'
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu -o pipefail
+          prs="$(gh api "repos/$GITHUB_REPOSITORY/commits/$EXPECTED_SHA/pulls")"
+          merged_pr_count="$(jq --arg sha "$EXPECTED_SHA" '[.[] | select(.base.ref == "main" and .merged_at != null and .merge_commit_sha == $sha)] | length' <<< "$prs")"
+          test "$merged_pr_count" = "1"
+      - uses: DeterminateSystems/determinate-nix-action@527f17dd63d2d60d3e5552934bc84b9a33a14d11
+        with:
+          github-token: ""
+      - name: Configure swap
+        run: |
+          swap_path="$RUNNER_TEMP/omanixy.swap"
+          sudo fallocate -l 4G "$swap_path"
+          sudo chmod 600 "$swap_path"
+          sudo mkswap "$swap_path"
+          sudo swapon "$swap_path"
+      - name: Format
+        run: |
+          nix fmt
+          git diff --exit-code
+      - name: Canonical checks
+        run: nix shell --inputs-from . nixpkgs#just -c just check
+      - name: All systems evaluation
+        run: nix flake check --show-trace --print-build-logs --all-systems --no-build
+      - name: Release-owned files
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PENDING_RELEASE: "${{ contains(github.event.pull_request.labels.*.name, 'autorelease: pending') }}"
+        run: |
+          set -eu -o pipefail
+          changed="$(git diff --name-only "$BASE_SHA...$HEAD_SHA")"
+          release_candidate=false
+          while IFS= read -r path; do
+            case "$path" in
+              .release-please-manifest.json|version.txt|CHANGELOG.md)
+                release_candidate=true
+                ;;
+            esac
+          done <<< "$changed"
+          if [ "$release_candidate" = true ]; then
+            bootstrap=true
+            for path in .release-please-manifest.json version.txt CHANGELOG.md; do
+              if git cat-file -e "$BASE_SHA:$path" 2>/dev/null; then
+                bootstrap=false
+              fi
+            done
+            if [ "$bootstrap" = true ]; then
+              for path in .release-please-manifest.json version.txt CHANGELOG.md; do
+                git cat-file -e "$HEAD_SHA:$path"
+              done
+            else
+              test "$HEAD_REPOSITORY" = "$GITHUB_REPOSITORY"
+              test "$PR_AUTHOR" = "github-actions[bot]"
+              test "$PENDING_RELEASE" = true
+              expected_title="chore(main): release $(cat version.txt)"
+              test "$PR_TITLE" = "$expected_title"
+              actual_release_files="$(printf '%s\n' "$changed" | LC_ALL=C sort)"
+              expected_release_files="$(printf '%s\n' .release-please-manifest.json CHANGELOG.md version.txt | LC_ALL=C sort)"
+              test "$actual_release_files" = "$expected_release_files"
+            fi
+            for path in .release-please-manifest.json version.txt CHANGELOG.md; do
+              tree_entry="$(git ls-tree "$HEAD_SHA" -- "$path")"
+              test "$(awk '{print $1}' <<< "$tree_entry")" = 100644
+              test "$(awk '{print $2}' <<< "$tree_entry")" = blob
+            done
+            pyyaml_store="$(nix build --inputs-from . --no-link --print-out-paths nixpkgs#python3Packages.pyyaml)"
+            pyyaml_site="$(find "$pyyaml_store/lib" -type d -name site-packages -print -quit)"
+            test -n "$pyyaml_site"
+            PYTHONPATH="$pyyaml_site" nix shell --inputs-from . nixpkgs#python3 -c python3 scripts/release-context --check
+          fi

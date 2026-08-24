@@ -146,7 +146,32 @@ def test_classify_language_by_shebang():
 
 
 def test_classify_language_excludes_generated_lock():
-    assert classify_language(Path("x/flake.lock"), Path("x")) is None
+        assert classify_language(Path("x/flake.lock"), Path("x")) is None
+
+
+def test_classify_language_accepts_exact_root_version_data():
+    with tempfile.TemporaryDirectory() as tmp_path_str:
+        tmp_path = Path(tmp_path_str)
+        version = tmp_path / "version.txt"
+        version.write_text("0.0.0\n")
+        assert classify_language(version, tmp_path) is None
+
+
+def test_classify_language_rejects_nested_version_data():
+    with tempfile.TemporaryDirectory() as tmp_path_str:
+        tmp_path = Path(tmp_path_str)
+        version = tmp_path / "nested" / "version.txt"
+        version.parent.mkdir()
+        version.write_text("0.0.0\n")
+        assert classify_language(version, tmp_path) == "unsupported"
+
+
+def test_classify_language_rejects_arbitrary_text_data():
+    with tempfile.TemporaryDirectory() as tmp_path_str:
+        tmp_path = Path(tmp_path_str)
+        arbitrary = tmp_path / "some-random-file.txt"
+        arbitrary.write_text("data\n")
+        assert classify_language(arbitrary, tmp_path) == "unsupported"
 
 
 def test_discover_skips_git_directory():

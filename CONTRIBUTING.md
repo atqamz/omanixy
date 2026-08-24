@@ -8,6 +8,21 @@ Run `just fmt` and `just check` before requesting review.
 Keep the compatibility ledger truthful and current when the issue changes
 compatibility state.
 
+Normal pull requests should be squash-merged.
+
+The final squash title is the semantic commit consumed by Release Please.
+
+Use titles such as `fix(audio): preserve selected default sink`,
+`feat(network): add NetworkManager Wi-Fi controls`,
+`feat(config)!: redesign shell plugin configuration`, and
+`chore(ci): refresh action pin`.
+
+Do not use fixup, WIP, or review-remediation subjects as the final mainline
+semantic unit when the squash title can describe the actual change.
+
+See [the release contract](docs/release.md) for release-owned files,
+breaking-change guidance, and upstream versioning.
+
 Add matrix entries only after the supported upstream contract has been
 audited.
 Commit, push, and pull request actions require explicit authorization.

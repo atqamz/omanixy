@@ -1,0 +1,378 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import re
+import sys
+from collections import Counter
+from pathlib import Path
+
+
+CLASSIFICATIONS = ("exact", "adapted", "omitted", "blocked")
+SUPPORT_STATES = ("supported", "experimental", "omitted", "blocked")
+REVISION_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+RELEASE_VERSION_PATTERN = re.compile(
+    r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$"
+)
+RELEASE_HEADING_PATTERN = re.compile(
+    r"^## (?:\[)?(v?[0-9]+\.[0-9]+\.[0-9]+)(?:\])?(?:\([^)]*\))?(?:\s|$)"
+)
+SECTION_HEADING_PATTERN = re.compile(r"^### (.+?)\s*$")
+RELEASE_PR_HEADER = ":robot: I have created a release *beep* *boop*"
+RELEASE_PR_FOOTER = (
+    "This PR was generated with [Release Please](https://github.com/googleapis/release-please). "
+    "See [documentation](https://github.com/googleapis/release-please#release-please)."
+)
+
+
+class ReleaseContextError(ValueError):
+    pass
+
+
+def require_mapping(value, label):
+    if not isinstance(value, dict):
+        raise ReleaseContextError(f"{label} must be a mapping")
+    return value
+
+
+def require_text(value, label):
+    if not isinstance(value, str) or not value:
+        raise ReleaseContextError(f"{label} must be non-empty text")
+    return value
+
+
+def require_revision(value, label):
+    value = require_text(value, label)
+    if not REVISION_PATTERN.fullmatch(value):
+        raise ReleaseContextError(f"{label} must be a lowercase full revision")
+    return value
+
+
+def load_yaml(path):
+    try:
+        import yaml
+    except ImportError as error:
+        raise ReleaseContextError("PyYAML is required for upstream compatibility checks") from error
+    try:
+        value = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, yaml.YAMLError) as error:
+        raise ReleaseContextError(f"cannot load {path}: {error}") from error
+    return require_mapping(value, str(path))
+
+
+def load_upstream(root):
+    omarchy = load_yaml(root / "upstream/omarchy.yaml")
+    if omarchy.get("project") != "basecamp/omarchy":
+        raise ReleaseContextError("upstream Omarchy project is not basecamp/omarchy")
+    if omarchy.get("track") != "quattro":
+        raise ReleaseContextError("upstream Omarchy track is not quattro")
+    omarchy_revision = require_revision(omarchy.get("revision"), "upstream Omarchy revision")
+    policy = require_mapping(omarchy.get("policy"), "upstream policy")
+    pair = require_mapping(policy.get("runtime_pair"), "upstream runtime pair")
+    if pair.get("status") != "validated":
+        raise ReleaseContextError("upstream runtime pair is not validated")
+    if policy.get("validated_quattro_pair") is not True:
+        raise ReleaseContextError("upstream Quattro pair is not validated")
+    pair_omarchy = require_mapping(pair.get("omarchy"), "runtime pair Omarchy")
+    if require_revision(pair_omarchy.get("revision"), "runtime pair Omarchy revision") != omarchy_revision:
+        raise ReleaseContextError("runtime pair Omarchy revision does not match upstream revision")
+    pair_quickshell = require_mapping(pair.get("quickshell"), "runtime pair Quickshell")
+    quickshell_revision = require_revision(
+        pair_quickshell.get("revision"), "runtime pair Quickshell revision"
+    )
+    nixpkgs_revision = None
+    if "nixpkgs" in pair_quickshell:
+        nixpkgs = require_mapping(pair_quickshell.get("nixpkgs"), "runtime pair nixpkgs")
+        nixpkgs_revision = require_revision(nixpkgs.get("revision"), "runtime pair nixpkgs revision")
+
+    matrix = load_yaml(root / "upstream/porting-matrix.yaml")
+    items = matrix.get("items")
+    if not isinstance(items, list) or not items:
+        raise ReleaseContextError("porting matrix items must be a non-empty list")
+    classifications = Counter()
+    support_states = Counter()
+    security_items = []
+    for index, item in enumerate(items):
+        item = require_mapping(item, f"porting matrix item {index}")
+        item_id = require_text(item.get("id"), f"porting matrix item {index} id")
+        classification = item.get("classification")
+        if classification not in CLASSIFICATIONS:
+            raise ReleaseContextError(f"porting matrix item {item_id} has invalid classification")
+        maturity = item.get("maturity")
+        if maturity not in {"audited", "validated"}:
+            raise ReleaseContextError(f"porting matrix item {item_id} has invalid maturity")
+        classifications[classification] += 1
+        support = item.get("support")
+        if support is not None:
+            if support not in SUPPORT_STATES:
+                raise ReleaseContextError(f"porting matrix item {item_id} has invalid support state")
+            support_states[support] += 1
+        if item_id.startswith("security."):
+            security_items.append((item_id, support))
+        item_upstream = item.get("upstream")
+        if item_upstream is not None:
+            item_upstream = require_mapping(item_upstream, f"porting matrix item {item_id} upstream")
+            item_revision = require_revision(
+                item_upstream.get("revision"), f"porting matrix item {item_id} Omarchy revision"
+            )
+            if item_revision != omarchy_revision:
+                raise ReleaseContextError(f"porting matrix item {item_id} uses a stale Omarchy revision")
+        native_quickshell = item.get("native_quickshell")
+        if native_quickshell is not None:
+            native_quickshell = require_mapping(
+                native_quickshell, f"porting matrix item {item_id} Quickshell"
+            )
+            item_revision = require_revision(
+                native_quickshell.get("revision"), f"porting matrix item {item_id} Quickshell revision"
+            )
+            if item_revision != quickshell_revision:
+                raise ReleaseContextError(f"porting matrix item {item_id} uses a stale Quickshell revision")
+    if security_items and any(support != "experimental" for _, support in security_items):
+        raise ReleaseContextError("security matrix entries must remain experimental")
+    return {
+        "omarchy_revision": omarchy_revision,
+        "quickshell_revision": quickshell_revision,
+        "nixpkgs_revision": nixpkgs_revision,
+        "classifications": classifications,
+        "support_states": support_states,
+        "security_count": len(security_items),
+    }
+
+
+def load_release_state(root):
+    try:
+        version_text = (root / "version.txt").read_text(encoding="utf-8")
+        manifest = json.loads((root / ".release-please-manifest.json").read_text(encoding="utf-8"))
+        changelog = (root / "CHANGELOG.md").read_text(encoding="utf-8")
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise ReleaseContextError(f"cannot load release files: {error}") from error
+    version = version_text.strip()
+    if version_text != version + "\n" or not RELEASE_VERSION_PATTERN.fullmatch(version):
+        raise ReleaseContextError("version.txt is not a single X.Y.Z SemVer release line")
+    manifest = require_mapping(manifest, ".release-please-manifest.json")
+    if manifest != {".": version}:
+        raise ReleaseContextError("manifest and version.txt do not match")
+    if not changelog.startswith("# Changelog\n"):
+        raise ReleaseContextError("CHANGELOG.md must start with # Changelog")
+    return version, changelog
+
+
+def release_entries(lines):
+    entries = []
+    for index, line in enumerate(lines):
+        match = RELEASE_HEADING_PATTERN.match(line.rstrip("\n"))
+        if match:
+            version = match.group(1).lstrip("v")
+            if RELEASE_VERSION_PATTERN.fullmatch(version):
+                entries.append((index, version))
+    return entries
+
+
+def entry_end(lines, start):
+    for index in range(start + 1, len(lines)):
+        if lines[index].startswith("## "):
+            return index
+    return len(lines)
+
+
+def candidate_entry(changelog, version):
+    lines = changelog.splitlines(keepends=True)
+    entries = release_entries(lines)
+    if not entries:
+        raise ReleaseContextError("CHANGELOG.md has no candidate release entry")
+    start, candidate_version = entries[0]
+    if candidate_version != version:
+        raise ReleaseContextError("CHANGELOG.md candidate heading does not match version.txt")
+    return "".join(lines[start:entry_end(lines, start)]).strip()
+
+
+def render_release_pr_body(changelog, version):
+    notes = candidate_entry(changelog, version)
+    return f"{RELEASE_PR_HEADER}\n---\n\n\n{notes}\n\n---\n{RELEASE_PR_FOOTER}\n"
+
+
+def section_blocks(lines):
+    starts = []
+    for index, line in enumerate(lines):
+        match = SECTION_HEADING_PATTERN.match(line.rstrip("\n"))
+        if match:
+            starts.append((index, match.group(1).strip()))
+    blocks = []
+    for index, (start, title) in enumerate(starts):
+        end = starts[index + 1][0] if index + 1 < len(starts) else len(lines)
+        blocks.append((start, end, title))
+    return blocks
+
+
+def format_counts(counter, names):
+    return "\n".join(f"- {name}: {counter.get(name, 0)}" for name in names)
+
+
+def render_context(data, version):
+    nixpkgs_line = []
+    if data["nixpkgs_revision"]:
+        nixpkgs_line = [f"- nixpkgs: `{data['nixpkgs_revision']}`", ""]
+    security_line = (
+        "- Security posture: "
+        f"{data['security_count']} security/session entries remain experimental, opt-in, and disabled by default; "
+        "none are supported."
+    )
+    ledger_url = (
+        "https://github.com/atqamz/omanixy/blob/"
+        f"v{version}/upstream/porting-matrix.yaml"
+    )
+    lines = [
+        "### Upstream",
+        "",
+        f"- Omarchy Quattro: `{data['omarchy_revision']}`",
+        f"- Quickshell: `{data['quickshell_revision']}`",
+        *nixpkgs_line,
+        "### Compatibility",
+        "",
+        "- Classification counts:",
+        format_counts(data["classifications"], CLASSIFICATIONS),
+        "- Support counts:",
+        format_counts(data["support_states"], SUPPORT_STATES),
+        security_line,
+        f"- Full ledger: [upstream/porting-matrix.yaml]({ledger_url})",
+    ]
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def remove_owned_sections(entry):
+    owned = {"Upstream", "Compatibility"}
+    result = []
+    index = 0
+    blocks = section_blocks(entry)
+    block_by_start = {start: end for start, end, title in blocks if title in owned}
+    while index < len(entry):
+        if index in block_by_start:
+            index = block_by_start[index]
+        else:
+            result.append(entry[index])
+            index += 1
+    return result
+
+
+def insert_context(entry, context):
+    clean = remove_owned_sections(entry)
+    migration_start = next(
+        (start for start, _, title in section_blocks(clean) if title == "Migration"),
+        len(clean),
+    )
+    prefix = clean[:migration_start]
+    suffix = clean[migration_start:]
+    while prefix and not prefix[-1].strip():
+        prefix.pop()
+    while suffix and not suffix[0].strip():
+        suffix.pop(0)
+    context_lines = context.splitlines(keepends=True)
+    return prefix + ["\n"] + context_lines + (["\n"] if suffix else []) + suffix
+
+
+def update_changelog(changelog, version, context):
+    lines = changelog.splitlines(keepends=True)
+    entries = release_entries(lines)
+    if not entries:
+        raise ReleaseContextError("CHANGELOG.md has no candidate release entry")
+    start, candidate_version = entries[0]
+    if candidate_version != version:
+        raise ReleaseContextError("CHANGELOG.md candidate heading does not match version.txt")
+    end = entry_end(lines, start)
+    entry = insert_context(lines[start:end], context)
+    return "".join(lines[:start] + entry + lines[end:])
+
+
+def owned_section_text(entry, title):
+    matches = [
+        (start, end)
+        for start, end, section_title in section_blocks(entry)
+        if section_title == title
+    ]
+    if len(matches) != 1:
+        raise ReleaseContextError(f"candidate release must contain exactly one {title} section")
+    start, end = matches[0]
+    return "".join(entry[start:end]).strip()
+
+
+def migration_text(entry):
+    matches = [
+        (start, end)
+        for start, end, title in section_blocks(entry)
+        if title == "Migration"
+    ]
+    if len(matches) > 1:
+        raise ReleaseContextError("candidate release contains duplicate Migration sections")
+    if not matches:
+        return ""
+    start, end = matches[0]
+    return "".join(entry[start + 1 : end]).strip()
+
+
+def check_candidate(changelog, version, context):
+    lines = changelog.splitlines(keepends=True)
+    entries = release_entries(lines)
+    if not entries:
+        raise ReleaseContextError("CHANGELOG.md has no candidate release entry")
+    start, candidate_version = entries[0]
+    if candidate_version != version:
+        raise ReleaseContextError("CHANGELOG.md candidate heading does not match version.txt")
+    entry = lines[start:entry_end(lines, start)]
+    if owned_section_text(entry, "Upstream") != context.split("\n### Compatibility", 1)[0].strip():
+        raise ReleaseContextError("Upstream release context is stale")
+    if owned_section_text(entry, "Compatibility") != ("### Compatibility" + context.split("\n### Compatibility", 1)[1]).strip():
+        raise ReleaseContextError("Compatibility release context is stale")
+    if re.search(r"BREAKING CHANGE(?:S)?", "".join(entry), re.IGNORECASE):
+        migration = migration_text(entry)
+        if not migration or re.fullmatch(r"(?:none|n/?a|tbd|todo|pending)\.?", migration, re.IGNORECASE):
+            raise ReleaseContextError("breaking release candidate requires migration guidance")
+
+
+def run(mode, root):
+    version, changelog = load_release_state(root)
+    if mode == "--release-notes":
+        if version == "0.0.0":
+            raise ReleaseContextError("bootstrap 0.0.0 has no release notes")
+        sys.stdout.write(candidate_entry(changelog, version) + "\n")
+        return
+    if mode == "--render-pr-body":
+        if version == "0.0.0":
+            raise ReleaseContextError("bootstrap 0.0.0 has no Release PR body")
+        sys.stdout.write(render_release_pr_body(changelog, version))
+        return
+
+    data = load_upstream(root)
+    if version == "0.0.0":
+        if release_entries(changelog.splitlines(keepends=True)):
+            raise ReleaseContextError("bootstrap 0.0.0 changelog must not contain a release entry")
+        return
+    context = render_context(data, version)
+    if mode == "--write":
+        updated = update_changelog(changelog, version, context)
+        (root / "CHANGELOG.md").write_text(updated, encoding="utf-8")
+        return
+    check_candidate(changelog, version, context)
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--write", action="store_true")
+    group.add_argument("--check", action="store_true")
+    group.add_argument("--release-notes", action="store_true")
+    group.add_argument("--render-pr-body", action="store_true")
+    args = parser.parse_args()
+    mode = next(
+        name
+        for name in ("--write", "--check", "--release-notes", "--render-pr-body")
+        if getattr(args, name[2:].replace("-", "_"))
+    )
+    try:
+        run(mode, Path.cwd())
+    except (OSError, UnicodeError, ReleaseContextError) as error:
+        print(f"release-context: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

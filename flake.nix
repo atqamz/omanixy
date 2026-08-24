@@ -70,6 +70,7 @@
       checks = forEachSystem (system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
+          releasePython = pkgs.python3.withPackages (ps: [ ps.pyyaml ]);
           runtime = runtimeFor system null;
           clipboardRuntime = runtimeFor system [ "clipboard" ];
           bluetoothRuntime = runtimeFor system [ "bluetooth" ];
@@ -1704,6 +1705,27 @@
               nativeBuildInputs = [ pkgs.python3 ];
             } ''
             python3 ${./test/lib/source-comment-policy-selftest.py} ${./scripts/check-source-comments}
+            touch "$out"
+          '';
+          release-contract = pkgs.runCommand "omanixy-release-contract"
+            {
+              nativeBuildInputs = [ releasePython ];
+            } ''
+            ${releasePython}/bin/python ${./test/release-contract.py} ${self}
+            touch "$out"
+          '';
+          release-context-selftest = pkgs.runCommand "omanixy-release-context-selftest"
+            {
+              nativeBuildInputs = [ releasePython ];
+            } ''
+            ${releasePython}/bin/python ${./test/lib/release-context-selftest.py} ${./scripts/release-context}
+            touch "$out"
+          '';
+          actionlint = pkgs.runCommand "omanixy-actionlint"
+            {
+              nativeBuildInputs = [ pkgs.actionlint ];
+            } ''
+            actionlint ${./.github/workflows/ci.yaml} ${./.github/workflows/release-please.yaml}
             touch "$out"
           '';
           source-comment-policy = pkgs.runCommand "omanixy-source-comment-policy"

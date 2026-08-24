@@ -110,6 +110,17 @@ Formatting is performed with `just fmt`.
 Narrower checks are encouraged during development, but `just check` must pass
 before committing.
 
+## Release rules
+
+Read `docs/release.md` before changing release-owned files or release
+workflows.
+Release semantics follow `docs/release.md`.
+The final squash title is release-significant.
+Do not manually edit version-managed files outside bootstrap or a Release PR.
+Do not manually create release tags or GitHub Releases.
+Breaking public changes require migration notes.
+`v1.0.0` requires an explicit project decision.
+
 ## NixOS Module Principles
 
 - Use `lib.mkDefault` for opinionated defaults users should override.
