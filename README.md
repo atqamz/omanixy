@@ -215,6 +215,20 @@ disabled unless the consumer explicitly chooses them.
 Known declarative owner conflicts fail evaluation instead of being killed or
 silently replaced at runtime.
 
+### Structural versus live validation
+
+The following matrix separates checks that can run in evaluation or a sandbox
+from behavior that still requires a real graphical session and hardware.
+
+| Surface | Structural evidence | Live status or gate |
+| --- | --- | --- |
+| Core Quattro shell and user service | Public module, activation, unit, and runtime checks | Requires a working Wayland, Hyprland, D-Bus, and graphical-session environment |
+| Audio, media, Bluetooth, clipboard, monitor, power, network, weather, and screenshots | Feature selection and compatibility closure checks | Requires the corresponding host devices, services, and session backends |
+| Launcher discovery and cold launch | Adapter and contract checks | Live activation remains open under [atqamz/omanixy#23](https://github.com/atqamz/omanixy/issues/23) |
+| StatusNotifier tray | Native Quickshell contract checks | Live tray behavior remains open under [atqamz/omanixy#39](https://github.com/atqamz/omanixy/issues/39) |
+| Default font and wallpaper ownership | Theme and configuration plumbing checks | Live default ownership remains open under [atqamz/omanixy#24](https://github.com/atqamz/omanixy/issues/24) |
+| Native lock, fingerprint, polkit agent, idle, and notification daemon | Option and ownership assertions | Experimental and opt-in, not release-readiness evidence |
+
 ## Optional security and session integrations
 
 A native password lock requires both halves of the ownership handshake:
@@ -243,9 +257,11 @@ another known Home Manager polkit agent.
 
 ## Shell configuration
 
-`programs.omanixy.shell.config` is the structured upstream-compatible escape
-hatch for Quattro's `shell.json` schema.
+`programs.omanixy.shell.config` is the structured partial override surface for
+Quattro's `shell.json` schema.
 It is deliberately not expanded into one Nix option per QML property.
+Consumer keys are merged under Omanixy's safe Quattro v1 baseline, while the
+immutable disabled-plugin floor remains enforced.
 
 For example, a consumer can add an explicit disabled plugin while preserving
 Omanixy's immutable safety floor:
@@ -271,6 +287,15 @@ policy.
 Omanixy seeds Quattro runtime theme state under the user's writable state
 boundary. That state belongs to Quattro presentation and is not a universal
 source of truth for GTK, Hyprland, launchers, terminals, or application themes.
+
+| Path | Ownership |
+| --- | --- |
+| `~/.config/omarchy/shell.json` | Declaratively seeded, then user-owned and writable |
+| `~/.config/omarchy/shell.toml` | User-owned theme/config state; Omanixy adapts only the supported monitor text-size field |
+| `~/.local/state/omanixy/capabilities.json` | Omanixy-generated capability metadata |
+| `~/.local/state/omarchy/current/theme/` | Seeded theme state, then runtime-writable |
+| `/nix/store/.../omarchy-quattro-*` | Immutable pinned upstream source |
+| `/nix/store/.../omanixy-omarchy-compat-root-*` | Immutable compatibility view and audited helper surface |
 
 A consumer should own its palette policy and feed each owned surface explicitly.
 Omanixy may provide integration adapters, but it does not absorb personal or
@@ -303,8 +328,8 @@ module priority when a consumer has a justified local policy.
 Start with the generated user unit:
 
 ```text
-systemctl --user status omanixy-shell.service
-journalctl --user -u omanixy-shell.service -b
+systemctl --user status omanixy-shell
+journalctl --user -u omanixy-shell
 ```
 
 Useful checks include:

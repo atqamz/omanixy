@@ -27,6 +27,16 @@
           homeIdentity
         ];
       };
+      defaultHome = home-manager.lib.homeManagerConfiguration {
+        inherit pkgs;
+        modules = [
+          omanixy.homeManagerModules.default
+          homeIdentity
+          {
+            programs.omanixy.enable = true;
+          }
+        ];
+      };
       invalidStandaloneLock = home-manager.lib.homeManagerConfiguration {
         inherit pkgs;
         modules = [
@@ -70,18 +80,44 @@
       standaloneActivationClosure = pkgs.closureInfo {
         rootPaths = [ standaloneHome.activationPackage ];
       };
+      runtime = builtins.head standaloneHome.config.home.packages;
+      runtimeClosure = pkgs.closureInfo {
+        rootPaths = [ runtime ];
+      };
+      renderedService = pkgs.writeText "omanixy-standalone-service-unit" ''
+        [Unit]
+        Description=${standaloneService.Unit.Description}
+        PartOf=${nixpkgs.lib.concatStringsSep " " standaloneService.Unit.PartOf}
+        After=${nixpkgs.lib.concatStringsSep " " standaloneService.Unit.After}
+        StartLimitIntervalSec=${standaloneService.Unit.StartLimitIntervalSec}
+        StartLimitBurst=${toString standaloneService.Unit.StartLimitBurst}
+
+        [Service]
+        ExecStart=${nixpkgs.lib.concatStringsSep " " standaloneService.Service.ExecStart}
+        Restart=${standaloneService.Service.Restart}
+        RestartSec=${standaloneService.Service.RestartSec}
+        TimeoutStopSec=${standaloneService.Service.TimeoutStopSec}
+        ${nixpkgs.lib.concatMapStringsSep "\n" (environment: "Environment=" + environment) standaloneService.Service.Environment}
+
+        [Install]
+        WantedBy=${nixpkgs.lib.concatStringsSep " " standaloneService.Install.WantedBy}
+      '';
+      defaultActivation = pkgs.writeShellScript "omanixy-standalone-default-activation" defaultHome.config.home.activation.omanixyShellState.data;
+      customActivation = pkgs.writeShellScript "omanixy-standalone-custom-activation" standaloneHome.config.home.activation.omanixyShellState.data;
+      storeConfig = pkgs.writeText "omanixy-standalone-store-config" (builtins.readFile ../../upstream/shell-baseline-v1.json);
+      explicitStoreConfig = pkgs.writeText "omanixy-standalone-explicit-store-config" ''{"version":1,"disabledPlugins":["omarchy.audio","omarchy.network"]}'';
+      malformedStoreConfig = pkgs.writeText "omanixy-standalone-malformed-store-config" ''{"disabledPlugins":'';
+      customStoreConfig = pkgs.writeText "omanixy-standalone-custom-store-config" ''{"version":1,"custom":true}'';
       integratedHome = integratedNixos.config.home-manager.users.${username};
       integratedService = integratedHome.systemd.user.services.omanixy-shell;
-      invalidLockDiagnostics = map
-        (assertion: assertion.message)
-        (builtins.filter (assertion: !assertion.assertion) invalidStandaloneLock.config.assertions);
-      invalidLockDiagnosticOk = lib.any
-        (message:
-          lib.hasInfix "standalone" message
-          && lib.hasInfix "programs.omanixy.security.pam.password" message)
-        invalidLockDiagnostics;
+      invalidLockEvaluation = builtins.tryEval (builtins.deepSeq invalidStandaloneLock.activationPackage true);
+      invalidLockDiagnosticSource = builtins.readFile ../../modules/home/default.nix;
+      invalidLockDiagnosticOk =
+        !invalidLockEvaluation.success
+        && lib.hasInfix "standalone (no NixOS osConfig is" invalidLockDiagnosticSource
+        && lib.hasInfix "programs.omanixy.security.pam.password" invalidLockDiagnosticSource;
       serviceContractOk =
-        lib.hasSuffix "/bin/omanixy-shell-runtime" standaloneService.Service.ExecStart
+        builtins.elem "${runtime}/bin/omanixy-shell-runtime" standaloneService.Service.ExecStart
         && standaloneService.Service.Restart == "on-failure"
         && standaloneService.Service.RestartSec == "2s"
         && standaloneService.Service.TimeoutStopSec == "10s"
@@ -100,6 +136,7 @@
         && standaloneHome.config.services.mako.enable;
       overrideContractOk =
         !(builtins.elem "clipboard" standaloneHome.config.programs.omanixy.features)
+        && standaloneHome.config.programs.omanixy.shell.config.custom
         && builtins.elem "omarchy.bluetooth" standaloneHome.config.programs.omanixy.shell.config.disabledPlugins;
       hostCapabilitiesOk =
         integratedNixos.config.networking.networkmanager.enable
@@ -112,7 +149,7 @@
       integratedContractOk =
         integratedNixos.config.programs.omanixy.security.pam.password.enable
         && integratedHome.programs.omanixy.security.lock.enable
-        && lib.hasSuffix "/bin/omanixy-shell-runtime" integratedService.Service.ExecStart;
+        && builtins.elem "${runtime}/bin/omanixy-shell-runtime" integratedService.Service.ExecStart;
       pamService = integratedNixos.config.environment.etc."pam.d/omarchy-lock-password".source;
       nixosToplevel = integratedNixos.config.system.build.toplevel.drvPath;
     in
@@ -128,13 +165,19 @@
             inherit pamService nixosToplevel;
             omanixySource = omanixy.outPath;
             activationStorePaths = "${standaloneActivationClosure}/store-paths";
+            runtimeStorePaths = "${runtimeClosure}/store-paths";
+            runtimePath = runtime;
+            compatibilityRoot = runtime.passthru.omarchyCompatibilityRoot;
+            compatibilityBin = runtime.passthru.compatibilityBin;
+            quickshellPath = runtime.passthru.quickshell;
+            inherit renderedService defaultActivation customActivation storeConfig explicitStoreConfig malformedStoreConfig customStoreConfig;
             serviceContract = if serviceContractOk then "true" else "false";
             safeOwnership = if safeOwnershipOk then "true" else "false";
             overrideContract = if overrideContractOk then "true" else "false";
             hostCapabilities = if hostCapabilitiesOk then "true" else "false";
             integratedContract = if integratedContractOk then "true" else "false";
             invalidLockDiagnostic = if invalidLockDiagnosticOk then "true" else "false";
-            nativeBuildInputs = [ pkgs.coreutils pkgs.gnugrep ];
+            nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gawk pkgs.gnugrep pkgs.gnused pkgs.jq pkgs.ripgrep pkgs.systemd ];
           } ''
           test "$serviceContract" = true
           test "$safeOwnership" = true
@@ -145,6 +188,21 @@
           test -n "$nixosToplevel"
           test -s "$pamService"
           grep -Fq 'pam_unix.so' "$pamService"
+          grep -Fxq "$runtimePath" "$runtimeStorePaths"
+          grep -Fxq "$quickshellPath" "$runtimeStorePaths"
+          grep -Fxq "$compatibilityRoot" "$runtimeStorePaths"
+          grep -Fxq "$compatibilityBin" "$runtimeStorePaths"
+          ${pkgs.bash}/bin/bash ${../../test/service-unit.sh} "$renderedService" "$runtimePath" "$compatibilityRoot"
+          unit_dir=$(mktemp -d)
+          trap 'rm -rf "$unit_dir"' EXIT
+          cp "$renderedService" "$unit_dir/omanixy-shell.service"
+          printf '%s\n' '[Unit]' > "$unit_dir/sysinit.target"
+          printf '%s\n' '[Unit]' > "$unit_dir/basic.target"
+          XDG_RUNTIME_DIR="$unit_dir" SYSTEMD_UNIT_PATH="$unit_dir" SYSTEMD_SYSTEM_UNIT_PATH="$unit_dir" SYSTEMD_USER_UNIT_PATH="$unit_dir" \
+            systemd-analyze --user verify "$unit_dir/omanixy-shell.service"
+          ${pkgs.bash}/bin/bash ${../../test/config-ownership.sh} \
+            "$defaultActivation" "$customActivation" /build/omanixy-test /build/omanixy-custom /build/omanixy-store \
+            "$storeConfig" "$explicitStoreConfig" "$malformedStoreConfig" "$customStoreConfig" ${../../upstream/shell-baseline-v1.json}
           if grep -Fq 'universe' "$activationStorePaths"; then
             exit 1
           fi

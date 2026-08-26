@@ -44,7 +44,7 @@ let
     (feature: featurePlugins.${feature} or [ ])
     (lib.filter (feature: !builtins.elem feature selectedFeatures) (builtins.attrNames featurePlugins)));
   runtimeBlockedPlugins = lib.unique (baselineConfig.disabledPlugins ++ omittedFeaturePlugins);
-  effectiveConfig = cfg.shell.config // {
+  effectiveConfig = baselineConfig // cfg.shell.config // {
     disabledPlugins = lib.unique (baselineConfig.disabledPlugins ++ configuredDisabledPlugins);
   };
   configJson = builtins.toJSON effectiveConfig;
@@ -102,12 +102,12 @@ in
 
     shell.config = lib.mkOption {
       type = lib.types.attrsOf lib.types.json;
-      default = baselineConfig;
-      defaultText = lib.literalExpression "<safe Quattro baseline>";
+      default = { };
+      defaultText = lib.literalExpression "{ }";
       description = ''
-        Whole-file upstream-compatible Quattro shell.json configuration.
-        Omanixy preserves the baseline disabled-plugin floor and explicit
-        user preferences in the generated file.
+        Partial upstream-compatible Quattro shell.json configuration.
+        Omanixy merges user keys under the safe baseline and preserves the
+        baseline disabled-plugin floor in the generated file.
         The immutable compatibility-root registry separately enforces the
         selected feature capability floor, so changing features cannot revive
         omitted runtime support or make unfinished issue #4 security surfaces
@@ -320,8 +320,8 @@ in
   config = lib.mkIf cfg.enable {
     assertions = [
       {
-        assertion = (cfg.shell.config.version or null) == 1;
-        message = "programs.omanixy.shell.config.version must be 1";
+        assertion = (effectiveConfig.version or null) == 1;
+        message = "programs.omanixy.shell.config.version must be 1; partial overrides inherit the safe Quattro v1 baseline, but explicit values must remain compatible with version 1";
       }
       {
         assertion = builtins.isList configuredDisabledPlugins

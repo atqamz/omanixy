@@ -24,7 +24,7 @@ Its safe standalone Home Manager configuration proves:
 - the generated `omanixy-shell.service` has the documented graphical-session
   lifecycle, restart policy, runtime command, and immutable environment;
 - presentation feature groups can be omitted;
-- `programs.omanixy.shell.config` can override upstream-compatible state;
+- `programs.omanixy.shell.config` can partially override the safe upstream-compatible baseline;
 - native lock, polkit-agent, idle, and notification-daemon ownership can stay
   disabled while an external notification daemon remains enabled;
 - the activation package builds without importing the NixOS module.
@@ -68,6 +68,20 @@ pretending a fake graphical session is real hardware.
 A synthetic VM with a fake Wayland compositor would not prove shell rendering,
 monitor hotplug, suspend/resume, or GPU behavior. Omanixy therefore does not add
 visual tests merely to claim coverage.
+
+## Structural versus live validation
+
+The matrix distinguishes repository checks from behavior that still requires a
+real graphical session and hardware.
+
+| Surface | Structural evidence | Live status or gate |
+| --- | --- | --- |
+| Core Quattro shell and user service | Public module, activation, unit, and runtime checks | Requires a working Wayland, Hyprland, D-Bus, and graphical-session environment |
+| Audio, media, Bluetooth, clipboard, monitor, power, network, weather, and screenshots | Feature selection and compatibility closure checks | Requires the corresponding host devices, services, and session backends |
+| Launcher discovery and cold launch | Adapter and contract checks | Live activation remains open under [atqamz/omanixy#23](https://github.com/atqamz/omanixy/issues/23) |
+| StatusNotifier tray | Native Quickshell contract checks | Live tray behavior remains open under [atqamz/omanixy#39](https://github.com/atqamz/omanixy/issues/39) |
+| Default font and wallpaper ownership | Theme and configuration plumbing checks | Live default ownership remains open under [atqamz/omanixy#24](https://github.com/atqamz/omanixy/issues/24) |
+| Native lock, fingerprint, polkit agent, idle, and notification daemon | Option and ownership assertions | Experimental and opt-in, not release-readiness evidence |
 
 ## Universe downstream evidence
 
@@ -124,6 +138,26 @@ known Omanixy-generated baselines are migrated automatically.
 Customized or malformed user files are not silently rewritten into a new
 policy.
 
+`programs.omanixy.shell.config` is the structured partial override surface for
+Quattro's `shell.json` schema.
+Consumer keys are merged under Omanixy's safe Quattro v1 baseline, while the
+immutable disabled-plugin floor remains enforced.
+
+```nix
+{
+  programs.omanixy.shell.config.disabledPlugins = [ "omarchy.bluetooth" ];
+}
+```
+
+| Path | Ownership |
+| --- | --- |
+| `~/.config/omarchy/shell.json` | Declaratively seeded, then user-owned and writable |
+| `~/.config/omarchy/shell.toml` | User-owned theme/config state; Omanixy adapts only the supported monitor text-size field |
+| `~/.local/state/omanixy/capabilities.json` | Omanixy-generated capability metadata |
+| `~/.local/state/omarchy/current/theme/` | Seeded theme state, then runtime-writable |
+| `/nix/store/.../omarchy-quattro-*` | Immutable pinned upstream source |
+| `/nix/store/.../omanixy-omarchy-compat-root-*` | Immutable compatibility view and audited helper surface |
+
 A downstream configuration should choose its own theme source and feed the
 parts it owns independently:
 
@@ -138,6 +172,18 @@ Quattro GTK       compositor/apps
 Consumers must not treat writable Quattro runtime theme state as an accidental
 source of truth for unrelated GTK, launcher, compositor, or application
 configuration.
+
+## First diagnostics
+
+Start with the generated user service:
+
+```text
+systemctl --user status omanixy-shell
+journalctl --user -u omanixy-shell
+```
+
+If the service starts outside the graphical session, verify that the user
+manager received the active Wayland, Hyprland, and D-Bus environment.
 
 ## Hardware acceptance boundary
 

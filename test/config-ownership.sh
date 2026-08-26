@@ -88,7 +88,7 @@ grep -Fqx 'user theme' "$theme_dir/user-state"
 
 HOME="$custom_home" USER=omanixy-test XDG_RUNTIME_DIR="$custom_home/runtime" \
   bash -c 'run() { "$@"; }; source "$1"' bash "$custom_activation"
-grep -Fq '"custom":true' "$custom_home/.config/omarchy/shell.json"
+jq -e '.version == 1 and .custom == true' "$custom_home/.config/omarchy/shell.json" >/dev/null
 jq -e '.disabledPlugins | index("omarchy.audio") != null' "$custom_home/.config/omarchy/shell.json" >/dev/null
 for plugin in \
   omarchy.active-window \

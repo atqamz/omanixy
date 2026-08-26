@@ -15,7 +15,10 @@
       "screenshot"
       "weather"
     ];
-    shell.config.disabledPlugins = [ "omarchy.bluetooth" ];
+    shell.config = {
+      custom = true;
+      disabledPlugins = [ "omarchy.bluetooth" ];
+    };
     security = {
       lock.enable = lib.mkDefault false;
       idle.enable = lib.mkDefault false;
