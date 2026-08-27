@@ -36,7 +36,7 @@ if (support.desktopFileId("org.telegram.desktop.desktop") !== "org.telegram.desk
   throw new Error("desktop filename was not converted to its semantic id");
 }
 const ownedSuffix = { "org.telegram.desktop": true };
-if (!support.canRemove("org.telegram.desktop", ownedSuffix) || support.canRemove("org.telegram", ownedSuffix)) {
+if (!support.canRemove("org.telegram.desktop", ownedSuffix) || !support.canRemove("org.telegram.desktop.desktop", ownedSuffix) || support.canRemove("org.telegram", ownedSuffix)) {
   throw new Error("launcher deletion ownership confused a semantic .desktop suffix with a filename suffix");
 }
 if (support.launchCommand("org.example.User") !== "uwsm app -- gtk-launch 'org.example.User.desktop'") {

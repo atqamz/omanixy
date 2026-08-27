@@ -85,9 +85,9 @@ It applies eleven narrow compatibility patch sites:
   user-owned-entry predicate rather than presenting a false system deletion
   affordance.
 - `shell/services/AppLibrary.qml` adds the user-owned entry scan and
-  `canRemove()` predicate behind that guard, and validates the desktop ID
-  before composing a launch command, so an entry with an unrepresentable ID
-  does not launch instead of interpolating the ID into a shell string.
+  `canRemove()` predicate behind that guard, and composes the direct UWSM
+  launch command only for a non-empty desktop ID while shell-quoting the
+  complete desktop filename.
 
 Each patch is tied to a pinned source location, has a focused compatibility
 assertion, and is kept smaller than the upstream feature it excludes.
