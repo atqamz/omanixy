@@ -241,7 +241,9 @@
             grep -Fn 'universe' "$activationStorePaths" >&2
             exit 1
           fi
-          private_path_matches=$(grep -R -n -E '/home/atqa/|sfx14|pavg15|~/dotfiles|atqamz/universe|private paths' ${./.} --exclude=flake.nix || true)
+          : "The pattern is split so this source file remains covered by its own leak scan."
+          private_path_pattern='/home/'atqa'/|sfx'14'|pavg'15'|'~/'dotfiles|atqamz/'universe'|private[[:space:]]paths'
+          private_path_matches=$(grep -R -n -E "$private_path_pattern" ${./.} || true)
           if test -n "$private_path_matches"; then
             printf 'adoption contract failed: private path leakage:\n%s\n' "$private_path_matches" >&2
             exit 1
