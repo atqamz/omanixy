@@ -181,6 +181,10 @@ dispatcher and helper links they validate.
 The `probes` output records the helper path it was generated against, and the
 closure check rejects a probe set whose recorded helper path or helper coverage
 does not match the helper surface whose identity it is validating.
+The launcher-removal consumer probe is intentionally omitted because the
+patched `AppLibrary.qml` loads `Quickshell.Wayland` and cannot execute in the
+headless Nix build sandbox; the helper remains covered by the executable
+adapter and launcher-delete contract checks.
 Omanixy never copies the upstream `bin/` tree or creates a mutable Omarchy
 filesystem.
 
@@ -238,6 +242,9 @@ setting the first variable.
 They exist so the generated consumer probes exercise the packaged dispatcher
 itself rather than a test-only rebuild, which is what binds the probe evidence
 to the shipped helper identity.
+Consumer probes report dispatcher identity through a per-helper marker file;
+Quickshell output is diagnostic log text and is kept separate from that marker
+channel.
 
 The runtime closure and compatibility-root checks fail if an unsupported
 Omarchy executable surface appears.

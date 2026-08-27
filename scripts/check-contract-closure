@@ -166,7 +166,8 @@ def main() -> int:
     probe_surface = read_json(compatibility_probes / "probe-surface.json")
     if probe_surface.get("compatibilityBin") != str(compatibility_bin):
         die("consumer probes were generated against a different runtime helper path")
-    expected_probe_helpers = sorted(actual_bin - {"omarchy-shell"})
+    headless_probe_omissions = {"omarchy-remove-launcher-entry"}
+    expected_probe_helpers = sorted(actual_bin - {"omarchy-shell"} - headless_probe_omissions)
     if probe_surface.get("helpers") != expected_probe_helpers:
         die("consumer probes do not cover the executable helper surface")
     probe_plan = []
@@ -224,19 +225,28 @@ def main() -> int:
             ):
                 die("omarchy-shell must use reference-only IPC evidence")
         else:
-            executable = consumer_probe.get("executable")
             probe_helper = consumer_probe.get("helper")
-            if (
-                probe_helper != helper
-                or consumer_probe.get("invocation") != "generated-post-patch-consumer"
-                or consumer_probe.get("marker") != "dispatcher-command-identity-success-only-v1"
-            ):
-                die(f"helper {helper} has a disconnected generated consumer probe")
-            probe_path = compatibility_probes / executable
-            if not probe_path.is_file():
-                die(f"helper {helper} has no packaged consumer executable")
-            if (compatibility_bin / executable).exists():
-                die(f"helper {helper} consumer probe leaked into the runtime helper path")
+            invocation = consumer_probe.get("invocation")
+            if invocation == "omitted-headless":
+                if (
+                    probe_helper != helper
+                    or helper not in headless_probe_omissions
+                    or not isinstance(consumer_probe.get("reason"), str)
+                ):
+                    die(f"helper {helper} has an invalid headless consumer probe omission")
+            else:
+                executable = consumer_probe.get("executable")
+                if (
+                    probe_helper != helper
+                    or invocation != "generated-post-patch-consumer"
+                    or consumer_probe.get("marker") != "dispatcher-command-identity-success-only-file-v2"
+                ):
+                    die(f"helper {helper} has a disconnected generated consumer probe")
+                probe_path = compatibility_probes / executable
+                if not probe_path.is_file():
+                    die(f"helper {helper} has no packaged consumer executable")
+                if (compatibility_bin / executable).exists():
+                    die(f"helper {helper} consumer probe leaked into the runtime helper path")
         expected_consumer_hash = surface.get("consumerSourceSha256")
         if not isinstance(expected_consumer_hash, str) or hashlib.sha256((root / consumer).read_bytes()).hexdigest() != expected_consumer_hash:
             die(f"helper {helper} generated consumer identity drifted")
@@ -265,7 +275,7 @@ def main() -> int:
             die(f"helper {helper} has a missing declared post-patch consumer")
         if helper not in actual_bin:
             die(f"helper {helper} is absent from the executable post-patch helper surface")
-        if helper != "omarchy-shell":
+        if helper != "omarchy-shell" and helper not in headless_probe_omissions:
             probe_plan.append((helper, probe_path))
         if contract.get("reachable") is not True:
             die(f"helper {helper} is not explicitly classified as post-patch reachable")
@@ -391,7 +401,7 @@ def main() -> int:
         if (fields := line.split("\t")) and len(fields) >= 3 and fields[0] == "CASE" and fields[2] == "valid"
     }
     for helper, contract in sorted(helpers.items()):
-        if contract.get("reachable") is True and helper != "omarchy-shell" and helper not in runtime_probes:
+        if contract.get("reachable") is True and helper != "omarchy-shell" and helper not in runtime_probes and helper not in headless_probe_omissions:
             die(f"helper {helper} has no executable post-patch consumer probe")
 
     for helper, probe_path in probe_plan:

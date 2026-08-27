@@ -78,6 +78,11 @@ CONSUMER_TRIGGERS = {
 }
 
 
+HEADLESS_PROBE_OMISSIONS = {
+    "omarchy-remove-launcher-entry": "AppLibrary loads Quickshell.Wayland and requires a live compositor for its consumer component",
+}
+
+
 HEADLESS_SOURCE_PATCHES = {
     "omarchy-shell": (
         '''  Component {
@@ -389,6 +394,24 @@ def main() -> int:
             }
             continue
 
+        if helper in HEADLESS_PROBE_OMISSIONS:
+            surface[helper] = {
+                "consumer": consumer,
+                "consumerSourceSha256": hashlib.sha256(source).hexdigest(),
+                "consumerSources": consumer_sources,
+                "referenceSources": reference_sources,
+                "helperTarget": str(helper_path.resolve()),
+                "helperTargetSha256": hashlib.sha256(helper_path.resolve().read_bytes()).hexdigest(),
+                "dispatcherTarget": str(dispatcher_path.resolve()),
+                "dispatcherTargetSha256": hashlib.sha256(dispatcher_path.resolve().read_bytes()).hexdigest(),
+                "consumerProbe": {
+                    "helper": helper,
+                    "invocation": "omitted-headless",
+                    "reason": HEADLESS_PROBE_OMISSIONS[helper],
+                },
+            }
+            continue
+
         probe_name = f"omanixy-consumer-{helper}"
         probe_path = probe_out / "bin" / probe_name
         harness_path = probe_out / "bin" / f"{probe_name}.qml"
@@ -629,11 +652,13 @@ def main() -> int:
             "else\n"
             "  probe_status=$?\n"
             "fi\n"
-            "if test \"$probe_status\" -eq 0 && grep -Fxq \"$probe_helper_name\" \"$marker_path.$probe_helper_name\" 2>/dev/null; then\n"
+            "marker_file=\"$marker_path.$probe_helper_name\"\n"
+            "if test \"$probe_status\" -eq 0 && grep -Fxq \"$probe_helper_name\" \"$marker_file\" 2>/dev/null; then\n"
             "  printf 'CONSUMER_REACHED\\t%s\\n' \"$probe_helper_name\"\n"
             "else\n"
-            "  printf 'dispatcher marker identity: expected %s, got:' \"$probe_helper_name\" >&2\n"
-            "  cat \"$marker_path.$probe_helper_name\" >&2 2>/dev/null || :\n"
+            "  printf 'dispatcher marker identity: expected=%s marker_file=%s actual=' \"$probe_helper_name\" \"$marker_file\" >&2\n"
+            "  if test -r \"$marker_file\"; then cat \"$marker_file\" >&2; else printf '<missing>\\n' >&2; fi\n"
+            "  printf 'quickshell log:\\n' >&2\n"
             "  cat \"$log_path\" >&2\n"
             "  if test \"$probe_status\" -eq 0; then exit 1; else exit \"$probe_status\"; fi\n"
             "fi\n",
@@ -655,7 +680,7 @@ def main() -> int:
                 "executable": f"bin/{probe_name}",
                 "helper": helper,
                 "invocation": "generated-post-patch-consumer",
-                "marker": "dispatcher-command-identity-success-only-v1",
+                "marker": "dispatcher-command-identity-success-only-file-v2",
             },
         }
     (compatibility_bin / "runtime-surface.json").write_text(
