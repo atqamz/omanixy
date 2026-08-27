@@ -179,6 +179,10 @@
           disabledBackgroundHomeConfiguration = homeConfigurationFor system {
             programs.omanixy.background.enable = false;
           };
+          disabledBackgroundRuntime = nixpkgs.lib.findFirst
+            (p: (p.name or "") == "omanixy-shell")
+            (throw "disabled background runtime package not found")
+            disabledBackgroundHomeConfiguration.config.home.packages;
           fontOverrideHomeConfiguration = homeConfigurationFor system {
             fonts.fontconfig.defaultFonts.monospace = [ "DejaVu Sans Mono" ];
           };
@@ -936,7 +940,7 @@
               ${activationScript} ${disabledBackgroundActivationScript} \
               ${defaultFontConfig} ${overrideFontConfig} \
               ${pkgs.nerd-fonts.jetbrains-mono} ${pkgs.dejavu_fonts} \
-              ${runtime.passthru.defaultBackground} ${runtime.passthru.omarchyCompatibilityRoot} \
+              ${runtime.passthru.defaultBackground} ${runtime.passthru.omarchyCompatibilityRoot} ${disabledBackgroundRuntime.passthru.omarchyCompatibilityRoot} \
               ${if fontPackageProvisioned then "true" else "false"} ${pkgs.fontconfig}/bin/fc-match
             touch "$out"
           '';
@@ -1829,7 +1833,7 @@
             {
               nativeBuildInputs = [ pkgs.bash pkgs.nodejs pkgs.python3 pkgs.coreutils pkgs.gnugrep pkgs.gnused ];
             } ''
-            PYTHON=${pkgs.python3}/bin/python3 ${pkgs.bash}/bin/bash ${./test/qml-patch-behavior.sh} ${compatibilityRoot} ${runtime.passthru.omarchySource} ${./scripts/patch-transparent-foreground-process} ${runtime}/bin/quickshell ${./scripts/patch-menu-power-provider} ${./scripts/patch-menu-font-provider} ${./scripts/patch-menu-terminal-provider}
+            PYTHON=${pkgs.python3}/bin/python3 ${pkgs.bash}/bin/bash ${./test/qml-patch-behavior.sh} ${compatibilityRoot} ${runtime.passthru.omarchySource} ${./scripts/patch-transparent-foreground-process} ${runtime}/bin/quickshell ${./scripts/patch-menu-power-provider} ${./scripts/patch-menu-font-provider} ${./scripts/patch-menu-terminal-provider} ${./scripts/patch-background}
             touch "$out"
           '';
           launcher-delete-contract = pkgs.runCommand "omanixy-launcher-delete-contract"

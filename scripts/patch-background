@@ -26,7 +26,7 @@ def main() -> int:
     workflow_start = "  function openSelector() {"
     workflow_end = "  Process {\n    id: readlinkProc"
     workflow = re.search(
-        re.escape(workflow_start) + r".*?" + re.escape(workflow_end),
+        re.escape(workflow_start) + r".*?(?=" + re.escape(workflow_end) + r")",
         text,
         flags=re.DOTALL,
     )
@@ -36,8 +36,14 @@ def main() -> int:
         workflow_count != 1
         or text.count(workflow_end) != 1
         or workflow is None
-        or workflow.group(0).count("omarchy-theme-bg-switcher") != 1
-        or workflow.group(0).count("omarchy-theme-switcher") != 1
+        or len(re.findall(
+            r"(?<![A-Za-z0-9_-])omarchy-theme-bg-switcher(?![A-Za-z0-9_-])",
+            workflow.group(0),
+        )) != 1
+        or len(re.findall(
+            r"(?<![A-Za-z0-9_-])omarchy-theme-switcher(?![A-Za-z0-9_-])",
+            workflow.group(0),
+        )) != 1
         or mouse_count != 1
     ):
         raise SystemExit(

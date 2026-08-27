@@ -52,6 +52,7 @@ let
     ++ lib.optionals polkitAgentEnabled [ "omarchy.polkit" ]
     ++ lib.optionals idleEnabled [ "omarchy.idle" ]
     ++ lib.optionals notificationDaemonEnabled [ "omarchy.notifications" ];
+  backgroundEnabled = security == null || (security.background or true);
   managedSecurityPluginIds = builtins.toJSON managedEnabledSecurityPlugins;
   externalExecutableCapabilities = contractSource.externalExecutableCapabilities or { };
   helperCapabilities = contractSource.helperCapabilities or { };
@@ -126,7 +127,7 @@ let
   omittedFeaturePlugins = lib.concatLists (map
     (feature: baselineSource.featurePlugins.${feature} or [ ])
     (lib.filter (feature: !builtins.elem feature selectedFeatures) (builtins.attrNames baselineSource.featurePlugins)));
-  runtimeBlockedPlugins = lib.subtractLists managedEnabledSecurityPlugins (lib.unique (baselineConfig.disabledPlugins ++ omittedFeaturePlugins));
+  runtimeBlockedPlugins = lib.subtractLists managedEnabledSecurityPlugins (lib.unique (baselineConfig.disabledPlugins ++ omittedFeaturePlugins ++ lib.optional (!backgroundEnabled) "omarchy.background"));
   blockedPluginIds = builtins.toJSON runtimeBlockedPlugins;
   safeMenuSource = builtins.fromJSON (builtins.readFile ./safe-menu.jsonc);
   safeMenuFeature = {

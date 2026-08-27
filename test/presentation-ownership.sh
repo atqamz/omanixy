@@ -9,8 +9,9 @@ font_package=${5:?default font package required}
 override_font_package=${6:?override font package required}
 default_background=${7:?default background required}
 compatibility_root=${8:?compatibility root required}
-font_provisioned=${9:?font provisioning result required}
-fc_match=${10:?fc-match executable required}
+disabled_compatibility_root=${9:?disabled compatibility root required}
+font_provisioned=${10:?font provisioning result required}
+fc_match=${11:?fc-match executable required}
 
 test_root=$(mktemp -d)
 trap 'chmod -R u+w "$test_root" 2>/dev/null || true; rm -rf "$test_root"' EXIT
@@ -55,6 +56,8 @@ run_activation "$test_root/disabled" "$disabled_activation"
 test ! -e "$test_root/disabled/.local/state/omarchy/current/background"
 jq -e '.disabledPlugins | index("omarchy.background") != null' \
   "$test_root/disabled/.config/omarchy/shell.json" >/dev/null
+test -f "$disabled_compatibility_root/shell/plugins/background/Background.qml"
+grep -Fq 'omarchy.background' "$disabled_compatibility_root/shell/services/PluginRegistry.qml"
 
 export HOME="$test_root/default"
 export XDG_CACHE_HOME="$test_root/fontconfig-cache"

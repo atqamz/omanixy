@@ -27,10 +27,14 @@ let
     // (lib.optionalAttrs cfg.security.notifications.daemon.enable {
       notificationDaemon = true;
     });
+  configuredDisabledPlugins = cfg.shell.config.disabledPlugins or [ ];
+  configuredBackgroundDisabled = builtins.elem "omarchy.background" configuredDisabledPlugins;
+  backgroundEnabled = cfg.background.enable && !configuredBackgroundDisabled;
   runtime = omanixyRuntimeFor cfg.features (
-    if securitySelection == { }
-    then null
-    else securitySelection
+    (if securitySelection == { }
+    then { }
+    else securitySelection)
+    // { background = backgroundEnabled; }
   );
   coreutils = "${pkgs.coreutils}/bin";
   baselineSource = builtins.fromJSON (builtins.readFile ../../upstream/shell-baseline.json);
@@ -39,9 +43,6 @@ let
   baselineConfig = builtins.removeAttrs baselineSource [ "featurePlugins" "featureDependencies" "featureOrder" "migrations" "featureCapabilities" "capabilityDependencies" ];
   featurePlugins = baselineSource.featurePlugins;
   selectedFeatures = featureSelection.select cfg.features;
-  configuredDisabledPlugins = cfg.shell.config.disabledPlugins or [ ];
-  configuredBackgroundDisabled = builtins.elem "omarchy.background" configuredDisabledPlugins;
-  backgroundEnabled = cfg.background.enable && !configuredBackgroundDisabled;
   effectiveDisabledPlugins = lib.unique (baselineConfig.disabledPlugins
     ++ configuredDisabledPlugins
     ++ lib.optional (!backgroundEnabled) "omarchy.background");
