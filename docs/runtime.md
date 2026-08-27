@@ -146,7 +146,8 @@ Quattro is consumed from a deterministic immutable compatibility root through
 The root contains the pinned source view used by the supported runtime graph,
 including shared QML libraries, shell services, the baseline bar widgets, and
 the copied panel and overlay sources needed by the registry.
-It applies eleven narrow patch sites: the disabled-plugin floor on bar widgets,
+It applies twelve narrow patch sites: the background renderer reachability guard,
+the disabled-plugin floor on bar widgets,
 enterprise Wi-Fi filtering through the network panel's model, removal of the
 Custom DNS provider/action/pill, hiding the unsupported speed-test action,
 clock middle-click routing, the native bar transparency fallback, the
@@ -283,14 +284,15 @@ The ownership model is deliberately whole-file and idempotent:
 | --- | --- |
 | `~/.config/omarchy/shell.json` | Declaratively seeded, then fully user-owned and writable |
 | `~/.local/state/omanixy/capabilities.json` | Omanixy-owned generated capability metadata; refreshed only while its owner marker remains valid |
+| `~/.local/state/omarchy/current/background` | Writable current-background symlink; seeded once to the immutable default asset and preserved after user replacement |
 | `~/.config/omarchy/shell.toml` | User-owned theme/config file; the monitor text-size adapter updates only `[font].base-size`, while preserving unrelated content |
 | `~/.config/omarchy/plugins/` | User-local plugin directory |
 | `~/.local/state/omarchy/current/theme/` | Seeded generated theme state, then runtime writable |
 | `/nix/store/.../omarchy-quattro-...` | Declaratively immutable upstream source |
 | `/nix/store/.../omanixy-omarchy-compat-root-...` | Immutable compatibility view with audited menu and helper links |
-| `/nix/store/.../omanixy-shell-theme-...` | Immutable theme seed |
+| `/nix/store/.../omanixy-shell-theme-...` | Immutable Tokyo Night theme and default background asset |
 
-First activation creates `shell.json` and the minimal theme seed.
+First activation creates `shell.json`, the minimal theme seed, and a current-background symlink when the Omanixy background owner is enabled.
 The generated baseline is versioned in `upstream/shell-baseline.json` with the
 upstream-required `version: 1` plus an `omanixyBaselineVersion` marker.
 The checked-in `upstream/shell-baseline-v1.json` is the exact issue #2
@@ -319,6 +321,8 @@ It never writes runtime state into the store.
 If the store symlink is broken, activation removes the broken link and seeds a
 new writable baseline; this is recovery, not preservation of unavailable bytes.
 Disabling and re-enabling the module does not silently replace customization.
+The background renderer is the only Omanixy wallpaper owner; selector and theme-switch actions that require unsupported Omarchy helpers are not exposed.
+The baseline monospace family is provisioned by Home Manager through `fonts.fontconfig.defaultFonts.monospace` with `lib.mkDefault`, so an explicit consumer fontconfig value wins normally.
 
 ## Adapter contract rationale
 
@@ -350,8 +354,9 @@ Feature selection is not closed across presentation groups.
 Runtime capabilities are resolved separately from the requested presentation
 set, and helper inclusion is exact to those capabilities and reachable
 consumer references.
-The updater, agents, background/theme workflow, nightlight, low-battery
-automation, and issue #4 security plugins remain disabled or absent.
+The updater, agents, background/theme selector workflow, nightlight, low-battery
+automation, and issue #4 security plugins remain disabled or absent; the pinned
+background renderer is supported separately.
 Third-party and user-local QML are trusted, unsandboxed code running in the
 shell process.
 Omanixy does not provide a plugin installation or packaging framework.

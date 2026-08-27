@@ -26,7 +26,8 @@ definition.
 Its complete `bin/` surface is not copied into the root.
 The root contains only dispatch wrappers for the audited helper names required
 by reachable Quattro consumers.
-The compatibility view carries eleven documented persistent source patch sites:
+The compatibility view carries twelve documented persistent source patch sites:
+the pinned background renderer's selector and theme-switch reachability guard,
 the registry safety floor for bar widgets, enterprise Wi-Fi filtering through
 the network panel's model, removal of the Custom DNS provider/action/pill,
 hiding the unsupported speed-test action, clock middle-click routing, the
@@ -75,12 +76,13 @@ User-owned extension menus remain outside the baseline support claim.
 
 ### Persistent source patch inventory
 
-The compatibility view carries exactly these eleven pinned-source patch sites.
+The compatibility view carries exactly these twelve pinned-source patch sites.
 Each patch is a presentation reachability guard or a native portability fix,
 not a replacement for an adapter that could provide the same contract.
 
 | Pinned source location | Behavioral delta | Why an adapter is insufficient | Ownership and regression evidence |
 | --- | --- | --- | --- |
+| `shell/plugins/background/Background.qml`, selector/theme-switch functions, processes, and double-click handler | Keeps the pinned Wayland renderer and current-background read path while removing unsupported selector and theme-switch helpers. | The renderer can own the default presentation without claiming Omarchy's theme and wallpaper mutation helpers. | Omanixy owns the narrow reachability adaptation; `scripts/patch-background` fails closed on pinned-source drift and `test/presentation-ownership.sh` proves the supported source surface. |
 | `shell/services/PluginRegistry.qml`, `isEnabled()` before manifest dispatch | Applies the immutable disabled-plugin floor before any first-party widget or panel can be enabled, even if a user-owned config removes the entries. | The registry decides reachability before any helper runs, so a command adapter or a mutable config cannot re-enable blocked issue #4 or unsupported first-party surfaces. | Omanixy owns the compatibility safety floor; `test/feature-lifecycle.sh` executes the registry policy for full, clipboard-only, and core selections, while `test/runtime-closure.sh` proves the blocked source directories are absent. |
 | `shell/plugins/panels/network/Model.js`, exported network model functions, and `shell/plugins/panels/network/Panel.qml`, `syncWifiNetworks()` | Filters WPA2-Enterprise and WPA-EAP networks before display and exposes only supported DNS providers. | The unsupported credential flow is created by the panel model and the Custom DNS row is created by QML; command failure cannot remove those visible affordances. | Omanixy owns the narrow reachability adaptation while NetworkManager remains host-owned; `test/qml-patch-behavior.sh` covers enterprise filtering and provider values. |
 | `shell/plugins/panels/network/Panel.qml`, DNS provider list, selection handler, and provider pill | Removes the Custom DNS action and pill. | Custom DNS would require the pinned privileged global `/etc` mutation, which is outside the host-owned NetworkManager boundary. | Omanixy omits the global policy action; the exact Nix substitutions fail closed during package construction, while `test/qml-patch-behavior.sh` executes the exported supported-provider model. |
@@ -94,7 +96,7 @@ not a replacement for an adapter that could provide the same contract.
 | `shell/plugins/menu/BarWidget.qml`, pinned terminal right-click handler | Removes the unsupported `xdg-terminal-exec` invocation while preserving the rest of the bar-menu behavior. | The command is an Omarchy-specific terminal policy surface with no generic NixOS owner in this boundary. | The exact substitution fails on source drift and the patched source is included in the QML patch behavior audit. |
 
 The network model and panel edits are one behavioral patch site family, so the
-inventory has eleven sites while documenting every persistent file and symbol.
+inventory has twelve sites while documenting every persistent file and symbol.
 Each source edit uses an exact pinned-text substitution or a fail-closed
 structured transformer and therefore fails the build if the pinned source
 shape changes.

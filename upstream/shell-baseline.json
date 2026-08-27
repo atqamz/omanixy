@@ -28,7 +28,6 @@
   "disabledPlugins": [
     "omarchy.active-window",
     "omarchy.agents",
-    "omarchy.background",
     "omarchy.battery",
     "omarchy.dev-gallery",
     "omarchy.disk-speedtest",

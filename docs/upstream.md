@@ -56,7 +56,11 @@ immutable compatibility root derived from the source-only flake input.
 The root contains the pinned runtime entrypoint, shared QML libraries, service
 objects, and the selected plugin files required by the supported baseline and
 its reachable panels.
-It applies eleven narrow compatibility patch sites:
+It applies twelve narrow compatibility patch sites:
+
+- `shell/plugins/background/Background.qml` keeps the pinned renderer and its
+  current-background read path while removing selector and theme-switch helper
+  processes that are outside the supported Nix-native boundary.
 
 - `shell/services/PluginRegistry.qml` applies the disabled-plugin floor to bar
   widgets so blocked first-party widgets cannot be re-enabled through layout
