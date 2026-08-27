@@ -17,7 +17,7 @@
     ];
     shell.config = {
       custom = true;
-      disabledPlugins = [ "omarchy.bluetooth" ];
+      disabledPlugins = [ "omarchy.audio" "omarchy.bluetooth" ];
     };
     security = {
       lock.enable = lib.mkDefault false;

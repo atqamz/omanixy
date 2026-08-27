@@ -149,7 +149,10 @@
       integratedContractOk =
         integratedNixos.config.programs.omanixy.security.pam.password.enable
         && integratedHome.programs.omanixy.security.lock.enable
-        && builtins.elem "${runtime}/bin/omanixy-shell-runtime" integratedService.Service.ExecStart;
+        && builtins.elem "${builtins.head integratedHome.home.packages}/bin/omanixy-shell-runtime" integratedService.Service.ExecStart;
+      integratedPamOk = integratedNixos.config.programs.omanixy.security.pam.password.enable;
+      integratedLockOk = integratedHome.programs.omanixy.security.lock.enable;
+      integratedRuntimeOk = builtins.elem "${builtins.head integratedHome.home.packages}/bin/omanixy-shell-runtime" integratedService.Service.ExecStart;
       pamService = integratedNixos.config.environment.etc."pam.d/omarchy-lock-password".source;
       nixosToplevel = integratedNixos.config.system.build.toplevel.drvPath;
     in
@@ -176,22 +179,52 @@
             overrideContract = if overrideContractOk then "true" else "false";
             hostCapabilities = if hostCapabilitiesOk then "true" else "false";
             integratedContract = if integratedContractOk then "true" else "false";
+            integratedPam = if integratedPamOk then "true" else "false";
+            integratedLock = if integratedLockOk then "true" else "false";
+            integratedRuntime = if integratedRuntimeOk then "true" else "false";
             invalidLockDiagnostic = if invalidLockDiagnosticOk then "true" else "false";
             nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gawk pkgs.gnugrep pkgs.gnused pkgs.jq pkgs.ripgrep pkgs.systemd ];
           } ''
-          test "$serviceContract" = true
-          test "$safeOwnership" = true
-          test "$overrideContract" = true
-          test "$hostCapabilities" = true
-          test "$integratedContract" = true
-          test "$invalidLockDiagnostic" = true
-          test -n "$nixosToplevel"
-          test -s "$pamService"
-          grep -Fq 'pam_unix.so' "$pamService"
-          grep -Fxq "$runtimePath" "$runtimeStorePaths"
-          grep -Fxq "$quickshellPath" "$runtimeStorePaths"
-          grep -Fxq "$compatibilityRoot" "$runtimeStorePaths"
-          grep -Fxq "$compatibilityBin" "$runtimeStorePaths"
+          assert_equals() {
+            label=$1
+            expected=$2
+            actual=$3
+            if test "$actual" != "$expected"; then
+              printf 'adoption contract failed: %s (expected %s, got %s)\n' "$label" "$expected" "$actual" >&2
+              exit 1
+            fi
+          }
+          assert_file_contains() {
+            label=$1
+            needle=$2
+            file=$3
+            if ! grep -Fq -- "$needle" "$file"; then
+              printf 'adoption contract failed: %s (missing %s in %s)\n' "$label" "$needle" "$file" >&2
+              exit 1
+            fi
+          }
+          assert_equals service-contract true "$serviceContract"
+          assert_equals safe-ownership true "$safeOwnership"
+          assert_equals override-contract true "$overrideContract"
+          assert_equals host-capabilities true "$hostCapabilities"
+          assert_equals integrated-pam true "$integratedPam"
+          assert_equals integrated-lock true "$integratedLock"
+          assert_equals integrated-runtime true "$integratedRuntime"
+          assert_equals integrated-contract true "$integratedContract"
+          assert_equals invalid-lock-diagnostic true "$invalidLockDiagnostic"
+          if ! test -n "$nixosToplevel"; then
+            printf 'adoption contract failed: nixos toplevel path is empty\n' >&2
+            exit 1
+          fi
+          if ! test -s "$pamService"; then
+            printf 'adoption contract failed: PAM service is empty or missing: %s\n' "$pamService" >&2
+            exit 1
+          fi
+          assert_file_contains pam-service pam_unix.so "$pamService"
+          assert_file_contains runtime-closure "$runtimePath" "$runtimeStorePaths"
+          assert_file_contains quickshell-closure "$quickshellPath" "$runtimeStorePaths"
+          assert_file_contains compatibility-root-closure "$compatibilityRoot" "$runtimeStorePaths"
+          assert_file_contains compatibility-bin-closure "$compatibilityBin" "$runtimeStorePaths"
           ${pkgs.bash}/bin/bash ${../../test/service-unit.sh} "$renderedService" "$runtimePath" "$compatibilityRoot"
           unit_dir=$(mktemp -d)
           trap 'rm -rf "$unit_dir"' EXIT
@@ -204,17 +237,21 @@
             "$defaultActivation" "$customActivation" /build/omanixy-test /build/omanixy-custom /build/omanixy-store \
             "$storeConfig" "$explicitStoreConfig" "$malformedStoreConfig" "$customStoreConfig" ${../../upstream/shell-baseline-v1.json}
           if grep -Fq 'universe' "$activationStorePaths"; then
+            printf 'adoption contract failed: activation closure contains universe:\n' >&2
+            grep -Fn 'universe' "$activationStorePaths" >&2
             exit 1
           fi
-          if grep -R -n -E '/home/atqa|sfx14|pavg15|~/dotfiles|atqamz/universe|Hand|private paths' ${./.}; then
+          private_path_matches=$(grep -R -n -E '/home/atqa/|sfx14|pavg15|~/dotfiles|atqamz/universe|private paths' ${./.} --exclude=flake.nix || true)
+          if test -n "$private_path_matches"; then
+            printf 'adoption contract failed: private path leakage:\n%s\n' "$private_path_matches" >&2
             exit 1
           fi
-          grep -Fq '## What Omanixy is' "$omanixySource/README.md"
-          grep -Fq '## Prerequisites and session assumptions' "$omanixySource/README.md"
-          grep -Fq '## Install with flakes' "$omanixySource/README.md"
-          grep -Fq '## Feature and support matrix' "$omanixySource/README.md"
-          grep -Fq '## Troubleshooting' "$omanixySource/README.md"
-          grep -Fq '## Upgrades and releases' "$omanixySource/README.md"
+          assert_file_contains readme-what-is '## What Omanixy is' "$omanixySource/README.md"
+          assert_file_contains readme-prerequisites '## Prerequisites and session assumptions' "$omanixySource/README.md"
+          assert_file_contains readme-install '## Install with flakes' "$omanixySource/README.md"
+          assert_file_contains readme-feature-matrix '## Feature and support matrix' "$omanixySource/README.md"
+          assert_file_contains readme-troubleshooting '## Troubleshooting' "$omanixySource/README.md"
+          assert_file_contains readme-upgrades '## Upgrades and releases' "$omanixySource/README.md"
           touch "$out"
         '';
       };

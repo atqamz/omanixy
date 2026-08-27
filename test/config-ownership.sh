@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+trap 'status=$?; printf "configuration ownership check failed at line %s: %s\n" "$LINENO" "$BASH_COMMAND" >&2; exit "$status"' ERR
 
 activation=${1:?Home Manager activation script required}
 custom_activation=${2:?custom Home Manager activation script required}
