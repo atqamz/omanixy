@@ -85,6 +85,10 @@ if grep -Fxq "$compatibility_probes" "$closure_paths"; then
   printf '%s\n' 'consumer probe scaffolding is part of the shipped runtime closure' >&2
   exit 1
 fi
+if grep -E 'sni-(provider|contract)' "$closure_paths"; then
+  printf '%s\n' 'SNI test scaffolding is part of the shipped runtime closure' >&2
+  exit 1
+fi
 if find "$compatibility_bin" -mindepth 1 -name 'omanixy-consumer-*' -print -quit | grep -q .; then
   printf '%s\n' 'consumer probe executables leaked into the runtime helper path' >&2
   exit 1
