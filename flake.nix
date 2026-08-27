@@ -70,6 +70,7 @@
       checks = forEachSystem (system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
+          lib = nixpkgs.lib;
           releasePython = pkgs.python3.withPackages (ps: [ ps.pyyaml ]);
           runtime = runtimeFor system null;
           clipboardRuntime = runtimeFor system [ "clipboard" ];
@@ -179,7 +180,7 @@
           disabledBackgroundHomeConfiguration = homeConfigurationFor system {
             programs.omanixy.background.enable = false;
           };
-          disabledBackgroundRuntime = nixpkgs.lib.findFirst
+          disabledBackgroundRuntime = lib.findFirst
             (p: (p.name or "") == "omanixy-shell")
             (throw "disabled background runtime package not found")
             disabledBackgroundHomeConfiguration.config.home.packages;
