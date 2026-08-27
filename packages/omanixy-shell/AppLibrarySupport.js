@@ -26,9 +26,7 @@ function hasEntry(entries, id) {
 
 function canRemove(value, entries) {
   var id = semanticDesktopId(value)
-  if (isValidDesktopId(id) && hasEntry(entries, id)) return true
-  var filenameId = desktopFileId(id)
-  return filenameId !== id && isValidDesktopId(filenameId) && hasEntry(entries, filenameId)
+  return isValidDesktopId(id) && hasEntry(entries, id)
 }
 
 function shellQuote(value) {
