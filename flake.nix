@@ -146,6 +146,7 @@
             programs.omanixy.features = [ "network" ];
           };
           runtimeClosureInfo = pkgs.closureInfo { rootPaths = [ runtime ]; };
+          sniPython = pkgs.python3.withPackages (ps: [ ps.dbus-next ]);
           lockRuntimeClosureInfo = pkgs.closureInfo { rootPaths = [ lockRuntime ]; };
           lockFingerprintRuntimeClosureInfo = pkgs.closureInfo { rootPaths = [ lockFingerprintRuntime ]; };
           coreLockRuntimeClosureInfo = pkgs.closureInfo { rootPaths = [ coreLockRuntime ]; };
@@ -799,6 +800,15 @@
               nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.gnused pkgs.findutils pkgs.jq pkgs.python3 ];
             } ''
             ${pkgs.bash}/bin/bash ${./test/runtime-closure.sh} ${runtime} "$closurePaths" ${runtime.passthru.quickshell} ${runtime.passthru.omarchySource} ${compatibilityRoot} ${runtime.passthru.compatibilityBin} ${runtime.passthru.compatibilityProbes} ${./upstream/compatibility-contracts.json}
+            touch "$out"
+          '';
+          sni-contract = pkgs.runCommand "omanixy-sni-contract"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.dbus pkgs.gnugrep pkgs.systemd sniPython ];
+            } ''
+            DBUS_SESSION_CONFIG=${pkgs.dbus}/share/dbus-1/session.conf \
+              PYTHON=${sniPython}/bin/python ${pkgs.bash}/bin/bash ${./test/sni-contract.sh} \
+              ${./test/sni-provider.py} ${runtime}/bin/quickshell ${runtime} ${compatibilityRoot}
             touch "$out"
           '';
           feature-dependencies = pkgs.runCommand "omanixy-feature-dependencies"
