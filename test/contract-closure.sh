@@ -24,6 +24,10 @@ cmp "$snapshot_a" "$snapshot_b"
 cmp "$snapshot_a" "$snapshot"
 
 checker_probes=$compatibility_probes
+jq -e '.helpers | index("omarchy-remove-launcher-entry") | not' \
+  "$compatibility_probes/probe-surface.json" >/dev/null
+jq -e '.["omarchy-remove-launcher-entry"].consumerProbe.invocation == "omitted-headless"' \
+  "$compatibility_bin/runtime-surface.json" >/dev/null
 run_checker() {
   "${PYTHON:-python3}" "$checker" "$repo" "$pinned_source" "$1" "$compatibility_bin" "$checker_probes" "${OMANIXY_RUNTIME:?selected runtime required}" "$2" "$snapshot" "$3" "$adapter" "$auditor" 2>"$checker_error"
 }
