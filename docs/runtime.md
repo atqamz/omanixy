@@ -52,8 +52,12 @@ Import the Home Manager module and enable the shell:
 }
 ```
 
-`programs.omanixy.enable`, `programs.omanixy.features`, and
-`programs.omanixy.shell.config` are the public options.
+`programs.omanixy.enable`, `programs.omanixy.features`,
+`programs.omanixy.font.package`, `programs.omanixy.font.icon.package`,
+`programs.omanixy.font.family`, and `programs.omanixy.shell.config` are the
+public options.
+The font package options provision the monospace and pinned Omarchy icon font
+families through Home Manager, and remain overridable by consumers.
 `features` selects optional presentation feature groups; the `core` group is
 always selected and the option defaults to every optional group.
 The selected presentation set is kept separate from the runtime capability
