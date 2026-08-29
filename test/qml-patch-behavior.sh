@@ -8,6 +8,7 @@ quickshell=${4:?selected Quickshell executable required}
 menu_patcher=${5:?menu provider patcher path required}
 font_patcher=${6:?font provider patcher path required}
 terminal_patcher=${7:?terminal provider patcher path required}
+background_patcher=${8:?background patcher path required}
 python=${PYTHON:-python3}
 test_root=$(mktemp -d)
 trap 'chmod -R u+w "$test_root" 2>/dev/null || true; rm -rf "$test_root"' EXIT
@@ -189,6 +190,76 @@ chmod u+w "$terminal_drift_fixture"
 sed -i '0,/xdg-terminal-exec/s//xdg-terminal-exec-drift/' "$terminal_drift_fixture"
 if "$python" "$terminal_patcher" "$terminal_drift_fixture" 2>"$test_root/terminal-drift-error"; then
   printf '%s\n' 'exact terminal provider patch accepted source-shape drift' >&2
+  exit 1
+fi
+
+background_fixture="$test_root/Background.qml"
+cp "$pinned_source/shell/plugins/background/Background.qml" "$background_fixture"
+chmod u+w "$background_fixture"
+"$python" "$background_patcher" "$background_fixture"
+"$python" - "$background_fixture" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+for old, new in {
+    "    PanelWindow {": "    Item {",
+    "      screen: modelData\n": "",
+    "      visible: !remapGuard.remapping\n": "      visible: true\n",
+    "      ScreenMoveRemap {\n        id: remapGuard\n        window: panel\n      }\n": "",
+    "      anchors { top: true; bottom: true; left: true; right: true }\n": "",
+    "      color: \"transparent\"\n": "",
+    "      updatesEnabled: true\n": "",
+    "      WlrLayershell.namespace: \"omarchy-background\"\n": "",
+    "      WlrLayershell.layer: WlrLayer.Background\n": "",
+    "      WlrLayershell.keyboardFocus: WlrKeyboardFocus.None\n": "",
+    "      exclusionMode: ExclusionMode.Ignore\n": "",
+}.items():
+    text = text.replace(old, new)
+path.write_text(text)
+PY
+mkdir -p "$test_root/home/.local/state/omarchy/current"
+ln -s "$pinned_source/themes/tokyo-night/backgrounds/1-quattro.jpg" "$test_root/home/.local/state/omarchy/current/background"
+cat > "$test_root/shell.qml" <<'EOF'
+import QtQuick
+import Quickshell
+
+ShellRoot {
+  Loader {
+    id: backgroundLoader
+    source: Qt.resolvedUrl("Background.qml")
+  }
+
+  Timer {
+    interval: 250
+    running: true
+    repeat: false
+    onTriggered: {
+      if (backgroundLoader.status === Loader.Ready) {
+        console.log("BACKGROUND_PATCH_PASS")
+      } else {
+        console.log("BACKGROUND_PATCH_FAIL", backgroundLoader.status)
+      }
+      Qt.quit()
+    }
+  }
+}
+EOF
+HOME="$test_root/home" XDG_RUNTIME_DIR="$test_root/runtime" QT_QPA_PLATFORM=offscreen \
+  QML2_IMPORT_PATH="$test_root:$root" timeout 10s "$quickshell" -n -p "$test_root" \
+  >"$test_root/background-quickshell.log" 2>&1 || true
+grep -Fq 'BACKGROUND_PATCH_PASS' "$test_root/background-quickshell.log" || {
+  cat "$test_root/background-quickshell.log" >&2
+  exit 1
+}
+
+background_drift_fixture="$test_root/Background-drift.qml"
+cp "$pinned_source/shell/plugins/background/Background.qml" "$background_drift_fixture"
+chmod u+w "$background_drift_fixture"
+sed -i '0,/omarchy-theme-bg-switcher/s//omarchy-theme-bg-switcher-drift/' "$background_drift_fixture"
+if "$python" "$background_patcher" "$background_drift_fixture" 2>"$test_root/background-drift-error"; then
+  printf '%s\n' 'exact Background.qml patch accepted source-shape drift' >&2
   exit 1
 fi
 

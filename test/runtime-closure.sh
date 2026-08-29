@@ -44,7 +44,12 @@ test -d "$runtime_source/shell"
 test ! -L "$runtime_source/shell"
 test ! -L "$runtime_source/config/omarchy/shell.json"
 test ! -e "$runtime_source/shell/plugins/agents"
-test ! -e "$runtime_source/shell/plugins/background"
+test -f "$runtime_source/shell/plugins/background/manifest.json"
+test -f "$runtime_source/shell/plugins/background/Background.qml"
+if grep -Eq 'omarchy-theme-(bg-switcher|bg-set|switcher|set)|MouseArea|openSelector|openThemeSwitcher' \
+  "$runtime_source/shell/plugins/background/Background.qml"; then
+  exit 1
+fi
 test ! -e "$runtime_source/shell/plugins/lock"
 test ! -e "$runtime_source/shell/plugins/notifications"
 test ! -e "$runtime_source/shell/plugins/panels/dropbox"

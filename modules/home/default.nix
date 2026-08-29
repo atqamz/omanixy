@@ -27,10 +27,14 @@ let
     // (lib.optionalAttrs cfg.security.notifications.daemon.enable {
       notificationDaemon = true;
     });
+  configuredDisabledPlugins = cfg.shell.config.disabledPlugins or [ ];
+  configuredBackgroundDisabled = builtins.elem "omarchy.background" configuredDisabledPlugins;
+  backgroundEnabled = cfg.background.enable && !configuredBackgroundDisabled;
   runtime = omanixyRuntimeFor cfg.features (
-    if securitySelection == { }
-    then null
-    else securitySelection
+    (if securitySelection == { }
+    then { }
+    else securitySelection)
+    // { background = backgroundEnabled; }
   );
   coreutils = "${pkgs.coreutils}/bin";
   baselineSource = builtins.fromJSON (builtins.readFile ../../upstream/shell-baseline.json);
@@ -39,13 +43,17 @@ let
   baselineConfig = builtins.removeAttrs baselineSource [ "featurePlugins" "featureDependencies" "featureOrder" "migrations" "featureCapabilities" "capabilityDependencies" ];
   featurePlugins = baselineSource.featurePlugins;
   selectedFeatures = featureSelection.select cfg.features;
-  configuredDisabledPlugins = cfg.shell.config.disabledPlugins or [ ];
+  effectiveDisabledPlugins = lib.unique (baselineConfig.disabledPlugins
+    ++ configuredDisabledPlugins
+    ++ lib.optional (!backgroundEnabled) "omarchy.background");
   omittedFeaturePlugins = lib.concatLists (map
     (feature: featurePlugins.${feature} or [ ])
     (lib.filter (feature: !builtins.elem feature selectedFeatures) (builtins.attrNames featurePlugins)));
-  runtimeBlockedPlugins = lib.unique (baselineConfig.disabledPlugins ++ omittedFeaturePlugins);
+  runtimeBlockedPlugins = lib.unique (baselineConfig.disabledPlugins
+    ++ omittedFeaturePlugins
+    ++ lib.optional (!backgroundEnabled) "omarchy.background");
   effectiveConfig = baselineConfig // cfg.shell.config // {
-    disabledPlugins = lib.unique (baselineConfig.disabledPlugins ++ configuredDisabledPlugins);
+    disabledPlugins = effectiveDisabledPlugins;
   };
   configJson = builtins.toJSON effectiveConfig;
   configSeed = pkgs.writeText "omanixy-shell-config" configJson;
@@ -89,6 +97,7 @@ let
     trap - EXIT
   '';
   runtimeTheme = runtime.passthru.theme;
+  defaultBackground = runtime.passthru.defaultBackground;
 in
 {
   options.programs.omanixy = {
@@ -118,6 +127,30 @@ in
         Omanixy-owned capability metadata is stored separately under
         .local/state/omanixy and is not shell configuration.
       '';
+    };
+
+    font.package = lib.mkOption {
+      type = lib.types.package;
+      default = pkgs.nerd-fonts.jetbrains-mono;
+      description = "Font package provisioned for the Omanixy monospace default.";
+    };
+
+    font.family = lib.mkOption {
+      type = lib.types.str;
+      default = "JetBrainsMono Nerd Font";
+      description = "Default monospace family selected by Omanixy.";
+    };
+
+    background.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = "Enable Omanixy's pinned Quattro background renderer and default state.";
+    };
+
+    background.default = lib.mkOption {
+      type = lib.types.path;
+      default = defaultBackground;
+      description = "Immutable image target materialized as the default writable background state.";
     };
 
     security.lock.enable = lib.mkOption {
@@ -318,6 +351,8 @@ in
   };
 
   config = lib.mkIf cfg.enable {
+    fonts.fontconfig.enable = lib.mkDefault true;
+    fonts.fontconfig.defaultFonts.monospace = lib.mkDefault [ cfg.font.family ];
     assertions = [
       {
         assertion = (effectiveConfig.version or null) == 1;
@@ -552,7 +587,7 @@ in
       }
     ];
 
-    home.packages = [ runtime ];
+    home.packages = [ runtime cfg.font.package ];
 
     home.activation.omanixyShellState = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
       config_dir="$HOME/.config/omarchy"
@@ -560,9 +595,20 @@ in
       capability_dir="$HOME/.local/state/omanixy"
       capability_file="$capability_dir/capabilities.json"
       theme_dir="$HOME/.local/state/omarchy/current/theme"
+      background_dir="$HOME/.local/state/omarchy/current"
+      background_file="$background_dir/background"
 
       run ${coreutils}/mkdir -p "$config_dir" "$config_dir/plugins"
       run ${coreutils}/mkdir -p "$capability_dir"
+      ${lib.optionalString backgroundEnabled ''
+      run ${coreutils}/mkdir -p "$background_dir"
+      if [ -L "$background_file" ] && [ ! -e "$background_file" ]; then
+        run ${coreutils}/rm -f -- "$background_file"
+      fi
+      if [ ! -e "$background_file" ]; then
+        run ${coreutils}/ln -s -- '${cfg.background.default}' "$background_file"
+      fi
+      ''}
 
       if [ -L "$config_file" ]; then
         config_target=$(${coreutils}/readlink -f "$config_file" || true)

@@ -52,6 +52,7 @@ let
     ++ lib.optionals polkitAgentEnabled [ "omarchy.polkit" ]
     ++ lib.optionals idleEnabled [ "omarchy.idle" ]
     ++ lib.optionals notificationDaemonEnabled [ "omarchy.notifications" ];
+  backgroundEnabled = security == null || (security.background or true);
   managedSecurityPluginIds = builtins.toJSON managedEnabledSecurityPlugins;
   externalExecutableCapabilities = contractSource.externalExecutableCapabilities or { };
   helperCapabilities = contractSource.helperCapabilities or { };
@@ -103,6 +104,7 @@ let
     installPhase = ''
       mkdir -p "$out"
       install -Dm644 colors.toml "$out/colors.toml"
+      install -Dm644 backgrounds/1-quattro.jpg "$out/backgrounds/1-quattro.jpg"
       cat > "$out/shell.toml" <<'EOF'
       [bar]
       background = "background"
@@ -120,10 +122,12 @@ let
     '';
   };
 
+  backgroundPatch = ../../scripts/patch-background;
+
   omittedFeaturePlugins = lib.concatLists (map
     (feature: baselineSource.featurePlugins.${feature} or [ ])
     (lib.filter (feature: !builtins.elem feature selectedFeatures) (builtins.attrNames baselineSource.featurePlugins)));
-  runtimeBlockedPlugins = lib.subtractLists managedEnabledSecurityPlugins (lib.unique (baselineConfig.disabledPlugins ++ omittedFeaturePlugins));
+  runtimeBlockedPlugins = lib.subtractLists managedEnabledSecurityPlugins (lib.unique (baselineConfig.disabledPlugins ++ omittedFeaturePlugins ++ lib.optional (!backgroundEnabled) "omarchy.background"));
   blockedPluginIds = builtins.toJSON runtimeBlockedPlugins;
   safeMenuSource = builtins.fromJSON (builtins.readFile ./safe-menu.jsonc);
   safeMenuFeature = {
@@ -166,6 +170,12 @@ let
             for plugin in clipboard emojis menu osd; do
               cp -R "${omarchySource}/shell/plugins/$plugin" "$out/shell/plugins/$plugin"
             done
+            mkdir -p "$out/shell/plugins/background"
+            install -Dm644 ${omarchySource}/shell/plugins/background/manifest.json "$out/shell/plugins/background/manifest.json"
+            install -Dm644 ${omarchySource}/shell/plugins/background/Background.qml "$out/shell/plugins/background/Background.qml"
+            chmod u+w "$out/shell/plugins/background/Background.qml"
+            ${pkgs.python3}/bin/python3 ${backgroundPatch} \
+              "$out/shell/plugins/background/Background.qml"
             for plugin in audio bluetooth clock monitor network power weather wifiqr; do
               mkdir -p "$out/shell/plugins/panels/$plugin"
               cp -R "${omarchySource}/shell/plugins/panels/$plugin/." "$out/shell/plugins/panels/$plugin"
@@ -391,6 +401,7 @@ let
     { prefix = "shell/Ui/"; feature = "core"; }
     { prefix = "shell/shell.qml"; feature = "core"; }
     { prefix = "shell/plugins/bar/"; feature = "core"; }
+    { prefix = "shell/plugins/background/"; feature = "core"; }
     { prefix = "shell/plugins/panels/audio/"; feature = "audio"; }
     { prefix = "shell/plugins/panels/bluetooth/"; feature = "bluetooth"; }
     { prefix = "shell/plugins/clipboard/"; feature = "clipboard"; }
@@ -543,7 +554,6 @@ let
     runtimeInputs = [ quickshell ] ++ runtimeInputs ++ [ compatAdapter compatibilityBin ];
     inheritPath = false;
     text = ''
-      export FONTCONFIG_FILE=${fontconfigFile}
       export OMARCHY_PATH=${lib.escapeShellArg "${omarchyCompatibilityRoot}"}
       export QS_DISABLE_FILE_WATCHER=1
       export QS_NO_RELOAD_POPUP=1
@@ -588,6 +598,7 @@ pkgs.symlinkJoin {
   '';
   passthru = {
     inherit omarchyRevision quickshellRevision nixpkgsRevision omarchySource omarchyCompatibilityRoot compatibilityBin compatibilityProbes quickshell theme supportedSystems safeMenu safeShellConfig selectedFeatures selectedCapabilities compatibilityHelpers runtimeBlockedPlugins adapterSources adapterSourceHash featureSurface lockEnabled fingerprintEnabled polkitAgentEnabled idleEnabled notificationDaemonEnabled managedEnabledSecurityPlugins declaredRuntimeInputs;
+    defaultBackground = "${theme}/backgrounds/1-quattro.jpg";
     inherit ipc compatAdapter runtime;
     buildProvenance = {
       inherit omarchyRevision quickshellRevision nixpkgsRevision;

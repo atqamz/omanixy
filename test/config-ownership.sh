@@ -94,7 +94,6 @@ jq -e '.disabledPlugins | index("omarchy.audio") != null' "$custom_home/.config/
 for plugin in \
   omarchy.active-window \
   omarchy.agents \
-  omarchy.background \
   omarchy.battery \
   omarchy.dev-gallery \
   omarchy.disk-speedtest \
@@ -151,7 +150,6 @@ test "$(stat -c '%a' "$store_file")" = 600
 for plugin in \
   omarchy.active-window \
   omarchy.agents \
-  omarchy.background \
   omarchy.battery \
   omarchy.dev-gallery \
   omarchy.disk-speedtest \

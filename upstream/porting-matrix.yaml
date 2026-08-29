@@ -1,4 +1,56 @@
 items:
+  - id: presentation.font
+    classification: adapted
+    maturity: validated
+    upstream:
+      project: basecamp/omarchy
+      revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
+      paths:
+        - path: bin/omarchy-font-set
+          role: upstream fontconfig contract reference
+          consumption: audited-reference
+    requirement: Resolve the deliberate Omanixy monospace default through declarative Home Manager font provisioning.
+    ownership:
+      presentation: omarchy
+      adapter: omanixy
+      backend: Home Manager fontconfig
+    dependencies:
+      runtime:
+        - JetBrainsMono Nerd Font
+      host: []
+    tests:
+      - test/presentation-ownership.sh
+    notes:
+      - Runtime font switching and imperative terminal configuration mutation remain unsupported.
+
+  - id: presentation.background
+    classification: adapted
+    maturity: validated
+    upstream:
+      project: basecamp/omarchy
+      revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
+      paths:
+        - path: shell/plugins/background/Background.qml
+          role: Quattro Wayland background renderer
+          consumption: runtime
+        - path: themes/tokyo-night/backgrounds/1-quattro.jpg
+          role: deterministic default background asset
+          consumption: build-time
+    requirement: Render one deterministic non-black default from writable current-background state without a competing wallpaper owner.
+    ownership:
+      presentation: omarchy
+      adapter: omanixy
+      backend: Quickshell Wayland background layer
+    dependencies:
+      runtime:
+        - Quickshell
+      host:
+        - Wayland
+    tests:
+      - test/presentation-ownership.sh
+    notes:
+      - Selector and theme-switch helper paths are removed from the supported renderer surface.
+
   - id: shell.runtime
     classification: adapted
     maturity: validated
@@ -774,12 +826,12 @@ items:
       revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
       paths:
         - path: shell/plugins/background/
-          role: wallpaper and theme workflow
+          role: wallpaper and theme selector workflow
           consumption: audited-reference
         - path: default/omarchy/omarchy-menu.jsonc
           role: theme and background actions
           consumption: audited-reference
-    requirement: Do not claim Omarchy theme, wallpaper, or font management without a separate Nix-native design.
+    requirement: Do not claim the Omarchy theme and background selector workflow or font management without a separate Nix-native design.
     ownership:
       presentation: omarchy
       adapter: none
@@ -790,7 +842,7 @@ items:
     tests:
       - test/safe-menu-contract.sh
     notes:
-      - The immutable compatibility menu excludes these actions.
+      - The pinned wallpaper renderer is separately owned by presentation.background; selector and theme actions remain omitted.
 
   - id: nightlight
     classification: omitted

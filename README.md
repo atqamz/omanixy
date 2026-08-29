@@ -112,6 +112,15 @@ Import it when using a system-level Omanixy capability:
 }
 ```
 
+Omanixy exposes opinionated but overridable defaults and a structured
+upstream-compatible shell configuration escape hatch.
+It does not turn every upstream QML property into a Nix option or require
+consumers to copy internal modules.
+The Home Manager module provisions JetBrainsMono Nerd Font as the overridable
+monospace baseline and materializes Tokyo Night's Quattro background through
+`~/.local/state/omarchy/current/background` without enabling a second wallpaper
+owner.
+
 When Home Manager is integrated through NixOS, import the Home Manager module
 inside the user configuration as usual:
 

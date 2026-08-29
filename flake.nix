@@ -70,6 +70,7 @@
       checks = forEachSystem (system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
+          lib = nixpkgs.lib;
           releasePython = pkgs.python3.withPackages (ps: [ ps.pyyaml ]);
           runtime = runtimeFor system null;
           clipboardRuntime = runtimeFor system [ "clipboard" ];
@@ -175,6 +176,16 @@
               custom = true;
               disabledPlugins = [ "omarchy.audio" ];
             };
+          };
+          disabledBackgroundHomeConfiguration = homeConfigurationFor system {
+            programs.omanixy.background.enable = false;
+          };
+          disabledBackgroundRuntime = lib.findFirst
+            (p: (p.name or "") == "omanixy-shell")
+            (throw "disabled background runtime package not found")
+            disabledBackgroundHomeConfiguration.config.home.packages;
+          fontOverrideHomeConfiguration = homeConfigurationFor system {
+            fonts.fontconfig.defaultFonts.monospace = [ "DejaVu Sans Mono" ];
           };
           invalidHomeConfiguration = builtins.tryEval (
             builtins.deepSeq
@@ -743,12 +754,16 @@
           pamFingerprintTodServiceFile = "${pamFingerprintTodNixosConfiguration.config.environment.etc."pam.d/omarchy-lock-fingerprint".source}";
           service = homeConfiguration.config.systemd.user.services.omanixy-shell;
           activationScript = pkgs.writeShellScript "omanixy-shell-state-activation" homeConfiguration.config.home.activation.omanixyShellState.data;
+          disabledBackgroundActivationScript = pkgs.writeShellScript "omanixy-shell-disabled-background-state-activation" disabledBackgroundHomeConfiguration.config.home.activation.omanixyShellState.data;
           clipboardActivationScript = pkgs.writeShellScript "omanixy-shell-clipboard-state-activation" clipboardHomeConfiguration.config.home.activation.omanixyShellState.data;
           coreActivationScript = pkgs.writeShellScript "omanixy-shell-core-state-activation" coreHomeConfiguration.config.home.activation.omanixyShellState.data;
           audioActivationScript = pkgs.writeShellScript "omanixy-shell-audio-state-activation" audioHomeConfiguration.config.home.activation.omanixyShellState.data;
           weatherActivationScript = pkgs.writeShellScript "omanixy-shell-weather-state-activation" weatherHomeConfiguration.config.home.activation.omanixyShellState.data;
           networkActivationScript = pkgs.writeShellScript "omanixy-shell-network-state-activation" networkHomeConfiguration.config.home.activation.omanixyShellState.data;
           customActivationScript = pkgs.writeShellScript "omanixy-shell-custom-state-activation" customHomeConfiguration.config.home.activation.omanixyShellState.data;
+          defaultFontConfig = homeConfiguration.config.xdg.configFile."fontconfig/conf.d/52-hm-default-fonts.conf".source;
+          overrideFontConfig = fontOverrideHomeConfiguration.config.xdg.configFile."fontconfig/conf.d/52-hm-default-fonts.conf".source;
+          fontPackageProvisioned = builtins.elem pkgs.nerd-fonts.jetbrains-mono homeConfiguration.config.home.packages;
           lockEnabledActivationScript = pkgs.writeShellScript "omanixy-shell-lock-state-activation"
             integratedPamOnLockOnNixosConfiguration.config.home-manager.users."omanixy-test".home.activation.omanixyShellState.data;
           polkitEnabledActivationScript = pkgs.writeShellScript "omanixy-shell-polkit-state-activation"
@@ -916,6 +931,18 @@
               nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.diffutils pkgs.jq ];
             } ''
             ${pkgs.bash}/bin/bash ${./test/config-ownership.sh} "$activation" "$customActivation" /build/omanixy-test /build/omanixy-custom-test /build/omanixy-store-link-test ${storeConfig} ${explicitStoreConfig} "$malformedStoreConfig" ${customStoreConfig} ${./upstream/shell-baseline-v1.json}
+            touch "$out"
+          '';
+          presentation-ownership = pkgs.runCommand "omanixy-presentation-ownership"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.jq pkgs.fontconfig ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/presentation-ownership.sh} \
+              ${activationScript} ${disabledBackgroundActivationScript} \
+              ${defaultFontConfig} ${overrideFontConfig} \
+              ${pkgs.nerd-fonts.jetbrains-mono} ${pkgs.dejavu_fonts} \
+              ${runtime.passthru.defaultBackground} ${runtime.passthru.omarchyCompatibilityRoot} ${disabledBackgroundRuntime.passthru.omarchyCompatibilityRoot} \
+              ${if fontPackageProvisioned then "true" else "false"} ${pkgs.fontconfig}/bin/fc-match
             touch "$out"
           '';
           service-unit = pkgs.runCommand "omanixy-service-unit"
@@ -1807,7 +1834,7 @@
             {
               nativeBuildInputs = [ pkgs.bash pkgs.nodejs pkgs.python3 pkgs.coreutils pkgs.gnugrep pkgs.gnused ];
             } ''
-            PYTHON=${pkgs.python3}/bin/python3 ${pkgs.bash}/bin/bash ${./test/qml-patch-behavior.sh} ${compatibilityRoot} ${runtime.passthru.omarchySource} ${./scripts/patch-transparent-foreground-process} ${runtime}/bin/quickshell ${./scripts/patch-menu-power-provider} ${./scripts/patch-menu-font-provider} ${./scripts/patch-menu-terminal-provider}
+            PYTHON=${pkgs.python3}/bin/python3 ${pkgs.bash}/bin/bash ${./test/qml-patch-behavior.sh} ${compatibilityRoot} ${runtime.passthru.omarchySource} ${./scripts/patch-transparent-foreground-process} ${runtime}/bin/quickshell ${./scripts/patch-menu-power-provider} ${./scripts/patch-menu-font-provider} ${./scripts/patch-menu-terminal-provider} ${./scripts/patch-background}
             touch "$out"
           '';
           launcher-delete-contract = pkgs.runCommand "omanixy-launcher-delete-contract"

@@ -1,0 +1,59 @@
+#!/usr/bin/env python3
+
+import re
+from pathlib import Path
+import sys
+
+
+UNSUPPORTED_MOUSE_AREA = '''      MouseArea {
+        anchors.fill: parent
+        acceptedButtons: Qt.LeftButton | Qt.RightButton
+        onDoubleClicked: function(mouse) {
+          if (mouse.button === Qt.RightButton) root.openThemeSwitcher()
+          else root.openSelector()
+          mouse.accepted = true
+        }
+      }
+'''
+
+
+def main() -> int:
+    if len(sys.argv) != 2:
+        print(f"usage: {sys.argv[0]} BACKGROUND_QML", file=sys.stderr)
+        return 2
+    path = Path(sys.argv[1])
+    text = path.read_text(encoding="utf-8")
+    workflow_start = "  function openSelector() {"
+    workflow_end = "  Process {\n    id: readlinkProc"
+    workflow = re.search(
+        re.escape(workflow_start) + r".*?(?=" + re.escape(workflow_end) + r")",
+        text,
+        flags=re.DOTALL,
+    )
+    workflow_count = text.count(workflow_start)
+    mouse_count = text.count(UNSUPPORTED_MOUSE_AREA)
+    if (
+        workflow_count != 1
+        or text.count(workflow_end) != 1
+        or workflow is None
+        or len(re.findall(
+            r"(?<![A-Za-z0-9_-])omarchy-theme-bg-switcher(?![A-Za-z0-9_-])",
+            workflow.group(0),
+        )) != 1
+        or len(re.findall(
+            r"(?<![A-Za-z0-9_-])omarchy-theme-switcher(?![A-Za-z0-9_-])",
+            workflow.group(0),
+        )) != 1
+        or mouse_count != 1
+    ):
+        raise SystemExit(
+            "expected exactly one pinned background workflow and mouse area, "
+            f"found {workflow_count} and {mouse_count}"
+        )
+    text = text[:workflow.start()] + text[workflow.end():]
+    path.write_text(text.replace(UNSUPPORTED_MOUSE_AREA, "", 1), encoding="utf-8")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
