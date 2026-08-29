@@ -12,9 +12,16 @@ explicit_store_config=${7:?explicit store-backed source config required}
 malformed_store_config=${8:?malformed store-backed source config required}
 custom_store_config=${9:?custom store-backed source config required}
 historical_baseline=${10:?historical issue #2 baseline required}
+nested_position_activation=${11:?nested position activation script required}
+nested_layout_activation=${12:?nested layout activation script required}
+nested_floor_activation=${13:?nested floor activation script required}
 mkdir -p "$home"
 mkdir -p "$custom_home"
 mkdir -p "$store_home/.config/omarchy"
+nested_position_home="$home/nested-position"
+nested_layout_home="$home/nested-layout"
+nested_floor_home="$home/nested-floor"
+mkdir -p "$nested_position_home" "$nested_layout_home" "$nested_floor_home"
 malformed_store_home="${home}-malformed-store-link"
 explicit_store_home="${home}-explicit-store-link"
 mkdir -p "$explicit_store_home/.config/omarchy"
@@ -42,6 +49,29 @@ run_dry_activation() {
 }
 
 run_activation
+
+run_activation_at "$nested_position_home" "$nested_position_activation"
+jq -e '
+  .bar.position == "bottom"
+  and .bar.layout.left == [{"id":"omarchy.menu"},{"id":"omarchy.workspaces"}]
+  and .bar.layout.center == [{"id":"omarchy.clock","format":"dddd HH:mm"},{"id":"omarchy.weather"}]
+  and .bar.layout.right == [{"id":"omarchy.tray"},{"id":"omarchy.media"},{"id":"omarchy.bluetooth"},{"id":"omarchy.network"},{"id":"omarchy.audio"},{"id":"omarchy.monitor"},{"id":"omarchy.power"}]
+' "$nested_position_home/.config/omarchy/shell.json" >/dev/null
+
+run_activation_at "$nested_layout_home" "$nested_layout_activation"
+jq -e '
+  .bar.layout.right == [{"id":"custom.right"}]
+  and .bar.layout.left == [{"id":"omarchy.menu"},{"id":"omarchy.workspaces"}]
+  and .bar.layout.center == [{"id":"omarchy.clock","format":"dddd HH:mm"},{"id":"omarchy.weather"}]
+' "$nested_layout_home/.config/omarchy/shell.json" >/dev/null
+
+run_activation_at "$nested_floor_home" "$nested_floor_activation"
+jq -e '
+  .bar.transparent == true
+  and .bar.layout.right[-1].id == "omarchy.power"
+  and (.disabledPlugins | index("omarchy.active-window") != null)
+  and (.disabledPlugins | index("omarchy.audio") != null)
+' "$nested_floor_home/.config/omarchy/shell.json" >/dev/null
 
 config_file="$home/.config/omarchy/shell.json"
 theme_dir="$home/.local/state/omarchy/current/theme"

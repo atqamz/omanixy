@@ -52,7 +52,7 @@ let
   runtimeBlockedPlugins = lib.unique (baselineConfig.disabledPlugins
     ++ omittedFeaturePlugins
     ++ lib.optional (!backgroundEnabled) "omarchy.background");
-  effectiveConfig = baselineConfig // cfg.shell.config // {
+  effectiveConfig = lib.recursiveUpdate baselineConfig cfg.shell.config // {
     disabledPlugins = effectiveDisabledPlugins;
   };
   configJson = builtins.toJSON effectiveConfig;
