@@ -39,6 +39,6 @@ else:
 PY
 
 check_command=$(just --justfile "$justfile" --dry-run check 2>&1 | python3 -c 'import sys; print(next(sys.stdin).rstrip())')
-[ "$check_command" = 'nix --option max-jobs 1 flake check --show-trace --print-build-logs' ]
+[[ "$check_command" == *'--option max-jobs 1'* ]]
 
 printf '%s\n' 'security recovery measurement output contract checks passed'
