@@ -56,6 +56,8 @@ PATH="$audio_path" command -v wpctl >/dev/null
 launcher_path=$(runtime_path "$launcher_runtime")
 test -x "$launcher_runtime/bin/omarchy-remove-launcher-entry"
 PATH="$launcher_path" command -v uwsm-app >/dev/null
+PATH="$launcher_path" command -v xdg-terminal-exec >/dev/null
+PATH="$launcher_path" command -v foot >/dev/null
 test ! -x "$launcher_runtime/bin/omarchy-network-status"
 
 screenshot_path=$(runtime_path "$screenshot_runtime")

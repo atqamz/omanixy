@@ -23,7 +23,7 @@
       contractSource = builtins.fromJSON (builtins.readFile ./upstream/compatibility-contracts.json);
       nixpkgsRevision = contractSource.pins.nixpkgs;
       forEachSystem = nixpkgs.lib.genAttrs supportedSystems;
-      runtimeForSecurity = system: features: security:
+      runtimeForSecurity = system: features: security: launcher:
         assert nixpkgs.lib.assertOneOf "omanixy supported system" system supportedSystems;
         import ./packages/omanixy-shell {
           inherit omarchy;
@@ -31,9 +31,9 @@
           pkgs = nixpkgs.legacyPackages.${system};
           quickshellSrc = quickshell;
           inherit nixpkgsRevision supportedSystems;
-          inherit features security;
+          inherit features security launcher;
         };
-      runtimeFor = system: features: runtimeForSecurity system features null;
+      runtimeFor = system: features: runtimeForSecurity system features null null;
       homeConfigurationFor = system: extra: home-manager.lib.homeManagerConfiguration {
         pkgs = nixpkgs.legacyPackages.${system};
         modules = [
@@ -50,7 +50,7 @@
     in
     {
       homeManagerModules.default = { pkgs, ... }: {
-        _module.args.omanixyRuntimeFor = features: security: runtimeForSecurity pkgs.stdenv.hostPlatform.system features security;
+        _module.args.omanixyRuntimeFor = features: security: launcher: runtimeForSecurity pkgs.stdenv.hostPlatform.system features security launcher;
         imports = [ ./modules/home/default.nix ];
       };
       nixosModules.default = ./modules/nixos/default.nix;
@@ -84,36 +84,40 @@
           monitorRuntime = runtimeFor system [ "monitor" ];
           powerRuntime = runtimeFor system [ "power" ];
           notificationRuntime = runtimeFor system [ "notification" ];
-          lockRuntime = runtimeForSecurity system null { lock = true; };
-          lockFingerprintRuntime = runtimeForSecurity system null { lock = true; fingerprint = true; fingerprintPackage = pkgs.fprintd; };
-          coreLockRuntime = runtimeForSecurity system [ "core" ] { lock = true; };
-          polkitRuntime = runtimeForSecurity system null { polkitAgent = true; };
-          corePolkitRuntime = runtimeForSecurity system [ "core" ] { polkitAgent = true; };
-          idleRuntime = runtimeForSecurity system null { lock = true; idle = true; };
-          coreLockIdleRuntime = runtimeForSecurity system [ "core" ] { lock = true; idle = true; };
-          notificationDaemonRuntime = runtimeForSecurity system null { notificationDaemon = true; };
-          coreNotificationDaemonRuntime = runtimeForSecurity system [ "core" ] { notificationDaemon = true; };
-          notificationClientAndDaemonRuntime = runtimeForSecurity system [ "notification" ] { notificationDaemon = true; };
-          allSecurityWithoutNotificationDaemonRuntime = runtimeForSecurity system null {
-            lock = true;
-            fingerprint = true;
-            fingerprintPackage = pkgs.fprintd;
-            polkitAgent = true;
-            idle = true;
-          };
-          allSecurityWithNotificationDaemonRuntime = runtimeForSecurity system null {
-            lock = true;
-            fingerprint = true;
-            fingerprintPackage = pkgs.fprintd;
-            polkitAgent = true;
-            idle = true;
-            notificationDaemon = true;
-          };
+          lockRuntime = runtimeForSecurity system null { lock = true; } null;
+          lockFingerprintRuntime = runtimeForSecurity system null { lock = true; fingerprint = true; fingerprintPackage = pkgs.fprintd; } null;
+          coreLockRuntime = runtimeForSecurity system [ "core" ] { lock = true; } null;
+          polkitRuntime = runtimeForSecurity system null { polkitAgent = true; } null;
+          corePolkitRuntime = runtimeForSecurity system [ "core" ] { polkitAgent = true; } null;
+          idleRuntime = runtimeForSecurity system null { lock = true; idle = true; } null;
+          coreLockIdleRuntime = runtimeForSecurity system [ "core" ] { lock = true; idle = true; } null;
+          notificationDaemonRuntime = runtimeForSecurity system null { notificationDaemon = true; } null;
+          coreNotificationDaemonRuntime = runtimeForSecurity system [ "core" ] { notificationDaemon = true; } null;
+          notificationClientAndDaemonRuntime = runtimeForSecurity system [ "notification" ] { notificationDaemon = true; } null;
+          allSecurityWithoutNotificationDaemonRuntime = runtimeForSecurity system null
+            {
+              lock = true;
+              fingerprint = true;
+              fingerprintPackage = pkgs.fprintd;
+              polkitAgent = true;
+              idle = true;
+            }
+            null;
+          allSecurityWithNotificationDaemonRuntime = runtimeForSecurity system null
+            {
+              lock = true;
+              fingerprint = true;
+              fingerprintPackage = pkgs.fprintd;
+              polkitAgent = true;
+              idle = true;
+              notificationDaemon = true;
+            }
+            null;
           packageIdleWithoutLockEval = builtins.tryEval (
-            builtins.seq (runtimeForSecurity system null { idle = true; lock = false; }).drvPath true
+            builtins.seq (runtimeForSecurity system null { idle = true; lock = false; } null).drvPath true
           );
           packageIdleWithLockEval = builtins.tryEval (
-            builtins.seq (runtimeForSecurity system null { idle = true; lock = true; }).drvPath true
+            builtins.seq (runtimeForSecurity system null { idle = true; lock = true; } null).drvPath true
           );
           capabilityRuntimePaths = pkgs.writeText "omanixy-capability-runtime-paths" (builtins.toJSON {
             "audio-control" = toString audioRuntime;
@@ -170,6 +174,9 @@
           customStoreConfig = pkgs.writeText "omanixy-custom-store-shell-config" ''{"version":1,"custom":true}'';
           malformedStoreConfig = pkgs.writeText "omanixy-malformed-store-shell-config" ''{"disabledPlugins":'';
           homeConfiguration = homeConfigurationFor system { };
+          launcherTerminalHomeConfiguration = homeConfigurationFor system {
+            programs.omanixy.launcher.terminal.desktop = "footclient.desktop";
+          };
           customHomeConfiguration = homeConfigurationFor system {
             programs.omanixy.shell.config = {
               version = 1;
@@ -770,6 +777,11 @@
           pamFingerprintTodServiceFile = "${pamFingerprintTodNixosConfiguration.config.environment.etc."pam.d/omarchy-lock-fingerprint".source}";
           service = homeConfiguration.config.systemd.user.services.omanixy-shell;
           activationScript = pkgs.writeShellScript "omanixy-shell-state-activation" homeConfiguration.config.home.activation.omanixyShellState.data;
+          launcherTerminalRuntime = lib.findFirst
+            (p: (p.name or "") == "omanixy-shell")
+            (throw "launcher terminal runtime package not found")
+            launcherTerminalHomeConfiguration.config.home.packages;
+          launcherTerminalActivationScript = pkgs.writeShellScript "omanixy-shell-launcher-terminal-state-activation" launcherTerminalHomeConfiguration.config.home.activation.omanixyShellState.data;
           disabledBackgroundActivationScript = pkgs.writeShellScript "omanixy-shell-disabled-background-state-activation" disabledBackgroundHomeConfiguration.config.home.activation.omanixyShellState.data;
           clipboardActivationScript = pkgs.writeShellScript "omanixy-shell-clipboard-state-activation" clipboardHomeConfiguration.config.home.activation.omanixyShellState.data;
           coreActivationScript = pkgs.writeShellScript "omanixy-shell-core-state-activation" coreHomeConfiguration.config.home.activation.omanixyShellState.data;
@@ -1895,6 +1907,13 @@
             touch "$out"
           '';
           launcher-cold-launch-vm = import ./test/launcher-cold-launch-vm.nix { inherit pkgs self; };
+          launcher-terminal = pkgs.runCommand "omanixy-launcher-terminal"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.gnused pkgs.xvfb-run pkgs.xauth pkgs.xorg-server ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/launcher-terminal.sh} ${activationScript} ${runtime} ${pkgs.foot} foot.desktop ${launcherTerminalActivationScript} ${launcherTerminalRuntime} ${pkgs.foot} footclient.desktop ${pkgs.xvfb-run}/bin/xvfb-run
+            touch "$out"
+          '';
         });
     };
 }
