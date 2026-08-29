@@ -494,15 +494,21 @@ let
 
         "$PKCHECK" -a "$ACTION_ID" -u -p $$ >pkcheck2.log 2>&1 &
         p2=$!
+        prompt_seen=no
         if wait_for "$HARNESS_DIR" polkit '.isResponseRequired == true' 15; then
+          prompt_seen=yes
           qs_call "$HARNESS_DIR" polkit submit "$FIXTURE_PASSWORD" >/dev/null
-          wait "$p2"
-          p2exit=$?
+          p2exit=0
+          wait "$p2" 2>/dev/null || p2exit=$?
           [ "$p2exit" = "0" ] && check same-harness-reprompt yes "exit=$p2exit" || check same-harness-reprompt no "exit=$p2exit"
         else
-          check same-harness-reprompt no "stale-no-prompt"
           kill "$p2" 2>/dev/null || true
+          p2exit=0
+          wait "$p2" 2>/dev/null || p2exit=$?
+          check same-harness-reprompt no "stale-no-prompt"
         fi
+        sequence=$({ grep 'HARNESS_EVENT' harness.log 2>/dev/null || true; } | sed -E 's/^.*HARNESS_EVENT //' | tr '\n' ';' | sed 's/;$//')
+        echo "MEASURE same-harness-reprompt exit=$p2exit prompt=$prompt_seen sequence=$sequence"
 
         kill "$hpid" 2>/dev/null || true
         wait "$hpid" 2>/dev/null

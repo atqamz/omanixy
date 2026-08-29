@@ -479,10 +479,12 @@ let
           n=$((n + 1))
           sleep 0.3
         done
+        popup=$(popup_count)
+        echo "MEASURE burst-history-bounded history_count=$hist popup_count=$popup"
         if [ "$hist" = "10" ]; then
           echo "CHECK burst-history-bounded PASS"
         else
-          echo "CHECK burst-history-bounded FAIL history_count=$hist popup_count=$(popup_count)"
+          echo "CHECK burst-history-bounded FAIL history_count=$hist popup_count=$popup"
           echo "DIAG history listing:"
           ls -la "$HOME/.local/state/omarchy/notifications/history/" 2>&1
         fi

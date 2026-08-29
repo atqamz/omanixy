@@ -7,7 +7,7 @@ fmt:
     nix fmt
 
 check:
-    nix flake check --show-trace --print-build-logs
+    nix --option max-jobs 1 flake check --show-trace --print-build-logs
     ./scripts/verify
 
 bootstrap:

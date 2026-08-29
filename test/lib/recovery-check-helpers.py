@@ -1,3 +1,4 @@
+import re
 
 
 class CheckAssertionError(AssertionError):
@@ -386,6 +387,44 @@ def parse_checks(output):
         name = parts[1]
         seen.setdefault(name, []).append(parts[2])
     return seen
+
+
+def parse_measurements(output):
+    measurements = {}
+    for line in output.splitlines():
+        if not line.startswith("MEASURE "):
+            continue
+        match = re.fullmatch(r"MEASURE (\S+)(?: (.*))?", line)
+        if match is None:
+            raise CheckAssertionError(f"malformed MEASURE line: {line}")
+        name, fields = match.groups()
+        values = {}
+        fields = fields or ""
+        sequence = re.search(r"(?:^| )sequence=(.*)$", fields)
+        scalar_fields = fields[:sequence.start()] if sequence else fields
+        cursor = 0
+        for field in re.finditer(r"(?<!\S)([\w-]+)=([^ ]*)", scalar_fields):
+            if scalar_fields[cursor:field.start()].strip():
+                raise CheckAssertionError(f"malformed MEASURE fields: {line}")
+            key, value = field.groups()
+            if key in values:
+                raise CheckAssertionError(f"duplicate MEASURE field {key!r}: {line}")
+            values[key] = value
+            cursor = field.end()
+        if scalar_fields[cursor:].strip():
+            raise CheckAssertionError(f"malformed MEASURE fields: {line}")
+        if sequence:
+            values["sequence"] = sequence.group(1)
+        measurements.setdefault(name, []).append(values)
+    return measurements
+
+
+def assert_measurements(output, expected):
+    actual = parse_measurements(output)
+    if actual != expected:
+        raise CheckAssertionError(
+            f"unexpected MEASURE output:\nexpected: {expected!r}\nactual: {actual!r}"
+        )
 
 
 def assert_checks(output, required):
