@@ -418,7 +418,7 @@ def main() -> int:
             die(f"helper {helper} generated consumer probe did not identify its consumer")
         if f"CONSUMER_REACHED\t{helper}\n" not in probe_result.stdout:
             die(
-                f"helper {helper} generated consumer probe did not execute its consumer: "
+                f"helper {helper} generated consumer probe failed its dispatcher marker check: "
                 f"stdout={probe_result.stdout!r} stderr={probe_result.stderr!r}"
             )
 

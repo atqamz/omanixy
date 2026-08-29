@@ -28,9 +28,74 @@ jq -e '.helpers | index("omarchy-remove-launcher-entry") | not' \
   "$compatibility_probes/probe-surface.json" >/dev/null
 jq -e '.["omarchy-remove-launcher-entry"].consumerProbe.invocation == "omitted-headless"' \
   "$compatibility_bin/runtime-surface.json" >/dev/null
+
 run_checker() {
   "${PYTHON:-python3}" "$checker" "$repo" "$pinned_source" "$1" "$compatibility_bin" "$checker_probes" "${OMANIXY_RUNTIME:?selected runtime required}" "$2" "$snapshot" "$3" "$adapter" "$auditor" 2>"$checker_error"
 }
+
+fake_quickshell=$test_root/fake-quickshell
+printf '%s\n' \
+  '#!/bin/sh' \
+  'set -eu' \
+  'printf "%s\\n" "INFO: Configuration Loaded" "WARN: Failed to create wl_display (No such file or directory)" >&2' \
+  'printf "%s\\n" "$OMANIXY_PROBE_HELPER" > "$OMANIXY_CONSUMER_MARKER.$OMANIXY_PROBE_HELPER"' \
+  > "$fake_quickshell"
+chmod u+x "$fake_quickshell"
+
+prepare_probe_copy() {
+  local destination=$1
+  cp -R -- "$compatibility_probes" "$destination"
+  chmod -R u+w "$destination"
+  for probe in "$destination"/bin/omanixy-consumer-*; do
+    sed -i "s|timeout 14s \".*\" -n -p|timeout 14s \"$fake_quickshell\" -n -p|" "$probe"
+  done
+}
+
+noisy_probes=$test_root/noisy-probes
+prepare_probe_copy "$noisy_probes"
+checker_probes=$noisy_probes
+if ! run_checker "$compatibility_root" "$manifest" "$test_script" > "$test_root/noisy-output"; then
+  printf '%s\n' 'contract closure rejected a correct marker with Quickshell diagnostic output' >&2
+  cat "$checker_error" >&2
+  exit 1
+fi
+printf '%s\n' 'ACCEPTED\tcorrect dispatcher marker with Quickshell diagnostic output'
+
+wrong_quickshell=$test_root/wrong-quickshell
+printf '%s\n' \
+  '#!/bin/sh' \
+  'set -eu' \
+  'printf "%s\\n" "INFO: Configuration Loaded" "WARN: Failed to create wl_display (No such file or directory)" >&2' \
+  'printf "%s\\n" wrong-identity > "$OMANIXY_CONSUMER_MARKER.$OMANIXY_PROBE_HELPER"' \
+  > "$wrong_quickshell"
+chmod u+x "$wrong_quickshell"
+wrong_probes=$test_root/wrong-probes
+prepare_probe_copy "$wrong_probes"
+for probe in "$wrong_probes"/bin/omanixy-consumer-*; do
+  sed -i "s|$fake_quickshell|$wrong_quickshell|" "$probe"
+done
+checker_probes=$wrong_probes
+if run_checker "$compatibility_root" "$manifest" "$test_script" > "$test_root/wrong-output"; then
+  printf '%s\n' 'contract closure accepted an incorrect dispatcher marker' >&2
+  exit 1
+fi
+if ! grep -Fq 'generated consumer probe failed its dispatcher marker check' "$checker_error"; then
+  printf '%s\n' 'contract closure rejected the incorrect marker for an unrelated reason' >&2
+  cat "$checker_error" >&2
+  exit 1
+fi
+if ! grep -Fq 'quickshell log:' "$checker_error" || ! grep -Fq 'Failed to create wl_display' "$checker_error"; then
+  printf '%s\n' 'contract closure omitted Quickshell diagnostic output from the marker failure' >&2
+  cat "$checker_error" >&2
+  exit 1
+fi
+if grep -Fq 'did not execute its consumer' "$checker_error"; then
+  printf '%s\n' 'contract closure retained the misleading consumer execution diagnostic' >&2
+  cat "$checker_error" >&2
+  exit 1
+fi
+printf '%s\n' 'REJECTED\tincorrect dispatcher marker with diagnostic output'
+checker_probes=$compatibility_probes
 
 expect_rejection() {
   local description=$1 reason=$2 root=$3 mutated_manifest=$4
