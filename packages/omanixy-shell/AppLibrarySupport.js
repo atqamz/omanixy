@@ -36,7 +36,7 @@ function shellQuote(value) {
 function launchCommand(value) {
   var id = semanticDesktopId(value)
   if (!id) return ""
-  return "uwsm app -- gtk-launch " + shellQuote(id + ".desktop")
+  return "uwsm app -t service -- gtk-launch " + shellQuote(id + ".desktop")
 }
 
 function entryIdentities(entry) {

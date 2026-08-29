@@ -1894,6 +1894,7 @@
             ${pkgs.bash}/bin/bash ${./test/uwsm-integration.sh} ${runtime} ${compatibilityRoot} ${runtime}/bin/quickshell
             touch "$out"
           '';
+          launcher-cold-launch-vm = import ./test/launcher-cold-launch-vm.nix { inherit pkgs self; };
         });
     };
 }
