@@ -23,6 +23,34 @@ items:
     notes:
       - Runtime font switching and imperative terminal configuration mutation remain unsupported.
 
+  - id: presentation.icon-font
+    classification: adapted
+    maturity: validated
+    upstream:
+      project: basecamp/omarchy
+      revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
+      paths:
+        - path: default/fonts/omarchy/omarchy.ttf
+          role: pinned Omarchy icon font
+          consumption: build-time
+        - path: shell/plugins/menu/BarWidget.qml
+          role: menu bar logo family consumer
+          consumption: runtime
+    requirement: Resolve the pinned Omarchy icon family used by the Quattro menu bar widget through declarative Home Manager font provisioning.
+    ownership:
+      presentation: omarchy
+      adapter: omanixy
+      backend: Home Manager font package and fontconfig
+    dependencies:
+      runtime:
+        - Omarchy icon font
+      host: []
+    tests:
+      - test/font-family-closure.sh
+    notes:
+      - Omanixy packages the exact pinned font with the upstream MIT license notice and provenance README.
+      - The compatibility root carries the QML consumer; the font is installed separately because nested compatibility-root files are not fontconfig search paths.
+
   - id: presentation.background
     classification: adapted
     maturity: validated

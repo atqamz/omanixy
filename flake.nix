@@ -783,6 +783,9 @@
           defaultFontConfig = homeConfiguration.config.xdg.configFile."fontconfig/conf.d/52-hm-default-fonts.conf".source;
           overrideFontConfig = fontOverrideHomeConfiguration.config.xdg.configFile."fontconfig/conf.d/52-hm-default-fonts.conf".source;
           fontPackageProvisioned = builtins.elem pkgs.nerd-fonts.jetbrains-mono homeConfiguration.config.home.packages;
+          iconFontPackage = runtime.passthru.iconFont;
+          iconFontPackageProvisioned = builtins.elem iconFontPackage homeConfiguration.config.home.packages;
+          fontFamilyConfig = pkgs.makeFontsConf { fontDirectories = [ pkgs.nerd-fonts.jetbrains-mono iconFontPackage ]; };
           lockEnabledActivationScript = pkgs.writeShellScript "omanixy-shell-lock-state-activation"
             integratedPamOnLockOnNixosConfiguration.config.home-manager.users."omanixy-test".home.activation.omanixyShellState.data;
           polkitEnabledActivationScript = pkgs.writeShellScript "omanixy-shell-polkit-state-activation"
@@ -965,6 +968,15 @@
               ${pkgs.nerd-fonts.jetbrains-mono} ${pkgs.dejavu_fonts} \
               ${runtime.passthru.defaultBackground} ${runtime.passthru.omarchyCompatibilityRoot} ${disabledBackgroundRuntime.passthru.omarchyCompatibilityRoot} \
               ${if fontPackageProvisioned then "true" else "false"} ${pkgs.fontconfig}/bin/fc-match
+            touch "$out"
+          '';
+          font-family-closure = pkgs.runCommand "omanixy-font-family-closure"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.findutils pkgs.gnugrep pkgs.gnused pkgs.fontconfig ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/font-family-closure.sh} \
+              ${compatibilityRoot} ${fontFamilyConfig} ${iconFontPackage} \
+              ${if iconFontPackageProvisioned then "true" else "false"} ${pkgs.fontconfig}/bin/fc-match
             touch "$out"
           '';
           service-unit = pkgs.runCommand "omanixy-service-unit"

@@ -83,6 +83,12 @@ It applies twelve narrow compatibility patch sites:
   invoke an absent helper or backend.
 - `shell/plugins/menu/Menu.qml` removes the pinned font provider because the
   generic runtime does not provide Omarchy font enumeration or mutation.
+- `default/fonts/omarchy/omarchy.ttf` is packaged as an exact pinned Home
+  Manager font dependency for the menu bar's `omarchy` family. The upstream
+  repository is MIT licensed and has no separate font license file; the
+  package retains the upstream license notice and font provenance README.
+  The font remains outside the compatibility root because fontconfig resolves
+  installed font directories rather than nested source-view files.
 - `shell/plugins/menu/BarWidget.qml` removes the unsupported terminal-provider
   right-click action while preserving the remaining menu behavior.
 - `shell/plugins/menu/Menu.qml` routes launcher deletion through a
