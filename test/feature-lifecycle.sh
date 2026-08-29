@@ -80,6 +80,7 @@ jq -e '(has("featureCapabilities") | not) and (has("capabilityDependencies") | n
 assert_no_feature_omissions "$fresh_core_config"
 jq -e '.selectedFeatures == ["core"]' \
   "$fresh_core_home/.local/state/omanixy/capabilities.json" >/dev/null
+test ! -e "$fresh_core_home/.config/xdg-terminals.list"
 activate "$fresh_core_home" "$full_activation"
 
 fresh_audio_home="$test_root/fresh-audio-home"
@@ -149,10 +150,13 @@ test -x "$full_runtime/bin/omarchy-bluetooth-device"
 PATH="$full_path" command -v pactl >/dev/null
 PATH="$full_path" command -v curl >/dev/null
 PATH="$full_path" command -v nmcli >/dev/null
+PATH="$full_path" command -v xdg-terminal-exec >/dev/null
+PATH="$full_path" command -v foot >/dev/null
 PATH="$audio_path" command -v pactl >/dev/null
 PATH="$weather_path" command -v curl >/dev/null
 PATH="$network_path" command -v nmcli >/dev/null
-if PATH="$core_path" command -v uwsm-app >/dev/null || PATH="$core_path" command -v gtk-launch >/dev/null; then
+if PATH="$core_path" command -v uwsm-app >/dev/null || PATH="$core_path" command -v gtk-launch >/dev/null || \
+  PATH="$core_path" command -v xdg-terminal-exec >/dev/null || PATH="$core_path" command -v foot >/dev/null; then
   printf '%s\n' 'core-only runtime unexpectedly contains launcher executables' >&2
   exit 1
 fi

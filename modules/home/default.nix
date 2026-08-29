@@ -30,12 +30,17 @@ let
   configuredDisabledPlugins = cfg.shell.config.disabledPlugins or [ ];
   configuredBackgroundDisabled = builtins.elem "omarchy.background" configuredDisabledPlugins;
   backgroundEnabled = cfg.background.enable && !configuredBackgroundDisabled;
-  runtime = omanixyRuntimeFor cfg.features (
-    (if securitySelection == { }
-    then { }
-    else securitySelection)
-    // { background = backgroundEnabled; }
-  );
+  runtime = omanixyRuntimeFor cfg.features
+    (
+      (if securitySelection == { }
+      then { }
+      else securitySelection)
+      // { background = backgroundEnabled; }
+    )
+    {
+      terminalPackage = cfg.launcher.terminal.package;
+      terminalDesktop = cfg.launcher.terminal.desktop;
+    };
   coreutils = "${pkgs.coreutils}/bin";
   baselineSource = builtins.fromJSON (builtins.readFile ../../upstream/shell-baseline.json);
   featureSelection = import ../../lib/feature-selection.nix { inherit lib; baseline = baselineSource; };
@@ -43,6 +48,7 @@ let
   baselineConfig = builtins.removeAttrs baselineSource [ "featurePlugins" "featureDependencies" "featureOrder" "migrations" "featureCapabilities" "capabilityDependencies" ];
   featurePlugins = baselineSource.featurePlugins;
   selectedFeatures = featureSelection.select cfg.features;
+  launcherEnabled = builtins.elem "launcher" selectedFeatures;
   effectiveDisabledPlugins = lib.unique (baselineConfig.disabledPlugins
     ++ configuredDisabledPlugins
     ++ lib.optional (!backgroundEnabled) "omarchy.background");
@@ -57,6 +63,7 @@ let
   };
   configJson = builtins.toJSON effectiveConfig;
   configSeed = pkgs.writeText "omanixy-shell-config" configJson;
+  terminalConfigSeed = pkgs.writeText "omanixy-xdg-terminals" "${cfg.launcher.terminal.desktop}\n";
   legacyBaselineJson = builtins.toJSON historicalBaseline;
   capabilityState = pkgs.writeText "omanixy-capability-state" (builtins.toJSON {
     schema = 1;
@@ -145,6 +152,18 @@ in
       type = lib.types.str;
       default = "JetBrainsMono Nerd Font";
       description = "Default monospace family selected by Omanixy.";
+    };
+
+    launcher.terminal.package = lib.mkOption {
+      type = lib.types.package;
+      default = pkgs.foot;
+      description = "Terminal emulator package provisioned for Terminal=true launcher entries.";
+    };
+
+    launcher.terminal.desktop = lib.mkOption {
+      type = lib.types.str;
+      default = "foot.desktop";
+      description = "Desktop entry ID selected by xdg-terminal-exec for Terminal=true launcher entries.";
     };
 
     background.enable = lib.mkOption {
@@ -593,7 +612,8 @@ in
       }
     ];
 
-    home.packages = [ runtime cfg.font.package cfg.font.icon.package ];
+    home.packages = [ runtime cfg.font.package cfg.font.icon.package ]
+      ++ lib.optional launcherEnabled cfg.launcher.terminal.package;
 
     home.activation.omanixyShellState = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
       config_dir="$HOME/.config/omarchy"
@@ -603,6 +623,8 @@ in
       theme_dir="$HOME/.local/state/omarchy/current/theme"
       background_dir="$HOME/.local/state/omarchy/current"
       background_file="$background_dir/background"
+      terminal_config_home="''${XDG_CONFIG_HOME:-$HOME/.config}"
+      terminal_config_file="$terminal_config_home/xdg-terminals.list"
 
       run ${coreutils}/mkdir -p "$config_dir" "$config_dir/plugins"
       run ${coreutils}/mkdir -p "$capability_dir"
@@ -656,6 +678,25 @@ in
       if [ ! -e "$config_file" ]; then
         run ${coreutils}/install -Dm600 -- '${configSeed}' "$config_file"
       fi
+
+      ${lib.optionalString launcherEnabled ''
+      if [ ! -e "$terminal_config_file" ] && [ ! -L "$terminal_config_file" ]; then
+        terminal_configured=0
+        terminal_config_dirs="''${XDG_CONFIG_DIRS:-/etc/xdg}"
+        terminal_config_ifs="$IFS"
+        IFS=:
+        for terminal_config_dir in $terminal_config_dirs; do
+          if [ -e "$terminal_config_dir/xdg-terminals.list" ] || [ -L "$terminal_config_dir/xdg-terminals.list" ]; then
+            terminal_configured=1
+            break
+          fi
+        done
+        IFS="$terminal_config_ifs"
+        if [ "$terminal_configured" = 0 ]; then
+          run ${coreutils}/install -Dm644 -- '${terminalConfigSeed}' "$terminal_config_file"
+        fi
+      fi
+      ''}
 
       if [ ! -L "$capability_file" ] && { [ ! -e "$capability_file" ] || ${pkgs.jq}/bin/jq -e '.owner == "omanixy" and .schema == 1' "$capability_file" >/dev/null 2>&1; }; then
         run ${coreutils}/install -Dm600 -- '${capabilityState}' "$capability_file"

@@ -29,6 +29,8 @@ PATH="$runtime_path" command -v pkill >/dev/null
 PATH="$runtime_path" command -v update-desktop-database >/dev/null
 PATH="$runtime_path" command -v wpctl >/dev/null
 PATH="$runtime_path" command -v wl-paste >/dev/null
+PATH="$runtime_path" command -v xdg-terminal-exec >/dev/null
+PATH="$runtime_path" command -v foot >/dev/null
 PATH="$runtime_path" command -v omanixy-compat-adapter >/dev/null
 uwsm_app=$(PATH="$runtime_path" command -v uwsm-app)
 uwsm=$(PATH="$runtime_path" command -v uwsm)

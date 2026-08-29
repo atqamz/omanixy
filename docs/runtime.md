@@ -156,14 +156,22 @@ enterprise Wi-Fi filtering through the network panel's model, removal of the
 Custom DNS provider/action/pill, hiding the unsupported speed-test action,
 clock middle-click routing, the native bar transparency fallback, the
 selected-feature power-provider gate, a user-owned launcher-delete guard, and
-the validated app-library launch and removability path, plus the unsupported
-terminal-provider right-click guard.
+the validated app-library launch and removability path, plus the conditional
+terminal-provider right-click guard for runtimes without the launcher feature.
 Some unsupported first-party plugin directories are omitted from the view,
 while copied baseline modules remain unreachable when disabled by the
 immutable registry floor.
 AppLibrary is also build-time gated: when `launcher` is not requested,
 `shell.qml` holds a null AppLibrary property, so its hidden-entry, icon-index,
 UWSM launch, and user-entry ownership scans do not run.
+Launcher-enabled runtimes include `xdg-terminal-exec` and the configured
+`launcher.terminal.package` in their hermetic runtime path, and expose both
+package share directories through `XDG_DATA_DIRS` for desktop-entry lookup.
+Activation seeds `xdg-terminals.list` with `launcher.terminal.desktop` only
+when the user has neither a regular file nor a symlink at that path, so an
+existing terminal choice remains user-owned and is not overwritten.
+When `XDG_CONFIG_DIRS` already supplies a terminal list, activation leaves the
+user path absent so the system-owned choice remains effective.
 The shipped `shell/services/hidden-entries.sh` source is launcher-owned and is
 audited whenever the launcher surface is selected.
 The root supplies Omanixy's safe fallback shell configuration, launcher-hides
@@ -291,6 +299,7 @@ idempotent:
 | `~/.local/state/omanixy/capabilities.json` | Omanixy-owned generated capability metadata; refreshed only while its owner marker remains valid |
 | `~/.local/state/omarchy/current/background` | Writable current-background symlink; seeded once to the immutable default asset and preserved after user replacement |
 | `~/.config/omarchy/shell.toml` | User-owned theme/config file; the monitor text-size adapter updates only `[font].base-size`, while preserving unrelated content |
+| `~/.config/xdg-terminals.list` | Seeded with the configured launcher terminal only when absent, then fully user-owned and preserved |
 | `~/.config/omarchy/plugins/` | User-local plugin directory |
 | `~/.local/state/omarchy/current/theme/` | Seeded generated theme state, then runtime writable |
 | `/nix/store/.../omarchy-quattro-...` | Declaratively immutable upstream source |
@@ -328,6 +337,7 @@ new writable baseline; this is recovery, not preservation of unavailable bytes.
 Disabling and re-enabling the module does not silently replace customization.
 The background renderer is the only Omanixy wallpaper owner; selector and theme-switch actions that require unsupported Omarchy helpers are not exposed.
 The baseline monospace family is provisioned by Home Manager through `fonts.fontconfig.defaultFonts.monospace` with `lib.mkDefault`, so an explicit consumer fontconfig value wins normally.
+The launcher terminal handler is provisioned through `programs.omanixy.launcher.terminal.package` and selected by `programs.omanixy.launcher.terminal.desktop`, both defaulting to `pkgs.foot` and `foot.desktop`; the terminal choice file remains user-owned after its initial seed.
 
 ## Adapter contract rationale
 

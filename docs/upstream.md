@@ -90,8 +90,9 @@ font asset:
   package retains the upstream license notice and font provenance README.
   The font remains outside the compatibility root because fontconfig resolves
   installed font directories rather than nested source-view files.
-- `shell/plugins/menu/BarWidget.qml` removes the unsupported terminal-provider
-  right-click action while preserving the remaining menu behavior.
+- `shell/plugins/menu/BarWidget.qml` retains the terminal-provider right-click
+  action for launcher runtimes, while runtimes without launcher apply the
+  unsupported-action guard and preserve the remaining menu behavior.
 - `shell/plugins/menu/Menu.qml` routes launcher deletion through a
   user-owned-entry predicate rather than presenting a false system deletion
   affordance.

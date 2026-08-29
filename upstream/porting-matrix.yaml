@@ -233,6 +233,46 @@ items:
       - Menu Delete is reachable for confirmed user-owned entries and inert for every unsupported entry; Omanixy never performs package removal.
       - Removal rejects missing, system-owned, symlink, and traversal targets and does not implement package removal.
 
+  - id: launcher.terminal
+    classification: adapted
+    maturity: validated
+    upstream:
+      project: basecamp/omarchy
+      revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
+      paths:
+        - path: shell/services/AppLibrarySupport.js
+          role: "session-scoped `uwsm app -- gtk-launch` dispatch for desktop entries"
+          consumption: runtime
+        - path: shell/plugins/menu/BarWidget.qml
+          role: "upstream `xdg-terminal-exec` terminal-provider action"
+          consumption: runtime
+    native_quickshell:
+      project: quickshell-mirror/quickshell
+      revision: 28771c7c74b42e20afca0b1b63980cb46515537c
+      modules:
+        - DesktopEntries
+    requirement: "Launch `Terminal=true` desktop entries through GLib's known `xdg-terminal-exec` handler while preserving the host's terminal choice."
+    ownership:
+      presentation: omarchy
+      adapter: omanixy
+      backend: XDG Default Terminal Execution and the configured terminal package
+    dependencies:
+      runtime:
+        - xdg-terminal-exec
+        - configured terminal emulator
+        - gtk3
+      host:
+        - user terminal choice
+        - desktop entry database
+    tests:
+      - test/launcher-terminal.sh
+      - test/feature-closure.sh
+      - test/feature-lifecycle.sh
+    notes:
+      - "`programs.omanixy.launcher.terminal.package` defaults to `pkgs.foot` and `programs.omanixy.launcher.terminal.desktop` defaults to `foot.desktop`; consumers may select another terminal package and desktop entry."
+      - "Activation seeds `~/.config/xdg-terminals.list` only when the path is absent and no `XDG_CONFIG_DIRS` entry already supplies one, preserving existing regular files and symlinks as user-owned terminal policy."
+      - "Launcher runtimes retain the pinned `xdg-terminal-exec` menu action; runtimes without launcher omit it with the existing exact compatibility patch."
+
   - id: menu.baseline
     classification: adapted
     maturity: validated

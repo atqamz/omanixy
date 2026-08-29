@@ -45,7 +45,8 @@
     "uwsm-app": "launcher",
     "wl-copy": "wayland-clipboard-write",
     "wl-paste": "clipboard-presentation",
-    "wtype": "text-injection"
+    "wtype": "text-injection",
+    "xdg-terminal-exec": "launcher"
   },
   "helperCapabilities": {
     "omarchy-audio-input-set-default": "audio-control",

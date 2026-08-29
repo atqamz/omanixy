@@ -6,6 +6,7 @@
 , supportedSystems
 , features ? null
 , security ? null
+, launcher ? null
 }:
 
 assert lib.assertOneOf "omanixy supported system" pkgs.stdenv.hostPlatform.system supportedSystems;
@@ -20,13 +21,19 @@ let
   omarchyRevision = contractSource.pins.omarchy;
   quickshellRevision = contractSource.pins.quickshell;
   baselineConfig = builtins.removeAttrs baselineSource [ "featurePlugins" "featureDependencies" "featureOrder" "migrations" "featureCapabilities" "capabilityDependencies" ];
+  launcherConfig = if launcher == null then { } else launcher;
+  terminalPackage = launcherConfig.terminalPackage or pkgs.foot;
+  terminalDesktop = launcherConfig.terminalDesktop or "foot.desktop";
+  terminalDesktopValid = lib.assertMsg
+    (builtins.isString terminalDesktop && terminalDesktop != "" && lib.hasSuffix ".desktop" terminalDesktop)
+    "omanixy launcher terminal desktop must be a non-empty .desktop ID";
   capabilityRuntimeInputs = with pkgs; {
     "audio-control" = [ pipewire pulseaudio wireplumber ];
     "audio-default-output" = [ pipewire pulseaudio wireplumber ];
     "bluetooth-control" = [ bluez ];
     "clipboard-presentation" = [ gnugrep procps util-linux wl-clipboard wtype xdg-utils ];
     "core-runtime" = [ bash coreutils findutils fontconfig gawk gnugrep gnused hyprland inotify-tools jq procps systemd util-linux ];
-    launcher = [ desktop-file-utils gtk3 uwsm ];
+    launcher = [ desktop-file-utils gtk3 uwsm terminalPackage xdg-terminal-exec ];
     "monitor-control" = [ brightnessctl fontconfig glib gtk3 hyprland libnotify procps ];
     "network-manager" = [ iproute2 iputils iw networkmanager qrencode ];
     "notification-send" = [ libnotify ];
@@ -272,8 +279,10 @@ let
       import "MenuDeleteSupport.js" as MenuDeleteSupport' \
               --replace-fail '    if (!row || row.kind !== "app") return' \
                 '    if (!MenuDeleteSupport.canRequestDelete(row, root.appLibrary)) return'
+            ${lib.optionalString (!builtins.elem "launcher" selectedFeatures) ''
             ${pkgs.python3}/bin/python3 ${../../scripts/patch-menu-terminal-provider} \
               "$out/shell/plugins/menu/BarWidget.qml"
+            ''}
             chmod u+w "$out/shell/plugins/bar" "$out/shell/plugins/bar/Bar.qml"
             chmod u+w "$out/shell/plugins/panels/network/Model.js" "$out/shell/plugins/panels/network/Panel.qml"
             registry_file="$out/shell/services/PluginRegistry.qml"
@@ -375,7 +384,7 @@ let
     };
   };
 
-  runtimeInputs = assert featureNamesValid; assert fingerprintPackageValid; assert idleRequiresLockValid; lib.unique (
+  runtimeInputs = assert terminalDesktopValid; assert featureNamesValid; assert fingerprintPackageValid; assert idleRequiresLockValid; lib.unique (
     (lib.concatMap (capability: capabilityRuntimeInputs.${capability}) selectedCapabilities)
     ++ lib.optional fingerprintEnabled fingerprintPackage
   );
@@ -566,11 +575,23 @@ let
   };
   compatibilityProbes = compatibilityBin.probes;
 
+  launcherDataDirs = builtins.concatStringsSep ":" [
+    "${terminalPackage}/share"
+    "${pkgs.xdg-terminal-exec}/share"
+  ];
+
   runtime = pkgs.writeShellApplication {
     name = "omanixy-shell-runtime";
     runtimeInputs = [ quickshell ] ++ runtimeInputs ++ [ compatAdapter compatibilityBin ];
     inheritPath = false;
     text = ''
+      ${lib.optionalString (builtins.elem "launcher" selectedFeatures) ''
+      if [ -n "''${XDG_DATA_DIRS:-}" ]; then
+        export XDG_DATA_DIRS=${lib.escapeShellArg launcherDataDirs}:"$XDG_DATA_DIRS"
+      else
+        export XDG_DATA_DIRS=${lib.escapeShellArg launcherDataDirs}
+      fi
+      ''}
       export OMARCHY_PATH=${lib.escapeShellArg "${omarchyCompatibilityRoot}"}
       export QS_DISABLE_FILE_WATCHER=1
       export QS_NO_RELOAD_POPUP=1
@@ -614,7 +635,7 @@ pkgs.symlinkJoin {
     ln -s ${theme} "$out/share/omarchy-theme"
   '';
   passthru = {
-    inherit omarchyRevision quickshellRevision nixpkgsRevision omarchySource iconFont omarchyCompatibilityRoot compatibilityBin compatibilityProbes quickshell theme supportedSystems safeMenu safeShellConfig selectedFeatures selectedCapabilities compatibilityHelpers runtimeBlockedPlugins adapterSources adapterSourceHash featureSurface lockEnabled fingerprintEnabled polkitAgentEnabled idleEnabled notificationDaemonEnabled managedEnabledSecurityPlugins declaredRuntimeInputs;
+    inherit omarchyRevision quickshellRevision nixpkgsRevision omarchySource iconFont omarchyCompatibilityRoot compatibilityBin compatibilityProbes quickshell theme supportedSystems safeMenu safeShellConfig selectedFeatures selectedCapabilities compatibilityHelpers runtimeBlockedPlugins adapterSources adapterSourceHash featureSurface lockEnabled fingerprintEnabled polkitAgentEnabled idleEnabled notificationDaemonEnabled managedEnabledSecurityPlugins declaredRuntimeInputs terminalPackage terminalDesktop;
     defaultBackground = "${theme}/backgrounds/1-quattro.jpg";
     inherit ipc compatAdapter runtime;
     buildProvenance = {
