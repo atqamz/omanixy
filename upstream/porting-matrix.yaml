@@ -197,8 +197,9 @@ items:
       - test/compat-adapters.sh
       - test/safe-menu-contract.sh
       - test/launcher-delete-contract.sh
+      - test/launcher-cold-launch-vm.nix
     notes:
-      - Existing applications use native Quickshell toplevel activation when stable identity yields one target; cold launch uses direct `uwsm app -- gtk-launch` inside the session-scoped app-graphical.slice.
+      - Existing applications use native Quickshell toplevel activation when stable identity yields one target; cold launch uses direct `uwsm app -t service -- gtk-launch` inside the session-scoped app-graphical.slice so gtk-launch can exit without reaping the launched application.
       - Matching uses exact desktop-entry ID or StartupWMClass against Toplevel.appId, with unique case-normalized fallback; ambiguous candidates and title-only matches are rejected.
       - AppLibrary exposes deletion only for a regular desktop file owned by the user's XDG applications directory; system, Nix-store, missing, malformed, symlink, and traversal entries remain unavailable.
       - Menu Delete is reachable for confirmed user-owned entries and inert for every unsupported entry; Omanixy never performs package removal.

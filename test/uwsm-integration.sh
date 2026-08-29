@@ -39,19 +39,19 @@ const ownedSuffix = { "org.telegram.desktop": true };
 if (!support.canRemove("org.telegram.desktop", ownedSuffix) || support.canRemove("org.telegram.desktop.desktop", ownedSuffix) || support.canRemove("org.telegram", ownedSuffix) || support.canRemove("org.telegram.desktop", { "org.telegram": true })) {
   throw new Error("launcher deletion ownership confused a semantic .desktop suffix with a filename suffix");
 }
-if (support.launchCommand("org.example.User") !== "uwsm app -- gtk-launch 'org.example.User.desktop'") {
-  throw new Error("unexpected direct UWSM command for ordinary desktop id");
+if (support.launchCommand("org.example.User") !== "uwsm app -t service -- gtk-launch 'org.example.User.desktop'") {
+  throw new Error("cold launch did not request a service unit");
 }
-if (support.launchCommand("org.telegram.desktop") !== "uwsm app -- gtk-launch 'org.telegram.desktop.desktop'") {
+if (support.launchCommand("org.telegram.desktop") !== "uwsm app -t service -- gtk-launch 'org.telegram.desktop.desktop'") {
   throw new Error("semantic id ending in .desktop was truncated before gtk-launch");
 }
-if (support.launchCommand("Example App") !== "uwsm app -- gtk-launch 'Example App.desktop'") {
+if (support.launchCommand("Example App") !== "uwsm app -t service -- gtk-launch 'Example App.desktop'") {
   throw new Error("desktop id containing a space was not preserved");
 }
-if (support.launchCommand("bad;id") !== "uwsm app -- gtk-launch 'bad;id.desktop'") {
+if (support.launchCommand("bad;id") !== "uwsm app -t service -- gtk-launch 'bad;id.desktop'") {
   throw new Error("shell metacharacter was not contained as one quoted desktop id argument");
 }
-if (support.launchCommand("odd'id") !== "uwsm app -- gtk-launch 'odd'\\''id.desktop'") {
+if (support.launchCommand("odd'id") !== "uwsm app -t service -- gtk-launch 'odd'\\''id.desktop'") {
   throw new Error("single quote was not escaped as one desktop id argument");
 }
 if (support.launchCommand("") !== "") {
@@ -140,7 +140,8 @@ NODE
 
 grep -Fq 'var id = AppLibrarySupport.semanticDesktopId(desktopId)' "$app_library"
 grep -Fq 'var entry = DesktopEntries.byId(id)' "$app_library"
-grep -Fq 'if (!entry) return' "$app_library"
+grep -Fq 'if (!entry) {' "$app_library"
+grep -Fq 'console.warn("Omanixy launcher: desktop entry not found: " + id)' "$app_library"
 grep -Fq 'id = AppLibrarySupport.semanticDesktopId(entry.id)' "$app_library"
 grep -Fq 'AppLibrarySupport.matchingToplevels(entry, ToplevelManager.toplevels.values || [])' "$app_library"
 grep -Fq 'toplevel.activate()' "$app_library"
@@ -151,7 +152,7 @@ grep -Fq 'AppLibrarySupport.desktopFileId(lines[i])' "$app_library"
 launch_feedback=$(sed -n '/function beginLaunchFeedback/,/launchTimeout.restart()/p' "$app_library")
 grep -Fq 'Quickshell.execDetached(["omarchy-shell", "osd", "close"])' <<<"$launch_feedback"
 grep -Fq 'root.launchOsdOpen = false' <<<"$launch_feedback"
-grep -Fq 'uwsm app -- gtk-launch ' "$support"
+grep -Fq 'uwsm app -t service -- gtk-launch ' "$support"
 if grep -Fq 'uwsm-app -- gtk-launch' "$app_library" "$support"; then
   printf '%s\n' 'built launcher still depends on uwsm-app daemon path' >&2
   exit 1
