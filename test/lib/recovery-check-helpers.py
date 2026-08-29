@@ -402,11 +402,17 @@ def parse_measurements(output):
         fields = fields or ""
         sequence = re.search(r"(?:^| )sequence=(.*)$", fields)
         scalar_fields = fields[:sequence.start()] if sequence else fields
-        for field in re.finditer(r"(?:^| )([\w-]+)=([^ ]*)", scalar_fields):
+        cursor = 0
+        for field in re.finditer(r"(?<!\S)([\w-]+)=([^ ]*)", scalar_fields):
+            if scalar_fields[cursor:field.start()].strip():
+                raise CheckAssertionError(f"malformed MEASURE fields: {line}")
             key, value = field.groups()
             if key in values:
                 raise CheckAssertionError(f"duplicate MEASURE field {key!r}: {line}")
             values[key] = value
+            cursor = field.end()
+        if scalar_fields[cursor:].strip():
+            raise CheckAssertionError(f"malformed MEASURE fields: {line}")
         if sequence:
             values["sequence"] = sequence.group(1)
         measurements.setdefault(name, []).append(values)

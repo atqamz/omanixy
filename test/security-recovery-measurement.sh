@@ -26,6 +26,16 @@ MEASURE same-harness-reprompt exit=0 prompt=yes sequence=isRegisteredChanged tru
         }],
     },
 )
+
+try:
+    assert_measurements(
+        "MEASURE burst-history-bounded history_count=10 popup_count=0 garbage\n",
+        {"burst-history-bounded": [{"history_count": "10", "popup_count": "0"}]},
+    )
+except helpers["CheckAssertionError"]:
+    pass
+else:
+    raise AssertionError("malformed MEASURE fields were accepted")
 PY
 
 check_command=$(just --justfile "$justfile" --dry-run check 2>&1 | python3 -c 'import sys; print(next(sys.stdin).rstrip())')

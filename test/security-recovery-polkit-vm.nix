@@ -498,8 +498,8 @@ let
         if wait_for "$HARNESS_DIR" polkit '.isResponseRequired == true' 15; then
           prompt_seen=yes
           qs_call "$HARNESS_DIR" polkit submit "$FIXTURE_PASSWORD" >/dev/null
-          wait "$p2" 2>/dev/null
-          p2exit=$?
+          p2exit=0
+          wait "$p2" 2>/dev/null || p2exit=$?
           [ "$p2exit" = "0" ] && check same-harness-reprompt yes "exit=$p2exit" || check same-harness-reprompt no "exit=$p2exit"
         else
           kill "$p2" 2>/dev/null || true
