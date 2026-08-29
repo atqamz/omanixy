@@ -1752,6 +1752,16 @@
             PYTHON=${pkgs.python3.withPackages (ps: [ ps.pyyaml ])}/bin/python ${pkgs.bash}/bin/bash ${./test/security-recovery-contract.sh} ${./.}
             touch "$out"
           '';
+          security-recovery-measurement = pkgs.runCommand "omanixy-security-recovery-measurement"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.gnugrep ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-recovery-measurement.sh} \
+              ${./test/security-recovery-notifications-vm.nix} \
+              ${./test/security-recovery-polkit-vm.nix} \
+              ${./justfile}
+            touch "$out"
+          '';
           security-recovery-check-helpers-selftest = pkgs.runCommand "omanixy-security-recovery-check-helpers-selftest"
             {
               nativeBuildInputs = [ pkgs.python3 ];
