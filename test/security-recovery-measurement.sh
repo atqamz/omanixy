@@ -28,6 +28,7 @@ MEASURE same-harness-reprompt exit=0 prompt=yes sequence=isRegisteredChanged tru
 )
 PY
 
-grep -Fq 'nix --option max-jobs 1 flake check --show-trace --print-build-logs' "$justfile"
+check_command=$(just --justfile "$justfile" --dry-run check 2>&1 | python3 -c 'import sys; print(next(sys.stdin).rstrip())')
+[ "$check_command" = 'nix --option max-jobs 1 flake check --show-trace --print-build-logs' ]
 
 printf '%s\n' 'security recovery measurement output contract checks passed'

@@ -503,11 +503,11 @@ let
           [ "$p2exit" = "0" ] && check same-harness-reprompt yes "exit=$p2exit" || check same-harness-reprompt no "exit=$p2exit"
         else
           kill "$p2" 2>/dev/null || true
-          wait "$p2" 2>/dev/null
-          p2exit=$?
+          p2exit=0
+          wait "$p2" 2>/dev/null || p2exit=$?
           check same-harness-reprompt no "stale-no-prompt"
         fi
-        sequence=$(grep 'HARNESS_EVENT' harness.log 2>/dev/null | sed -E 's/^.*HARNESS_EVENT //' | tr '\n' ';' | sed 's/;$//')
+        sequence=$({ grep 'HARNESS_EVENT' harness.log 2>/dev/null || true; } | sed -E 's/^.*HARNESS_EVENT //' | tr '\n' ';' | sed 's/;$//')
         echo "MEASURE same-harness-reprompt exit=$p2exit prompt=$prompt_seen sequence=$sequence"
 
         kill "$hpid" 2>/dev/null || true
