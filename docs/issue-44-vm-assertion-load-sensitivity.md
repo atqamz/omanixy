@@ -11,7 +11,8 @@ The root flake check now serializes local derivation builds with `nix --option m
 
 ## Method
 
-The test source and fixture remained unchanged apart from measurement output and the polkit harness telemetry needed to expose the assertion result.
+Production behavior remained unchanged.
+The test harness now emits and semantically validates measurement output, guards expected nonzero child exits, tolerates empty event extraction, and rejects malformed measurement fields.
 The controlled contended arm launched the target VM while peer VM and Nix activity was present, and the quiet arm launched only the target VM after confirming no host QEMU or Nix process at run start.
 Each record captured the three load averages as one-minute, five-minute, and fifteen-minute values.
 Each record captured host QEMU and Nix counts at start, assertion, target end, and peer or final end when that phase existed.
