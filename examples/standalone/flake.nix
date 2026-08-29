@@ -37,6 +37,46 @@
           }
         ];
       };
+      nestedPositionHome = home-manager.lib.homeManagerConfiguration {
+        inherit pkgs;
+        modules = [
+          omanixy.homeManagerModules.default
+          homeIdentity
+          {
+            programs.omanixy.enable = true;
+            programs.omanixy.shell.config = {
+              bar.position = "bottom";
+            };
+          }
+        ];
+      };
+      nestedLayoutHome = home-manager.lib.homeManagerConfiguration {
+        inherit pkgs;
+        modules = [
+          omanixy.homeManagerModules.default
+          homeIdentity
+          {
+            programs.omanixy.enable = true;
+            programs.omanixy.shell.config = {
+              bar.layout.right = [{ id = "custom.right"; }];
+            };
+          }
+        ];
+      };
+      nestedFloorHome = home-manager.lib.homeManagerConfiguration {
+        inherit pkgs;
+        modules = [
+          omanixy.homeManagerModules.default
+          homeIdentity
+          {
+            programs.omanixy.enable = true;
+            programs.omanixy.shell.config = {
+              bar.transparent = true;
+              disabledPlugins = [ "omarchy.audio" ];
+            };
+          }
+        ];
+      };
       invalidStandaloneLock = home-manager.lib.homeManagerConfiguration {
         inherit pkgs;
         modules = [
@@ -104,6 +144,9 @@
       '';
       defaultActivation = pkgs.writeShellScript "omanixy-standalone-default-activation" defaultHome.config.home.activation.omanixyShellState.data;
       customActivation = pkgs.writeShellScript "omanixy-standalone-custom-activation" standaloneHome.config.home.activation.omanixyShellState.data;
+      nestedPositionActivation = pkgs.writeShellScript "omanixy-standalone-nested-position-activation" nestedPositionHome.config.home.activation.omanixyShellState.data;
+      nestedLayoutActivation = pkgs.writeShellScript "omanixy-standalone-nested-layout-activation" nestedLayoutHome.config.home.activation.omanixyShellState.data;
+      nestedFloorActivation = pkgs.writeShellScript "omanixy-standalone-nested-floor-activation" nestedFloorHome.config.home.activation.omanixyShellState.data;
       storeConfig = pkgs.writeText "omanixy-standalone-store-config" (builtins.readFile ../../upstream/shell-baseline-v1.json);
       explicitStoreConfig = pkgs.writeText "omanixy-standalone-explicit-store-config" ''{"version":1,"disabledPlugins":["omarchy.audio","omarchy.network"]}'';
       malformedStoreConfig = pkgs.writeText "omanixy-standalone-malformed-store-config" ''{"disabledPlugins":'';
@@ -173,7 +216,7 @@
             compatibilityRoot = runtime.passthru.omarchyCompatibilityRoot;
             compatibilityBin = runtime.passthru.compatibilityBin;
             quickshellPath = runtime.passthru.quickshell;
-            inherit renderedService defaultActivation customActivation storeConfig explicitStoreConfig malformedStoreConfig customStoreConfig;
+            inherit renderedService defaultActivation customActivation nestedPositionActivation nestedLayoutActivation nestedFloorActivation storeConfig explicitStoreConfig malformedStoreConfig customStoreConfig;
             serviceContract = if serviceContractOk then "true" else "false";
             safeOwnership = if safeOwnershipOk then "true" else "false";
             overrideContract = if overrideContractOk then "true" else "false";
@@ -235,7 +278,8 @@
             systemd-analyze --user verify "$unit_dir/omanixy-shell.service"
           ${pkgs.bash}/bin/bash ${../../test/config-ownership.sh} \
             "$defaultActivation" "$customActivation" /build/omanixy-test /build/omanixy-custom /build/omanixy-store \
-            "$storeConfig" "$explicitStoreConfig" "$malformedStoreConfig" "$customStoreConfig" ${../../upstream/shell-baseline-v1.json}
+            "$storeConfig" "$explicitStoreConfig" "$malformedStoreConfig" "$customStoreConfig" ${../../upstream/shell-baseline-v1.json} \
+            "$nestedPositionActivation" "$nestedLayoutActivation" "$nestedFloorActivation"
           if grep -Fq 'universe' "$activationStorePaths"; then
             printf 'adoption contract failed: activation closure contains universe:\n' >&2
             grep -Fn 'universe' "$activationStorePaths" >&2

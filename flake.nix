@@ -177,6 +177,22 @@
               disabledPlugins = [ "omarchy.audio" ];
             };
           };
+          nestedPositionHomeConfiguration = homeConfigurationFor system {
+            programs.omanixy.shell.config = {
+              bar.position = "bottom";
+            };
+          };
+          nestedLayoutHomeConfiguration = homeConfigurationFor system {
+            programs.omanixy.shell.config = {
+              bar.layout.right = [{ id = "custom.right"; }];
+            };
+          };
+          nestedFloorHomeConfiguration = homeConfigurationFor system {
+            programs.omanixy.shell.config = {
+              bar.transparent = true;
+              disabledPlugins = [ "omarchy.audio" ];
+            };
+          };
           disabledBackgroundHomeConfiguration = homeConfigurationFor system {
             programs.omanixy.background.enable = false;
           };
@@ -761,6 +777,9 @@
           weatherActivationScript = pkgs.writeShellScript "omanixy-shell-weather-state-activation" weatherHomeConfiguration.config.home.activation.omanixyShellState.data;
           networkActivationScript = pkgs.writeShellScript "omanixy-shell-network-state-activation" networkHomeConfiguration.config.home.activation.omanixyShellState.data;
           customActivationScript = pkgs.writeShellScript "omanixy-shell-custom-state-activation" customHomeConfiguration.config.home.activation.omanixyShellState.data;
+          nestedPositionActivationScript = pkgs.writeShellScript "omanixy-shell-nested-position-state-activation" nestedPositionHomeConfiguration.config.home.activation.omanixyShellState.data;
+          nestedLayoutActivationScript = pkgs.writeShellScript "omanixy-shell-nested-layout-state-activation" nestedLayoutHomeConfiguration.config.home.activation.omanixyShellState.data;
+          nestedFloorActivationScript = pkgs.writeShellScript "omanixy-shell-nested-floor-state-activation" nestedFloorHomeConfiguration.config.home.activation.omanixyShellState.data;
           defaultFontConfig = homeConfiguration.config.xdg.configFile."fontconfig/conf.d/52-hm-default-fonts.conf".source;
           overrideFontConfig = fontOverrideHomeConfiguration.config.xdg.configFile."fontconfig/conf.d/52-hm-default-fonts.conf".source;
           fontPackageProvisioned = builtins.elem pkgs.nerd-fonts.jetbrains-mono homeConfiguration.config.home.packages;
@@ -927,10 +946,13 @@
             {
               activation = activationScript;
               customActivation = customActivationScript;
+              nestedPositionActivation = nestedPositionActivationScript;
+              nestedLayoutActivation = nestedLayoutActivationScript;
+              nestedFloorActivation = nestedFloorActivationScript;
               malformedStoreConfig = malformedStoreConfig;
               nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.diffutils pkgs.jq ];
             } ''
-            ${pkgs.bash}/bin/bash ${./test/config-ownership.sh} "$activation" "$customActivation" /build/omanixy-test /build/omanixy-custom-test /build/omanixy-store-link-test ${storeConfig} ${explicitStoreConfig} "$malformedStoreConfig" ${customStoreConfig} ${./upstream/shell-baseline-v1.json}
+            ${pkgs.bash}/bin/bash ${./test/config-ownership.sh} "$activation" "$customActivation" /build/omanixy-test /build/omanixy-custom-test /build/omanixy-store-link-test ${storeConfig} ${explicitStoreConfig} "$malformedStoreConfig" ${customStoreConfig} ${./upstream/shell-baseline-v1.json} "$nestedPositionActivation" "$nestedLayoutActivation" "$nestedFloorActivation"
             touch "$out"
           '';
           presentation-ownership = pkgs.runCommand "omanixy-presentation-ownership"

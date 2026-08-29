@@ -46,7 +46,7 @@ Import the Home Manager module and enable the shell:
     # Optional; defaults to every feature group.
     features = [ "network" "audio" ];
     shell.config = {
-      # Whole-file upstream-compatible shell.json configuration.
+      # Partial upstream-compatible shell.json configuration.
     };
   };
 }
@@ -65,7 +65,7 @@ The structured config is the escape hatch for upstream schema changes rather
 than a Nix option for every QML property.
 Omanixy seeds the safety floor in `disabledPlugins` and enforces the same
 immutable floor in the compatibility-root plugin registry, even when a custom
-whole-file config omits or removes those entries.
+partial config omits or removes those entries.
 The raw config escape hatch cannot enable unfinished lock, polkit, idle,
 notification, or related security-sensitive surfaces.
 `shell.json` stores the baseline permanently disabled plugins plus explicit
@@ -278,7 +278,8 @@ Behavioral adapter tests and live smoke are separate evidence.
 
 ## Configuration and state ownership
 
-The ownership model is deliberately whole-file and idempotent:
+The ownership model for generated files is deliberately whole-file and
+idempotent:
 
 | Path | Ownership |
 | --- | --- |
