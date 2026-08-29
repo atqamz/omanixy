@@ -96,6 +96,23 @@ let
     };
   };
 
+  iconFont = stdenvNoCC.mkDerivation {
+    pname = "omanixy-omarchy-icon-font";
+    version = lib.substring 0 12 omarchyRevision;
+    dontUnpack = true;
+    installPhase = ''
+      install -Dm644 ${omarchySource}/default/fonts/omarchy/omarchy.ttf "$out/share/fonts/omarchy/omarchy.ttf"
+      install -Dm644 ${omarchySource}/default/fonts/omarchy/README.md "$out/share/doc/omanixy-omarchy-icon-font/README.md"
+      install -Dm644 ${omarchySource}/LICENSE "$out/share/licenses/omanixy-omarchy-icon-font/LICENSE"
+    '';
+    meta = {
+      description = "Pinned Omarchy icon font used by Omanixy Quattro";
+      homepage = "https://github.com/basecamp/omarchy";
+      license = lib.licenses.mit;
+      platforms = supportedSystems;
+    };
+  };
+
   theme = stdenvNoCC.mkDerivation {
     pname = "omanixy-shell-theme";
     version = lib.substring 0 12 omarchyRevision;
@@ -597,7 +614,7 @@ pkgs.symlinkJoin {
     ln -s ${theme} "$out/share/omarchy-theme"
   '';
   passthru = {
-    inherit omarchyRevision quickshellRevision nixpkgsRevision omarchySource omarchyCompatibilityRoot compatibilityBin compatibilityProbes quickshell theme supportedSystems safeMenu safeShellConfig selectedFeatures selectedCapabilities compatibilityHelpers runtimeBlockedPlugins adapterSources adapterSourceHash featureSurface lockEnabled fingerprintEnabled polkitAgentEnabled idleEnabled notificationDaemonEnabled managedEnabledSecurityPlugins declaredRuntimeInputs;
+    inherit omarchyRevision quickshellRevision nixpkgsRevision omarchySource iconFont omarchyCompatibilityRoot compatibilityBin compatibilityProbes quickshell theme supportedSystems safeMenu safeShellConfig selectedFeatures selectedCapabilities compatibilityHelpers runtimeBlockedPlugins adapterSources adapterSourceHash featureSurface lockEnabled fingerprintEnabled polkitAgentEnabled idleEnabled notificationDaemonEnabled managedEnabledSecurityPlugins declaredRuntimeInputs;
     defaultBackground = "${theme}/backgrounds/1-quattro.jpg";
     inherit ipc compatAdapter runtime;
     buildProvenance = {

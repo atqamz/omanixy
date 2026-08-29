@@ -56,7 +56,8 @@ immutable compatibility root derived from the source-only flake input.
 The root contains the pinned runtime entrypoint, shared QML libraries, service
 objects, and the selected plugin files required by the supported baseline and
 its reachable panels.
-It applies twelve narrow compatibility patch sites:
+It applies twelve narrow compatibility patch sites and packages one pinned
+font asset:
 
 - `shell/plugins/background/Background.qml` keeps the pinned renderer and its
   current-background read path while removing selector and theme-switch helper
@@ -83,6 +84,12 @@ It applies twelve narrow compatibility patch sites:
   invoke an absent helper or backend.
 - `shell/plugins/menu/Menu.qml` removes the pinned font provider because the
   generic runtime does not provide Omarchy font enumeration or mutation.
+- `default/fonts/omarchy/omarchy.ttf` is packaged as an exact pinned Home
+  Manager font dependency for the menu bar's `omarchy` family. The upstream
+  repository is MIT licensed and has no separate font license file; the
+  package retains the upstream license notice and font provenance README.
+  The font remains outside the compatibility root because fontconfig resolves
+  installed font directories rather than nested source-view files.
 - `shell/plugins/menu/BarWidget.qml` removes the unsupported terminal-provider
   right-click action while preserving the remaining menu behavior.
 - `shell/plugins/menu/Menu.qml` routes launcher deletion through a

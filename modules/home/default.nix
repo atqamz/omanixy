@@ -135,6 +135,12 @@ in
       description = "Font package provisioned for the Omanixy monospace default.";
     };
 
+    font.icon.package = lib.mkOption {
+      type = lib.types.package;
+      default = runtime.passthru.iconFont;
+      description = "Icon font package provisioned for the pinned Omarchy menu glyphs.";
+    };
+
     font.family = lib.mkOption {
       type = lib.types.str;
       default = "JetBrainsMono Nerd Font";
@@ -587,7 +593,7 @@ in
       }
     ];
 
-    home.packages = [ runtime cfg.font.package ];
+    home.packages = [ runtime cfg.font.package cfg.font.icon.package ];
 
     home.activation.omanixyShellState = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
       config_dir="$HOME/.config/omarchy"
