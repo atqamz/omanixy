@@ -1,14 +1,33 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-notifications_vm=${1:?notifications VM path required}
-polkit_vm=${2:?polkit VM path required}
-justfile=${3:?justfile path required}
+repo_root=${1:?repository root required}
+justfile=${2:?justfile path required}
 
-grep -Fq 'echo "MEASURE burst-history-bounded history_count=$hist popup_count=$popup"' "$notifications_vm"
-grep -Fq 'echo "MEASURE same-harness-reprompt exit=$p2exit prompt=$prompt_seen sequence=$sequence"' "$polkit_vm"
-grep -Fq "grep 'HARNESS_EVENT' harness.log" "$polkit_vm"
-grep -Fq "sed -E 's/^.*HARNESS_EVENT //'" "$polkit_vm"
+python3 - "$repo_root" <<'PY'
+import sys
+
+helpers_path = f"{sys.argv[1]}/test/lib/recovery-check-helpers.py"
+helpers = {}
+with open(helpers_path, encoding="utf-8") as file:
+    exec(compile(file.read(), helpers_path, "exec"), helpers)
+assert_measurements = helpers["assert_measurements"]
+
+assert_measurements(
+    """MEASURE burst-history-bounded history_count=10 popup_count=0
+MEASURE same-harness-reprompt exit=0 prompt=yes sequence=isRegisteredChanged true;isActiveChanged true;authenticationRequestStarted;isResponseRequiredChanged true prompt=;authenticationRequestStarted;isResponseRequiredChanged true prompt=;isResponseRequiredChanged false prompt=Password: ;isActiveChanged false;authenticationSucceeded
+""",
+    {
+        "burst-history-bounded": [{"history_count": "10", "popup_count": "0"}],
+        "same-harness-reprompt": [{
+            "exit": "0",
+            "prompt": "yes",
+            "sequence": "isRegisteredChanged true;isActiveChanged true;authenticationRequestStarted;isResponseRequiredChanged true prompt=;authenticationRequestStarted;isResponseRequiredChanged true prompt=;isResponseRequiredChanged false prompt=Password: ;isActiveChanged false;authenticationSucceeded",
+        }],
+    },
+)
+PY
+
 grep -Fq 'nix --option max-jobs 1 flake check --show-trace --print-build-logs' "$justfile"
 
 printf '%s\n' 'security recovery measurement output contract checks passed'

@@ -1754,11 +1754,10 @@
           '';
           security-recovery-measurement = pkgs.runCommand "omanixy-security-recovery-measurement"
             {
-              nativeBuildInputs = [ pkgs.bash pkgs.gnugrep ];
+              nativeBuildInputs = [ pkgs.bash pkgs.gnugrep pkgs.python3 ];
             } ''
             ${pkgs.bash}/bin/bash ${./test/security-recovery-measurement.sh} \
-              ${./test/security-recovery-notifications-vm.nix} \
-              ${./test/security-recovery-polkit-vm.nix} \
+              ${./.} \
               ${./justfile}
             touch "$out"
           '';
