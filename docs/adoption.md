@@ -78,7 +78,7 @@ real graphical session and hardware.
 | --- | --- | --- |
 | Core Quattro shell and user service | Public module, activation, unit, and runtime checks | Requires a working Wayland, Hyprland, D-Bus, and graphical-session environment |
 | Audio, media, Bluetooth, clipboard, monitor, power, network, weather, and screenshots | Feature selection and compatibility closure checks | Requires the corresponding host devices, services, and session backends |
-| Launcher discovery and cold launch | Adapter and contract checks | Live activation remains open under [atqamz/omanixy#23](https://github.com/atqamz/omanixy/issues/23) |
+| Launcher discovery and cold launch | Adapter, contract, and Wayland VM regression checks | Live hardware activation remains open under [atqamz/omanixy#23](https://github.com/atqamz/omanixy/issues/23) |
 | StatusNotifier tray | Native Quickshell contract checks | Live tray behavior remains open under [atqamz/omanixy#39](https://github.com/atqamz/omanixy/issues/39) |
 | Default font and wallpaper ownership | Theme and configuration plumbing checks | Live default ownership remains open under [atqamz/omanixy#24](https://github.com/atqamz/omanixy/issues/24) |
 | Native lock, fingerprint, polkit agent, idle, and notification daemon | Option and ownership assertions | Experimental and opt-in, not release-readiness evidence |
