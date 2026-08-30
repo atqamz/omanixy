@@ -16,6 +16,13 @@ UNSUPPORTED_MOUSE_AREA = '''      MouseArea {
       }
 '''
 
+UNSUPPORTED_HELPERS = (
+    "omarchy-theme-bg-switcher",
+    "omarchy-theme-bg-set",
+    "omarchy-theme-switcher",
+    "omarchy-theme-set",
+)
+
 
 def main() -> int:
     if len(sys.argv) != 2:
@@ -36,14 +43,15 @@ def main() -> int:
         workflow_count != 1
         or text.count(workflow_end) != 1
         or workflow is None
-        or len(re.findall(
-            r"(?<![A-Za-z0-9_-])omarchy-theme-bg-switcher(?![A-Za-z0-9_-])",
-            workflow.group(0),
-        )) != 1
-        or len(re.findall(
-            r"(?<![A-Za-z0-9_-])omarchy-theme-switcher(?![A-Za-z0-9_-])",
-            workflow.group(0),
-        )) != 1
+        or any(
+            len(re.findall(
+                r"(?<![A-Za-z0-9_-])"
+                + re.escape(helper)
+                + r"(?![A-Za-z0-9_-])",
+                workflow.group(0),
+            )) != 1
+            for helper in UNSUPPORTED_HELPERS
+        )
         or mouse_count != 1
     ):
         raise SystemExit(

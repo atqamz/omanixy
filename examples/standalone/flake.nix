@@ -206,6 +206,16 @@
       checks.${system} = {
         home-manager = standaloneHome.activationPackage;
 
+        wallpaper-ownership = pkgs.runCommand "omanixy-standalone-wallpaper-ownership"
+          {
+            nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.gnused ];
+          } ''
+          ${pkgs.bash}/bin/bash ${../../test/wallpaper-ownership.sh} \
+            ${customActivation} ${runtime} "${runtime.passthru.defaultBackground}" \
+            "${runtime.passthru.omarchySource}" "${runtime.passthru.omarchyCompatibilityRoot}"
+          touch "$out"
+        '';
+
         adoption-contract = pkgs.runCommand "omanixy-standalone-adoption-contract"
           {
             inherit pamService nixosToplevel;

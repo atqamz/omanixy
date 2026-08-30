@@ -76,6 +76,7 @@ items:
         - Wayland
     tests:
       - test/presentation-ownership.sh
+      - test/wallpaper-ownership.sh
     notes:
       - Selector and theme-switch helper paths are removed from the supported renderer surface.
 

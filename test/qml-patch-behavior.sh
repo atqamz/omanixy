@@ -254,14 +254,20 @@ grep -Fq 'BACKGROUND_PATCH_PASS' "$test_root/background-quickshell.log" || {
   exit 1
 }
 
-background_drift_fixture="$test_root/Background-drift.qml"
-cp "$pinned_source/shell/plugins/background/Background.qml" "$background_drift_fixture"
-chmod u+w "$background_drift_fixture"
-sed -i '0,/omarchy-theme-bg-switcher/s//omarchy-theme-bg-switcher-drift/' "$background_drift_fixture"
-if "$python" "$background_patcher" "$background_drift_fixture" 2>"$test_root/background-drift-error"; then
-  printf '%s\n' 'exact Background.qml patch accepted source-shape drift' >&2
-  exit 1
-fi
+for helper in \
+  omarchy-theme-bg-switcher \
+  omarchy-theme-bg-set \
+  omarchy-theme-switcher \
+  omarchy-theme-set; do
+  background_drift_fixture="$test_root/Background-$helper-drift.qml"
+  cp "$pinned_source/shell/plugins/background/Background.qml" "$background_drift_fixture"
+  chmod u+w "$background_drift_fixture"
+  sed -i "0,/${helper}/s//${helper}-drift/" "$background_drift_fixture"
+  if "$python" "$background_patcher" "$background_drift_fixture" 2>"$test_root/background-$helper-drift-error"; then
+    printf '%s\n' "exact Background.qml patch accepted source-shape drift for $helper" >&2
+    exit 1
+  fi
+done
 
 node - "$root" <<'NODE'
 const assert = require("node:assert/strict")

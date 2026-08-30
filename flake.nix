@@ -982,6 +982,15 @@
               ${if fontPackageProvisioned then "true" else "false"} ${pkgs.fontconfig}/bin/fc-match
             touch "$out"
           '';
+          wallpaper-ownership = pkgs.runCommand "omanixy-wallpaper-ownership"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.gnused ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/wallpaper-ownership.sh} \
+              ${activationScript} ${runtime} ${runtime.passthru.defaultBackground} \
+              ${runtime.passthru.omarchySource} ${runtime.passthru.omarchyCompatibilityRoot}
+            touch "$out"
+          '';
           font-family-closure = pkgs.runCommand "omanixy-font-family-closure"
             {
               nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.findutils pkgs.gnugrep pkgs.gnused pkgs.fontconfig ];
