@@ -30,7 +30,7 @@ SHEBANG_LANGUAGE = {
     "#!/usr/bin/env bash": "shell",
     "#!/bin/sh": "shell",
 }
-NON_SOURCE_SUFFIXES = {".md", ".json", ".lock"}
+NON_SOURCE_SUFFIXES = {".md", ".json", ".lock", ".patch"}
 EXACT_MACHINE_DATA_PATHS = {Path("version.txt")}
 
 

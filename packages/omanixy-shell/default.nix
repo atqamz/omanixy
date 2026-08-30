@@ -81,6 +81,7 @@ let
     pname = "quickshell-omanixy";
     version = "git-${lib.substring 0 7 quickshellRevision}";
     src = quickshellSrc;
+    patches = (old.patches or [ ]) ++ [ ../../patches/quickshell-pam-conversation-cleanup.patch ];
     cmakeFlags =
       (lib.filter (flag: !(lib.hasInfix "GIT_REVISION" (toString flag))) (old.cmakeFlags or [ ]))
       ++ [ (lib.cmakeFeature "GIT_REVISION" quickshellRevision) ];
