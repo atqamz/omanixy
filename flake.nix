@@ -1794,6 +1794,13 @@
               ${./justfile}
             touch "$out"
           '';
+          security-recovery-pam-patch = pkgs.runCommand "omanixy-security-recovery-pam-patch"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.patch pkgs.python3 ];
+            } ''
+            ${pkgs.bash}/bin/bash ${./test/security-recovery-pam-patch.sh} ${quickshell} ${./patches/quickshell-pam-conversation-cleanup.patch}
+            touch "$out"
+          '';
           security-recovery-check-helpers-selftest = pkgs.runCommand "omanixy-security-recovery-check-helpers-selftest"
             {
               nativeBuildInputs = [ pkgs.python3 ];

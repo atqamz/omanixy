@@ -1,0 +1,9 @@
+diff --git a/src/services/pam/conversation.cpp b/src/services/pam/conversation.cpp
+--- a/src/services/pam/conversation.cpp
++++ b/src/services/pam/conversation.cpp
+@@ -54,0 +55 @@
++	this->notifier.setEnabled(false);
+@@ -63,0 +65 @@
++	this->notifier.setEnabled(false);
+@@ -96,0 +99 @@
++			this->notifier.setEnabled(false);
