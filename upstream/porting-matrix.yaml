@@ -266,12 +266,14 @@ items:
         - desktop entry database
     tests:
       - test/launcher-terminal.sh
+      - test/launcher-cold-launch-vm.nix
       - test/feature-closure.sh
       - test/feature-lifecycle.sh
     notes:
       - "`programs.omanixy.launcher.terminal.package` defaults to `pkgs.foot` and `programs.omanixy.launcher.terminal.desktop` defaults to `foot.desktop`; consumers may select another terminal package and desktop entry."
       - "Activation seeds `~/.config/xdg-terminals.list` only when the path is absent and no `XDG_CONFIG_DIRS` entry already supplies one, preserving existing regular files and symlinks as user-owned terminal policy."
-      - "Launcher runtimes retain the pinned `xdg-terminal-exec` menu action; runtimes without launcher omit it with the existing exact compatibility patch."
+      - "Launcher-enabled Home Manager profiles include `xdg-terminal-exec` for transient systemd user services; launcher runtimes also retain the pinned helper for the bar's terminal action, while runtimes without launcher omit it with the existing exact compatibility patch."
+      - "The cold-launch VM configures the Home Manager module and launches a real `Terminal=true` entry through the transient systemd user service, proving the user-manager PATH resolves the handler; the shell test retains activation ownership and in-process bar terminal coverage."
 
   - id: menu.baseline
     classification: adapted
