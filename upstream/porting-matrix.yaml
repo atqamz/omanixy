@@ -1139,6 +1139,12 @@ items:
       revision: 28771c7c74b42e20afca0b1b63980cb46515537c
       modules:
         - Quickshell.Services.Pam
+    local_patches:
+      - path: patches/quickshell-pam-conversation-cleanup.patch
+        upstream_path: src/services/pam/conversation.cpp
+        upstream_revision: 28771c7c74b42e20afca0b1b63980cb46515537c
+        change: Disable the PAM QSocketNotifier on abort, internal error, and subprocess exit before terminal result or error signals.
+        rationale: Prevent a notifier on a closed child pipe from firing until deferred conversation deletion, which can drop repeated PAM attempt and final-result output.
     nixpkgs:
       revision: 241313f4e8e508cb9b13278c2b0fa25b9ca27163
       paths:
@@ -1179,7 +1185,8 @@ items:
       - lockout policy must not be inherited accidentally from a login service
     evidence:
       available:
-        - exact Quickshell PamContext source and qmltypes
+        - pinned Quickshell PamContext API and qmltypes audit, with conversation.cpp consumed through the local patch recorded above
+        - pinned-source regression proof that the local Quickshell patch applies to the pinned conversation.cpp and disables the notifier on every terminal path it changes
         - exact nixpkgs security.pam module audit
         - pinned Arch policy inventory without its /etc writes
         - declarative programs.omanixy.security.pam.password.enable NixOS option, disabled by default
@@ -1195,14 +1202,17 @@ items:
       - test/security-pam.sh
       - test/security-pam-composition.sh
       - test/security-pam-capability.sh
+      - test/security-recovery-pam-patch.sh
       - test/security-recovery-contract.sh
       - test/security-recovery-pam-vm.nix
     notes:
       - This layer implements security.pam.services."omarchy-lock-password".text as a single explicit auth-only pam_unix.so line, and owns both that text and the service's enable state atomically via lib.mkForce; no faillock or nullok policy is included.
+      - Quickshell.Services.Pam is consumed from the pinned revision with the local patches/quickshell-pam-conversation-cleanup.patch. This downstream divergence changes only notifier lifetime on abort, internal error, and subprocess exit; it does not change PAM policy or authentication results. The patch prevents stale notifications from a closed child pipe from losing repeated-attempt and terminal-result output while deferred conversation cleanup is pending.
       - lib.mkForce alone does not defend against an equal-priority competing definition of text, since nixpkgs' lines merge type concatenates same-priority definitions instead of raising a conflict; this layer adds an assertion verifying the final resolved service still matches the exact Omanixy-owned contract whenever the capability is enabled, so such a conflict fails the build closed instead of silently composing. A consumer who needs different policy for this service must disable programs.omanixy.security.pam.password first; this layer provides no extraConfig or other free-form PAM extension option.
       - The implemented password backend is pam_unix against ordinary shadow-backed local Unix accounts. systemd-homed authentication is not implemented by this layer and is not claimed to work; pam_systemd_home is deliberately absent. A host may have systemd-homed available while a given account is still shadow-backed - this is a support-scope omission, not a host-specific claim.
       - support is experimental, not supported, because no live authentication conversation has been exercised; only the generated declarative artifact is hermetically proven.
       - No PAM consumer, native lock, fingerprint capability, polkit agent, idle manager, or notification daemon is enabled by this layer.
+      - The local notifier-lifetime patch does not fix unrelated PAM worker fork deadlocks, PAM policy decisions, fingerprint backend availability, or shell-service restart behavior. The single, cancel, missing-service, and fingerprint arms use the same PamConversation notifier path and remain covered by the shared patch; the service crash-loop arm does not create a PAM conversation and was never affected by this defect.
       - No faillock or other lockout policy is adopted in this v0.1; layer 8's real, repeated (>=20 attempts) wrong-password evidence against the live pam_unix backend is the proof this decision holds under load, not an outstanding gate to revisit (see security.recovery's own notes for the same confirmation at the ledger's final promotion gate).
 
   - id: security.pam-fingerprint
