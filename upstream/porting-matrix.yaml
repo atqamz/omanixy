@@ -310,7 +310,7 @@ items:
 
   - id: tray
     classification: exact
-    maturity: audited
+    maturity: validated
     upstream:
       project: basecamp/omarchy
       revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
@@ -337,8 +337,8 @@ items:
       - test/sni-contract.sh
     notes:
       - Omanixy does not start a second tray daemon.
-      - The isolated D-Bus/SNI contract proves native watcher and item lifecycle, Quickshell observation, and active-item behavior; real Quattro rendering and menu interaction require a Wayland session smoke test.
-      - Legacy XEmbed-only applications are not implied by the native StatusNotifier support claim.
+      - The isolated D-Bus/SNI contract proves native watcher and item lifecycle, Quickshell observation, and active-item behavior; live sfx14 evidence additionally proves Quattro rendering, primary activation, menu interaction, and shell restart recovery for native StatusNotifier items.
+      - Native StatusNotifier support does not include XEmbed-only tray applications; Omanixy provides no XEmbed bridge.
 
   - id: media.mpris
     classification: exact

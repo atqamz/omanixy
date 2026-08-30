@@ -78,10 +78,15 @@ real graphical session and hardware.
 | --- | --- | --- |
 | Core Quattro shell and user service | Public module, activation, unit, and runtime checks | Requires a working Wayland, Hyprland, D-Bus, and graphical-session environment |
 | Audio, media, Bluetooth, clipboard, monitor, power, network, weather, and screenshots | Feature selection and compatibility closure checks | Requires the corresponding host devices, services, and session backends |
-| Launcher discovery and cold launch | Adapter, contract, and Wayland VM regression checks | Live hardware activation remains open under [atqamz/omanixy#23](https://github.com/atqamz/omanixy/issues/23) |
-| StatusNotifier tray | Native Quickshell contract checks | Live tray behavior remains open under [atqamz/omanixy#39](https://github.com/atqamz/omanixy/issues/39) |
+| Launcher discovery and cold launch | Adapter, contract, and Wayland VM regression checks | Cold launch validated on one sfx14 session, as recorded in [atqamz/omanixy#50](https://github.com/atqamz/omanixy/issues/50); already-running toplevel activation is not yet proven live |
+| StatusNotifier tray | Native Quickshell contract checks | Validated on one sfx14 session for native StatusNotifier items; XEmbed-only tray applications are unsupported |
 | Default font and wallpaper ownership | Theme and configuration plumbing checks | Live default ownership remains open under [atqamz/omanixy#24](https://github.com/atqamz/omanixy/issues/24) |
 | Native lock, fingerprint, polkit agent, idle, and notification daemon | Option and ownership assertions | Experimental and opt-in, not release-readiness evidence |
+
+The tray proof is host-scoped to one sfx14 session and native StatusNotifier
+items; it is not a claim about every StatusNotifier implementation.
+Omanixy provides no XEmbed bridge, so XEmbed-only tray applications are
+unsupported.
 
 ## Universe downstream evidence
 
