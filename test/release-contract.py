@@ -16,6 +16,8 @@ RELEASE_PLEASE_ACTION = "googleapis/release-please-action@45996ed1f6d02564a971a2
 RELEASE_FILES = (".release-please-manifest.json", "CHANGELOG.md", "version.txt")
 RELEASE_VERSION = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 IMMUTABLE_ACTION = re.compile(r"^[^@]+@[0-9a-f]{40}$")
+RELEASE_AUTHOR = "github-actions"
+RELEASE_AUTHOR_LOGINS = ("github-actions[bot]", "app/github-actions")
 
 
 def load_json(path):
@@ -52,6 +54,23 @@ def command_argvs(step):
         if argv:
             result.append(argv)
     return result
+
+
+def normalize_release_author(login):
+    if login in RELEASE_AUTHOR_LOGINS:
+        return RELEASE_AUTHOR
+    return login
+
+
+def release_author_matches(pr):
+    return normalize_release_author(pr["author"]["login"]) == RELEASE_AUTHOR
+
+
+def assert_release_author_identity():
+    assert release_author_matches({"author": {"login": "github-actions[bot]"}})
+    assert release_author_matches({"author": {"login": "app/github-actions"}})
+    assert not release_author_matches({"author": {"login": "human"}})
+    assert not release_author_matches({"author": {"login": "app/third-party"}})
 
 
 def assert_regular_files(source, ref):
@@ -258,7 +277,10 @@ def assert_release_workflow(release, release_text):
             '--label "autorelease: pending"',
             "--limit 200",
             'test "$(jq length <<< "$pending_prs")" = 1',
-            '"github-actions[bot]"',
+            "def normalized_author:",
+            'if . == "github-actions[bot]" or . == "app/github-actions"',
+            ".[0].author.login | normalized_author",
+            '"github-actions"',
         ),
     )
 
@@ -339,7 +361,17 @@ def assert_release_workflow(release, release_text):
     }
 
     query = named["Find pending Release PR"]
-    contains_all(query["run"], ('--label "autorelease: pending"', "--limit 100", "headRepository.nameWithOwner == $repo", '.author.login == "github-actions[bot]"'))
+    contains_all(
+        query["run"],
+        (
+            '--label "autorelease: pending"',
+            "--limit 100",
+            "headRepository.nameWithOwner == $repo",
+            "def normalized_author:",
+            'if . == "github-actions[bot]" or . == "app/github-actions"',
+            '((.author.login | normalized_author) == "github-actions")',
+        ),
+    )
 
     identity = named["Verify pending Release PR identity"]
     assert identity["if"] == candidate
@@ -458,6 +490,7 @@ def main():
     release = yaml.safe_load(release_text)
     assert_release_config(root)
     assert_release_context(root)
+    assert_release_author_identity()
     assert_ci(ci)
     assert_release_workflow(release, release_text)
     assert_immutable_actions(ci, release)
