@@ -139,11 +139,11 @@ jobs:
           test "$(jq -r '
             def normalized_author:
               if . == "github-actions[bot]" or . == "app/github-actions"
-              then "github-actions"
+              then "github-actions:bot"
               else .
               end;
             .[0].author.login | normalized_author
-          ' <<< "$pending_prs")" = "github-actions"
+          ' <<< "$pending_prs")" = "github-actions:bot"
       - name: Canonicalize merged Release PR body
         if: steps.main-identity.outputs.current == 'true' && steps.merged-pr.outputs.release_commit == 'true' && steps.merged-pr.outputs.pending == 'true' && steps.release-state.outputs.exists != 'true'
         working-directory: trusted-main
@@ -293,10 +293,10 @@ jobs:
           prs="$(jq --arg repo "$GITHUB_REPOSITORY" '
             def normalized_author:
               if . == "github-actions[bot]" or . == "app/github-actions"
-              then "github-actions"
+              then "github-actions:bot"
               else .
               end;
-            [.[] | select(.baseRefName == "main" and .headRepository.nameWithOwner == $repo and ((.author.login | normalized_author) == "github-actions") and ([.labels[].name] | index("autorelease: pending")) != null)]
+            [.[] | select(.baseRefName == "main" and .headRepository.nameWithOwner == $repo and ((.author.login | normalized_author) == "github-actions:bot") and ([.labels[].name] | index("autorelease: pending")) != null)]
           ' <<< "$raw_prs")"
           count="$(jq length <<< "$prs")"
           test "$count" -le 1

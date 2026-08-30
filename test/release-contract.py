@@ -16,7 +16,7 @@ RELEASE_PLEASE_ACTION = "googleapis/release-please-action@45996ed1f6d02564a971a2
 RELEASE_FILES = (".release-please-manifest.json", "CHANGELOG.md", "version.txt")
 RELEASE_VERSION = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 IMMUTABLE_ACTION = re.compile(r"^[^@]+@[0-9a-f]{40}$")
-RELEASE_AUTHOR = "github-actions"
+RELEASE_AUTHOR = "github-actions:bot"
 RELEASE_AUTHOR_LOGINS = ("github-actions[bot]", "app/github-actions")
 
 
@@ -71,6 +71,7 @@ def assert_release_author_identity():
     assert release_author_matches({"author": {"login": "app/github-actions"}})
     assert not release_author_matches({"author": {"login": "human"}})
     assert not release_author_matches({"author": {"login": "app/third-party"}})
+    assert not release_author_matches({"author": {"login": "github-actions"}})
 
 
 def assert_regular_files(source, ref):
@@ -280,7 +281,7 @@ def assert_release_workflow(release, release_text):
             "def normalized_author:",
             'if . == "github-actions[bot]" or . == "app/github-actions"',
             ".[0].author.login | normalized_author",
-            '"github-actions"',
+            '"github-actions:bot"',
         ),
     )
 
@@ -369,7 +370,7 @@ def assert_release_workflow(release, release_text):
             "headRepository.nameWithOwner == $repo",
             "def normalized_author:",
             'if . == "github-actions[bot]" or . == "app/github-actions"',
-            '((.author.login | normalized_author) == "github-actions")',
+            '((.author.login | normalized_author) == "github-actions:bot")',
         ),
     )
 
