@@ -613,7 +613,8 @@ in
     ];
 
     home.packages = [ runtime cfg.font.package cfg.font.icon.package ]
-      ++ lib.optional launcherEnabled cfg.launcher.terminal.package;
+      ++ lib.optional launcherEnabled cfg.launcher.terminal.package
+      ++ lib.optional launcherEnabled pkgs.xdg-terminal-exec;
 
     home.activation.omanixyShellState = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
       config_dir="$HOME/.config/omarchy"

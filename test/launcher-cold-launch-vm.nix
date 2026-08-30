@@ -1,4 +1,4 @@
-{ pkgs, self }:
+{ pkgs, self, home-manager }:
 
 let
   system = pkgs.system;
@@ -7,6 +7,7 @@ let
   quickshell = runtime.passthru.quickshell;
   testUser = "omanixy-launcher-test";
   appId = "org.omanixy.LauncherColdLaunch";
+  terminalAppId = "org.omanixy.LauncherTerminal";
   missingId = "org.omanixy.Missing";
   harness = pkgs.writeText "omanixy-launcher-cold-launch-harness.qml" ''
     import QtQuick
@@ -41,6 +42,7 @@ let
           if (appLibrary.status === Loader.Ready && found && !root.launchRequested) {
             appLibrary.item.launch("${missingId}", "missing test entry")
             appLibrary.item.launch("${appId}", "cold launch test app")
+            appLibrary.item.launch("${terminalAppId}", "terminal launch test app")
             root.launchRequested = true
           }
 
@@ -67,18 +69,28 @@ pkgs.testers.runNixOSTest {
   name = "launcher-cold-launch-vm";
 
   nodes.machine = { ... }: {
+    imports = [ home-manager.nixosModules.home-manager ];
+
     users.users.${testUser} = {
       isNormalUser = true;
     };
 
     environment.etc."omanixy/launcher-cold-launch-harness.qml".source = harness;
     environment.systemPackages = [
-      runtime
-      pkgs.foot
       pkgs.gtk3
       pkgs.sway
       pkgs.uwsm
     ];
+
+    home-manager.useGlobalPkgs = true;
+    home-manager.useUserPackages = true;
+    home-manager.users.${testUser} = {
+      imports = [ self.homeManagerModules.default ];
+      home.username = testUser;
+      home.homeDirectory = "/home/${testUser}";
+      home.stateVersion = "25.11";
+      programs.omanixy.enable = true;
+    };
   };
 
   testScript = ''
@@ -86,6 +98,7 @@ pkgs.testers.runNixOSTest {
 
     test_user = "${testUser}"
     app_id = "${appId}"
+    terminal_app_id = "${terminalAppId}"
     missing_id = "${missingId}"
     compatibility_root = "${compatibilityRoot}"
     quickshell_path = "${quickshell}/bin/quickshell"
@@ -104,6 +117,8 @@ pkgs.testers.runNixOSTest {
     desktop = f"{app_dir}/{app_id}.desktop"
     app_script = f"{home}/launcher-cold-launch-app"
     app_pid = f"{home}/launcher-cold-launch.pid"
+    terminal_app_script = f"{home}/launcher-terminal-app"
+    terminal_app_pid = f"{home}/launcher-terminal.pid"
     compositor_pid = f"{home}/launcher-cold-launch-compositor.pid"
     compositor_config = f"{home}/launcher-cold-launch-compositor.conf"
     qml_import_root = "/tmp/omanixy-launcher-qml"
@@ -127,6 +142,17 @@ pkgs.testers.runNixOSTest {
     machine.succeed(f"printf %s {shlex.quote(app_contents)} > {shlex.quote(app_script)}")
     machine.succeed(f"chmod 755 {shlex.quote(app_script)}")
 
+    terminal_app_contents = chr(10).join([
+      "#!/bin/sh",
+      f"printf '%s' $$ > {terminal_app_pid}",
+      "sleep 60",
+      "",
+    ])
+    machine.succeed(
+      f"printf %s {shlex.quote(terminal_app_contents)} > {shlex.quote(terminal_app_script)}"
+    )
+    machine.succeed(f"chmod 755 {shlex.quote(terminal_app_script)}")
+
     desktop_contents = chr(10).join([
       "[Desktop Entry]",
       "Type=Application",
@@ -136,6 +162,19 @@ pkgs.testers.runNixOSTest {
       "",
     ])
     machine.succeed(f"printf %s {shlex.quote(desktop_contents)} > {shlex.quote(desktop)}")
+
+    terminal_desktop = f"{app_dir}/{terminal_app_id}.desktop"
+    terminal_desktop_contents = chr(10).join([
+      "[Desktop Entry]",
+      "Type=Application",
+      "Name=Omanixy terminal launch test",
+      f"Exec={terminal_app_script}",
+      "Terminal=true",
+      "",
+    ])
+    machine.succeed(
+      f"printf %s {shlex.quote(terminal_desktop_contents)} > {shlex.quote(terminal_desktop)}"
+    )
 
     compositor_contents = chr(10).join([
       "output HEADLESS-1 mode 1024x768",
@@ -160,6 +199,7 @@ pkgs.testers.runNixOSTest {
       )
     )
     machine.succeed(as_user("command -v uwsm && command -v gtk-launch"))
+    machine.succeed(as_user(f"grep -Fxq foot.desktop {shlex.quote(home + '/.config/xdg-terminals.list')}"))
 
     machine.succeed(f"rm -f {shlex.quote(app_pid)}")
     harness_command = (
@@ -189,7 +229,23 @@ pkgs.testers.runNixOSTest {
     assert "ActiveState=active" in unit_status, unit_status
     assert "ExitType=cgroup" in unit_status, unit_status
 
+    machine.wait_until_succeeds(f"test -s {shlex.quote(terminal_app_pid)}", timeout=30)
+    terminal_pid = machine.succeed(f"cat {shlex.quote(terminal_app_pid)}").strip()
+    machine.succeed(f"kill -0 {shlex.quote(terminal_pid)}")
+    terminal_cgroup = machine.succeed(
+      f"awk -F: '$1 == \"0\" {{ print $3 }}' /proc/{shlex.quote(terminal_pid)}/cgroup"
+    ).strip()
+    assert "/app-graphical.slice/" in terminal_cgroup, terminal_cgroup
+    assert terminal_cgroup.endswith(".service"), terminal_cgroup
+    terminal_unit = terminal_cgroup.rsplit("/", 1)[-1]
+    terminal_unit_status = machine.succeed(
+      as_user(f"systemctl --user show {shlex.quote(terminal_unit)} -p ActiveState -p ExitType")
+    )
+    assert "ActiveState=active" in terminal_unit_status, terminal_unit_status
+    assert "ExitType=cgroup" in terminal_unit_status, terminal_unit_status
+
     machine.succeed(as_user(f"systemctl --user stop {shlex.quote(unit)}"))
+    machine.succeed(as_user(f"systemctl --user stop {shlex.quote(terminal_unit)}"))
     machine.succeed(as_user(f"kill $(cat {shlex.quote(compositor_pid)}) 2>/dev/null || true"))
   '';
 }

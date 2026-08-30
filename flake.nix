@@ -1906,7 +1906,7 @@
             ${pkgs.bash}/bin/bash ${./test/uwsm-integration.sh} ${runtime} ${compatibilityRoot} ${runtime}/bin/quickshell
             touch "$out"
           '';
-          launcher-cold-launch-vm = import ./test/launcher-cold-launch-vm.nix { inherit pkgs self; };
+          launcher-cold-launch-vm = import ./test/launcher-cold-launch-vm.nix { inherit pkgs self home-manager; };
           launcher-terminal = pkgs.runCommand "omanixy-launcher-terminal"
             {
               nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnugrep pkgs.gnused pkgs.xvfb-run pkgs.xauth pkgs.xorg-server ];
