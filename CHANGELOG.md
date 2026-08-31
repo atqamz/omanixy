@@ -32,4 +32,24 @@
 * **release:** publish validated releases after main advances ([#65](https://github.com/atqamz/omanixy/issues/65)) ([1439851](https://github.com/atqamz/omanixy/commit/1439851ac3b031ef02741f7ad9039b1ffbd21cbc))
 * **security:** stop stale PAM retry notifiers ([#61](https://github.com/atqamz/omanixy/issues/61)) ([d2183ac](https://github.com/atqamz/omanixy/commit/d2183ac96964fbe4d4d8830c86519525dcfaef35))
 
+### Upstream
+
+- Omarchy Quattro: `f0020448ca87329199de7cb12f2015ebc4a3e5e7`
+- Quickshell: `28771c7c74b42e20afca0b1b63980cb46515537c`
+- nixpkgs: `241313f4e8e508cb9b13278c2b0fa25b9ca27163`
+
+### Compatibility
+
+- Classification counts:
+- exact: 7
+- adapted: 26
+- omitted: 6
+- blocked: 0
+- Support counts:
+- supported: 0
+- experimental: 7
+- omitted: 0
+- blocked: 0
+- Security posture: 7 security/session entries remain experimental, opt-in, and disabled by default; none are supported.
+- Full ledger: [upstream/porting-matrix.yaml](https://github.com/atqamz/omanixy/blob/v0.1.0/upstream/porting-matrix.yaml)
 ## Changelog
