@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 import json
+import os
 import re
 import shlex
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import yaml
@@ -72,6 +75,264 @@ def assert_release_author_identity():
     assert not release_author_matches({"author": {"login": "human"}})
     assert not release_author_matches({"author": {"login": "app/third-party"}})
     assert not release_author_matches({"author": {"login": "github-actions"}})
+
+
+def run_command(argv, cwd):
+    result = subprocess.run(argv, cwd=cwd, text=True, capture_output=True, check=False)
+    assert result.returncode == 0, result.stderr
+    return result.stdout.strip()
+
+
+def create_release_fixture():
+    temporary = tempfile.TemporaryDirectory()
+    root = Path(temporary.name)
+    remote = root / "remote.git"
+    repository = root / "repository"
+    run_command(["git", "init", "--bare", str(remote)], root)
+    run_command(["git", "init", "-b", "main", str(repository)], root)
+    run_command(["git", "config", "user.name", "fixture"], repository)
+    run_command(["git", "config", "user.email", "fixture@example.invalid"], repository)
+    run_command(["git", "remote", "add", "origin", str(remote)], repository)
+
+    (repository / ".release-please-manifest.json").write_text('{".": "0.0.0"}\n', encoding="utf-8")
+    (repository / "CHANGELOG.md").write_text("# Changelog\n", encoding="utf-8")
+    (repository / "version.txt").write_text("0.0.0\n", encoding="utf-8")
+    run_command(["git", "add", *RELEASE_FILES], repository)
+    run_command(["git", "commit", "-m", "chore: fixture baseline"], repository)
+    parent_sha = run_command(["git", "rev-parse", "HEAD"], repository)
+
+    (repository / ".release-please-manifest.json").write_text('{".": "0.1.0"}\n', encoding="utf-8")
+    (repository / "CHANGELOG.md").write_text("# Changelog\n\n## 0.1.0\n\n* fixture\n", encoding="utf-8")
+    (repository / "version.txt").write_text("0.1.0\n", encoding="utf-8")
+    run_command(["git", "add", *RELEASE_FILES], repository)
+    run_command(["git", "commit", "-m", "chore(main): release 0.1.0"], repository)
+    release_sha = run_command(["git", "rev-parse", "HEAD"], repository)
+
+    (repository / "main.txt").write_text("validated main\n", encoding="utf-8")
+    run_command(["git", "add", "main.txt"], repository)
+    run_command(["git", "commit", "-m", "fix: advance main"], repository)
+    validated_sha = run_command(["git", "rev-parse", "HEAD"], repository)
+    run_command(["git", "push", "origin", "HEAD:refs/heads/main"], repository)
+    return temporary, root, remote, repository, parent_sha, release_sha, validated_sha
+
+
+def write_gh_fixture(root, pending_prs, pr_json, associated_prs):
+    fixture = root / "gh-fixture"
+    fixture.mkdir(exist_ok=True)
+    pending_path = fixture / "pending.json"
+    pr_path = fixture / "pr.json"
+    associated_path = fixture / "associated.json"
+    pending_path.write_text(json.dumps(pending_prs), encoding="utf-8")
+    pr_path.write_text(json.dumps(pr_json), encoding="utf-8")
+    associated_path.write_text(json.dumps(associated_prs), encoding="utf-8")
+    gh = fixture / "gh"
+    gh.write_text(
+        f"#!{sys.executable}\n"
+        "import sys\n"
+        "from pathlib import Path\n"
+        f"pending = Path({str(pending_path)!r})\n"
+        f"pr = Path({str(pr_path)!r})\n"
+        f"associated = Path({str(associated_path)!r})\n"
+        "if sys.argv[1:3] == ['pr', 'list']:\n"
+        "    print(pending.read_text(encoding='utf-8'), end='')\n"
+        "elif sys.argv[1] == 'api':\n"
+        "    endpoint = sys.argv[2]\n"
+        "    if '/pulls/' in endpoint:\n"
+        "        print(pr.read_text(encoding='utf-8'), end='')\n"
+        "    elif '/commits/' in endpoint and endpoint.endswith('/pulls'):\n"
+        "        print(associated.read_text(encoding='utf-8'), end='')\n"
+        "    else:\n"
+        "        raise SystemExit(1)\n"
+        "else:\n"
+        "    raise SystemExit(1)\n",
+        encoding="utf-8",
+    )
+    gh.chmod(0o755)
+    return fixture
+
+
+def run_workflow_script(source, cwd, environment):
+    env = os.environ.copy()
+    env.update(environment)
+    return subprocess.run(
+        ["bash", "-euo", "pipefail", "-c", source],
+        cwd=cwd,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def output_values(path):
+    return dict(line.split("=", 1) for line in path.read_text(encoding="utf-8").splitlines())
+
+
+def release_pr_fixture(release_sha):
+    return {
+        "number": 57,
+        "base": {"ref": "main", "repo": {"full_name": "atqamz/omanixy"}},
+        "head": {"repo": {"full_name": "atqamz/omanixy"}},
+        "merged_at": "2026-08-30T17:05:32Z",
+        "merge_commit_sha": release_sha,
+        "user": {"login": "github-actions[bot]"},
+        "title": "chore(main): release 0.1.0",
+        "labels": [{"name": "autorelease: pending"}],
+    }
+
+
+def assert_release_candidate_fixtures(source):
+    temporary, root, _remote, repository, parent_sha, release_sha, validated_sha = create_release_fixture()
+    try:
+        pr_json = release_pr_fixture(release_sha)
+        associated_prs = [
+            {
+                "number": 57,
+                "base": {"ref": "main"},
+                "merged_at": pr_json["merged_at"],
+                "merge_commit_sha": release_sha,
+            }
+        ]
+        fixture = write_gh_fixture(root, [{"number": 57}], pr_json, associated_prs)
+        output = root / "candidate-output"
+        result = run_workflow_script(
+            source,
+            repository,
+            {
+                "GITHUB_OUTPUT": str(output),
+                "GITHUB_REPOSITORY": "atqamz/omanixy",
+                "PATH": f"{fixture}:{os.environ['PATH']}",
+                "VALIDATED_SHA": validated_sha,
+            },
+        )
+        assert result.returncode == 0, (result.returncode, result.stdout, result.stderr)
+        values = output_values(output)
+        assert values == {
+            "found": "true",
+            "number": "57",
+            "release_sha": release_sha,
+            "release_commit": "true",
+            "pending": "true",
+        }, values
+
+        output = root / "multiple-output"
+        fixture = write_gh_fixture(root, [{"number": 57}, {"number": 58}], pr_json, associated_prs)
+        result = run_workflow_script(
+            source,
+            repository,
+            {
+                "GITHUB_OUTPUT": str(output),
+                "GITHUB_REPOSITORY": "atqamz/omanixy",
+                "PATH": f"{fixture}:{os.environ['PATH']}",
+                "VALIDATED_SHA": validated_sha,
+            },
+        )
+        assert result.returncode != 0
+
+        output = root / "author-output"
+        wrong_author = {**pr_json, "user": {"login": "human"}}
+        fixture = write_gh_fixture(root, [{"number": 57}], wrong_author, associated_prs)
+        result = run_workflow_script(
+            source,
+            repository,
+            {
+                "GITHUB_OUTPUT": str(output),
+                "GITHUB_REPOSITORY": "atqamz/omanixy",
+                "PATH": f"{fixture}:{os.environ['PATH']}",
+                "VALIDATED_SHA": validated_sha,
+            },
+        )
+        assert result.returncode != 0
+
+        output = root / "unvalidated-output"
+        fixture = write_gh_fixture(root, [{"number": 57}], pr_json, associated_prs)
+        result = run_workflow_script(
+            source,
+            repository,
+            {
+                "GITHUB_OUTPUT": str(output),
+                "GITHUB_REPOSITORY": "atqamz/omanixy",
+                "PATH": f"{fixture}:{os.environ['PATH']}",
+                "VALIDATED_SHA": parent_sha,
+            },
+        )
+        assert result.returncode == 0, (result.returncode, result.stdout, result.stderr)
+        assert output_values(output) == {
+            "found": "true",
+            "number": "57",
+            "release_sha": release_sha,
+            "release_commit": "false",
+            "pending": "true",
+        }
+    finally:
+        temporary.cleanup()
+
+
+def push_unrelated_main(root, remote):
+    repository = root / "unrelated"
+    run_command(["git", "init", "-b", "main", str(repository)], root)
+    run_command(["git", "config", "user.name", "fixture"], repository)
+    run_command(["git", "config", "user.email", "fixture@example.invalid"], repository)
+    (repository / "unrelated.txt").write_text("unrelated main\n", encoding="utf-8")
+    run_command(["git", "add", "unrelated.txt"], repository)
+    run_command(["git", "commit", "-m", "fix: replace main"], repository)
+    unrelated_sha = run_command(["git", "rev-parse", "HEAD"], repository)
+    run_command(["git", "push", "--force", str(remote), "HEAD:refs/heads/main"], repository)
+    return unrelated_sha
+
+
+def assert_release_ancestry_fixtures(source):
+    temporary, root, remote, repository, _parent_sha, release_sha, validated_sha = create_release_fixture()
+    try:
+        output = root / "stale-output"
+        result = run_workflow_script(
+            source,
+            repository,
+            {
+                "GITHUB_OUTPUT": str(output),
+                "RELEASE_COMMIT": "true",
+                "RELEASE_SHA": release_sha,
+                "VALIDATED_SHA": release_sha,
+            },
+        )
+        assert result.returncode == 0, result.stderr
+        assert output_values(output) == {
+            "current": "false",
+            "release_eligible": "true",
+        }
+
+        output = root / "current-output"
+        result = run_workflow_script(
+            source,
+            repository,
+            {
+                "GITHUB_OUTPUT": str(output),
+                "RELEASE_COMMIT": "false",
+                "RELEASE_SHA": "",
+                "VALIDATED_SHA": validated_sha,
+            },
+        )
+        assert result.returncode == 0, result.stderr
+        assert output_values(output) == {
+            "current": "true",
+            "release_eligible": "false",
+        }
+
+        push_unrelated_main(root, remote)
+        output = root / "rejected-output"
+        result = run_workflow_script(
+            source,
+            repository,
+            {
+                "GITHUB_OUTPUT": str(output),
+                "RELEASE_COMMIT": "true",
+                "RELEASE_SHA": release_sha,
+                "VALIDATED_SHA": validated_sha,
+            },
+        )
+        assert result.returncode != 0
+    finally:
+        temporary.cleanup()
 
 
 def assert_regular_files(source, ref):
@@ -213,6 +474,7 @@ def assert_release_workflow(release, release_text):
     assert release["concurrency"] == {"group": "release-main", "cancel-in-progress": False}
     assert "${{ secrets." not in release_text
     assert "RELEASE_PLEASE_TOKEN" not in release_text
+    assert "EXPECTED_SHA" not in release_text
 
     job = release["jobs"]["release"]
     assert job["runs-on"] == "ubuntu-24.04"
@@ -220,6 +482,7 @@ def assert_release_workflow(release, release_text):
     ordered = steps(release, "release")
     named = named_steps(release, "release")
     initial_current = "steps.main-identity.outputs.current == 'true'"
+    release_candidate = "steps.merged-pr.outputs.release_commit == 'true' && steps.main-identity.outputs.release_eligible == 'true'"
     maintenance_current = "steps.maintenance-main.outputs.current == 'true'"
     candidate = maintenance_current + " && steps.release-pr.outputs.found == 'true'"
 
@@ -233,23 +496,52 @@ def assert_release_workflow(release, release_text):
         "persist-credentials": False,
     }
 
-    provenance = named["Verify merged PR provenance"]
+    provenance = named["Find merged Release PR"]
     source = provenance["run"]
     contains_all(
         source,
         (
+            'gh pr list --repo "$GITHUB_REPOSITORY" --state merged --base main --label "autorelease: pending" --limit 200 --json number',
+            'test "$pending_count" -le 1',
+            'gh api "repos/$GITHUB_REPOSITORY/pulls/$release_pr_number"',
+            'release_sha="$(jq -r \'.merge_commit_sha\' <<< "$pr_json")"',
+            'gh api "repos/$GITHUB_REPOSITORY/commits/$release_sha/pulls"',
             ".merge_commit_sha == $sha",
             'test "$(jq length <<< "$matches")" = "1"',
-            '[ "$author" = "github-actions[bot]" ]',
-            'parent_count="$(git rev-list --parents -n 1 "$EXPECTED_SHA"',
+            'test "$(jq -r \'.user.login\' <<< "$pr_json")" = "github-actions[bot]"',
+            'parent_count="$(git rev-list --parents -n 1 "$release_sha"',
             'test "$parent_count" = 1',
-            'git diff --name-only "$EXPECTED_SHA^1" "$EXPECTED_SHA"',
+            'git diff --name-only "$release_sha^1" "$release_sha"',
             'test "$actual_release_files" = "$expected_release_files"',
-            'expected_title="chore(main): release $(cat version.txt)"',
+            'git show "$release_sha:version.txt"',
+            'expected_title="chore(main): release $version"',
             'test "$title" = "$expected_title"',
+            'git merge-base --is-ancestor "$release_sha" "$VALIDATED_SHA"',
+            "release_sha=%s",
+            "release_commit=%s",
         ),
     )
-    assert_regular_files(source, '"$EXPECTED_SHA"')
+    assert_regular_files(source, '"$release_sha"')
+
+    ancestry = named["Verify release candidate ancestry"]
+    contains_all(
+        ancestry["run"],
+        (
+            'current_sha="$(git ls-remote --refs origin refs/heads/main | cut -f1)"',
+            'test -n "$current_sha"',
+            'if [ "$current_sha" = "$VALIDATED_SHA" ]',
+            'git fetch --no-tags origin "$current_sha"',
+            'git merge-base --is-ancestor "$RELEASE_SHA" "$current_sha"',
+            'release_eligible=true',
+            'printf \'current=%s\\nrelease_eligible=%s\\n\'',
+        ),
+    )
+    assert_release_candidate_fixtures(source)
+    assert_release_ancestry_fixtures(ancestry["run"])
+
+    checkout = named["Check out validated release commit"]
+    assert checkout["if"] == release_candidate
+    contains_all(checkout["run"], ('git checkout --detach "$RELEASE_SHA"', 'test "$(git rev-parse HEAD)" = "$RELEASE_SHA"'))
 
     release_state = named["Inspect merged release state"]
     contains_all(
@@ -259,8 +551,8 @@ def assert_release_workflow(release, release_text):
             "git/ref/tags/$tag",
             "'.object.type'",
             "'.object.sha'",
-            'test "$target" = "$EXPECTED_SHA"',
-            'test "$tag_target" = "$EXPECTED_SHA"',
+            'test "$target" = "$RELEASE_SHA"',
+            'test "$tag_target" = "$RELEASE_SHA"',
             'test "$name" = "$tag"',
             'test "$body" = "$expected_notes"',
             'test "$draft" = false',
@@ -269,33 +561,34 @@ def assert_release_workflow(release, release_text):
     )
 
     exclusive = named["Verify exclusive publish candidate"]
+    assert exclusive["if"] == release_candidate + " && steps.merged-pr.outputs.pending == 'true'"
     contains_all(
         exclusive["run"],
         (
-            'test "$current_sha" = "$EXPECTED_SHA"',
+            'git merge-base --is-ancestor "$RELEASE_SHA" "$current_sha"',
             "--state merged",
             "--base main",
             '--label "autorelease: pending"',
             "--limit 200",
             'test "$(jq length <<< "$pending_prs")" = 1',
-            "def normalized_author:",
-            'if . == "github-actions[bot]" or . == "app/github-actions"',
-            ".[0].author.login | normalized_author",
-            '"github-actions:bot"',
+            'test "$(jq -r \'.[0].number\' <<< "$pending_prs")" = "$RELEASE_PR_NUMBER"',
         ),
     )
 
     canonical = named["Canonicalize merged Release PR body"]
-    assert canonical["run"].count('test "$current_sha" = "$EXPECTED_SHA"') >= 2
+    assert canonical["if"] == release_candidate + " && steps.merged-pr.outputs.pending == 'true' && steps.release-state.outputs.exists != 'true'"
+    assert canonical["run"].count('git merge-base --is-ancestor "$RELEASE_SHA" "$current_sha"') >= 2
     contains_all(canonical["run"], ("--render-pr-body", "--method PATCH", 'test "$actual_body" = "$expected_body"'))
 
     preconditions = named["Verify publish preconditions"]
+    assert preconditions["if"] == canonical["if"]
     contains_all(
         preconditions["run"],
         (
-            'test "$current_sha" = "$EXPECTED_SHA"',
+            'git merge-base --is-ancestor "$RELEASE_SHA" "$current_sha"',
             "'.merged_at'",
             "'.merge_commit_sha'",
+            'test "$(jq -r \'.merge_commit_sha\' <<< "$pr_json")" = "$RELEASE_SHA"',
             'test "$(jq -r \'.user.login\' <<< "$pr_json")" = "github-actions[bot]"',
             'test "$(jq -r \'.title\' <<< "$pr_json")" = "$expected_title"',
             'test "$(jq -r \'.body\' <<< "$pr_json")" = "$expected_body"',
@@ -318,11 +611,12 @@ def assert_release_workflow(release, release_text):
     assert "manifest-file" not in publish["with"]
 
     published = named["Verify published release identity"]
+    assert published["if"] == "steps.publish.outcome == 'success'"
     contains_all(
         published["run"],
         (
             'test "$RELEASE_CREATED" = true',
-            'test "$RELEASE_SHA" = "$EXPECTED_SHA"',
+            'test "$PUBLISHED_SHA" = "$RELEASE_SHA"',
             'test "$RELEASE_TAG" = "$tag"',
             'test "$RELEASE_BODY" = "$expected_notes"',
             "git/ref/tags/$tag",
@@ -336,12 +630,13 @@ def assert_release_workflow(release, release_text):
     )
 
     tagged = named["Verify tagged release identity"]
+    assert tagged["if"] == release_candidate + " && steps.release-state.outputs.exists == 'true'"
     contains_all(
         tagged["run"],
         (
             "--release-notes",
             "git/ref/tags/$tag",
-            'test "$(jq -r \'.target_commitish\' <<< "$release_json")" = "$EXPECTED_SHA"',
+            'test "$(jq -r \'.target_commitish\' <<< "$release_json")" = "$RELEASE_SHA"',
             'select(. == "autorelease: pending")',
             'select(. == "autorelease: tagged")',
         ),
@@ -349,7 +644,7 @@ def assert_release_workflow(release, release_text):
 
     maintenance = named["Recheck current main for maintenance"]
     assert maintenance["if"] == initial_current
-    contains_all(maintenance["run"], ('current_sha="$(git ls-remote --refs origin refs/heads/main | cut -f1)"', 'if [ "$current_sha" = "$EXPECTED_SHA" ]'))
+    contains_all(maintenance["run"], ('current_sha="$(git ls-remote --refs origin refs/heads/main | cut -f1)"', 'if [ "$current_sha" = "$VALIDATED_SHA" ]'))
 
     maintain = named["Maintain Release PR"]
     assert maintain["uses"] == RELEASE_PLEASE_ACTION
@@ -384,7 +679,7 @@ def assert_release_workflow(release, release_text):
             "'.head.repo.full_name'",
             "'.head.ref'",
             "'.user.login'",
-            'test "$base_sha" = "$EXPECTED_SHA"',
+            'test "$base_sha" = "$VALIDATED_SHA"',
             'test "$head_repo" = "$GITHUB_REPOSITORY"',
             'test "$head_ref" = "$RELEASE_BRANCH"',
             'test "$author" = "github-actions[bot]"',
@@ -404,7 +699,7 @@ def assert_release_workflow(release, release_text):
     contains_all(
         boundary["run"],
         (
-            'git diff --name-only "$EXPECTED_SHA...HEAD"',
+            'git diff --name-only "$VALIDATED_SHA...HEAD"',
             'test "$actual_release_files" = "$expected_release_files"',
             'expected_title="chore(main): release $(cat version.txt)"',
             'test "$actual_title" = "$expected_title"',
@@ -435,7 +730,7 @@ def assert_release_workflow(release, release_text):
             'test "$actual_body" = "$expected_body"',
         ),
     )
-    assert writer_source.count('test "$current_sha" = "$EXPECTED_SHA"') >= 2
+    assert writer_source.count('test "$current_sha" = "$VALIDATED_SHA"') >= 2
     assert writer_source.count('test "$remote_candidate_sha" = "$candidate_sha"') >= 2
     assert writer_source.count('test "$pr_head_sha" = "$candidate_sha"') >= 2
     assert writer_source.index("--write") < writer_source.index('git push origin')
@@ -445,6 +740,9 @@ def assert_release_workflow(release, release_text):
     assert "python3 scripts/release-context" not in writer_source
 
     order = {step["name"]: i for i, step in enumerate(ordered) if "name" in step}
+    assert order["Find merged Release PR"] < order["Verify release candidate ancestry"]
+    assert order["Verify release candidate ancestry"] < order["Check out validated release commit"]
+    assert order["Check out validated release commit"] < order["Inspect merged release state"]
     assert order["Inspect merged release state"] < order["Verify exclusive publish candidate"]
     assert order["Verify exclusive publish candidate"] < order["Canonicalize merged Release PR body"]
     assert order["Canonicalize merged Release PR body"] < order["Verify publish preconditions"]
