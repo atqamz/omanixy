@@ -397,6 +397,29 @@ def assert_release_config(root):
     assert changelog.startswith("# Changelog\n")
     if version == "0.0.0":
         assert changelog == "# Changelog\n"
+    return config
+
+
+def assert_release_please_invocation_agreement(publish, maintain, config):
+    shared = {
+        "config-file": "release-please-config.json",
+        "manifest-file": ".release-please-manifest.json",
+        "target-branch": "main",
+    }
+    assert publish["with"] == {
+        **shared,
+        "skip-github-pull-request": True,
+    }
+    assert maintain["with"] == {
+        **shared,
+        "skip-github-release": True,
+    }
+    config_options = {
+        "release-type": config["release-type"],
+        "include-component-in-tag": config["include-component-in-tag"],
+    }
+    for invocation in (publish["with"], maintain["with"]):
+        assert set(config_options).isdisjoint(invocation)
 
 
 def assert_release_context(root):
@@ -466,7 +489,7 @@ def assert_ci(ci):
     assert_regular_files(source, '"$HEAD_SHA"')
 
 
-def assert_release_workflow(release, release_text):
+def assert_release_workflow(release, release_text, config):
     release_on = trigger(release)
     assert release["name"] == "Release Please"
     assert release_on["workflow_run"] == {"workflows": ["CI"], "types": ["completed"], "branches": ["main"]}
@@ -601,14 +624,6 @@ def assert_release_workflow(release, release_text):
 
     publish = named["Publish merged Release PR"]
     assert publish["uses"] == RELEASE_PLEASE_ACTION
-    assert publish["with"] == {
-        "release-type": "simple",
-        "include-component-in-tag": False,
-        "target-branch": "main",
-        "skip-github-pull-request": True,
-    }
-    assert "config-file" not in publish["with"]
-    assert "manifest-file" not in publish["with"]
 
     published = named["Verify published release identity"]
     assert published["if"] == "steps.publish.outcome == 'success'"
@@ -649,12 +664,7 @@ def assert_release_workflow(release, release_text):
     maintain = named["Maintain Release PR"]
     assert maintain["uses"] == RELEASE_PLEASE_ACTION
     assert maintain["if"] == maintenance_current
-    assert maintain["with"] == {
-        "config-file": "release-please-config.json",
-        "manifest-file": ".release-please-manifest.json",
-        "target-branch": "main",
-        "skip-github-release": True,
-    }
+    assert_release_please_invocation_agreement(publish, maintain, config)
 
     query = named["Find pending Release PR"]
     contains_all(
@@ -787,11 +797,11 @@ def main():
     ci = yaml.safe_load((root / ".github/workflows/ci.yaml").read_text(encoding="utf-8"))
     release_text = (root / ".github/workflows/release-please.yaml").read_text(encoding="utf-8")
     release = yaml.safe_load(release_text)
-    assert_release_config(root)
+    config = assert_release_config(root)
     assert_release_context(root)
     assert_release_author_identity()
     assert_ci(ci)
-    assert_release_workflow(release, release_text)
+    assert_release_workflow(release, release_text, config)
     assert_immutable_actions(ci, release)
 
 
