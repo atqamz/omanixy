@@ -23,10 +23,10 @@ jobs:
     env:
       NIX_CONFIG: |
         max-jobs = 1
-        cores = 1
-      CMAKE_BUILD_PARALLEL_LEVEL: 1
-      MAKEFLAGS: -j1
-      NINJAFLAGS: -j1
+        cores = 2
+      CMAKE_BUILD_PARALLEL_LEVEL: 2
+      MAKEFLAGS: -j2
+      NINJAFLAGS: -j2
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
