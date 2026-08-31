@@ -1817,7 +1817,7 @@
           '';
           release-contract = pkgs.runCommand "omanixy-release-contract"
             {
-              nativeBuildInputs = [ releasePython ];
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.git pkgs.jq releasePython ];
             } ''
             ${releasePython}/bin/python ${./test/release-contract.py} ${self}
             touch "$out"
