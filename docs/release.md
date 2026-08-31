@@ -156,17 +156,19 @@ This makes reviewed `Upstream`, `Compatibility`, and `Migration` content from `C
 
 Release Please is invoked in two distinct modes with different trust requirements.
 
-The publication invocation uses explicit action inputs:
+The publication invocation loads the repository configuration and manifest:
 
 ```text
-release-type: simple
-include-component-in-tag: false
+config-file: release-please-config.json
+manifest-file: .release-please-manifest.json
 target-branch: main
 skip-github-pull-request: true
 ```
 
-It intentionally does not load `release-please-config.json` or `.release-please-manifest.json` through manifest mode during publication.
-The pinned action's manifest mode reads those files from the live target branch, so avoiding manifest mode removes that live-configuration race from the tag/Release path.
+The publication invocation and maintenance invocation therefore use the same component configuration, manifest, and target branch.
+They deliberately retain different skip inputs: publication skips pull-request creation while maintenance skips GitHub Release creation.
+`release-type` and `include-component-in-tag` are absent from both invocations because `release-please-config.json` is authoritative for those options.
+The pinned action's manifest mode reads the configuration and manifest from the target branch, while the release candidate's tag, notes, and SHA come from the merged Release PR selected by the validated workflow guards.
 
 Publication is eligible only when the validated main commit is itself a merged Release PR with:
 

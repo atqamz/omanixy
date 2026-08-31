@@ -232,8 +232,8 @@ jobs:
         if: steps.merged-pr.outputs.release_commit == 'true' && steps.main-identity.outputs.release_eligible == 'true' && steps.merged-pr.outputs.pending == 'true' && steps.release-state.outputs.exists != 'true'
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7
         with:
-          release-type: simple
-          include-component-in-tag: false
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
           target-branch: main
           skip-github-pull-request: true
       - name: Verify published release identity
