@@ -45,7 +45,7 @@ boot, power policy, and unrelated desktop services remain consumer-owned.
 
 Omanixy is an independent community project. It is not an official Basecamp
 project and is not endorsed by Basecamp. Omarchy remains the upstream source
-and presentation authority: [basecamp/omarchy](https://github.com/basecamp/omarchy).
+and presentation authority: [basecamp/omarchy](https://github.com/omacom/omarchy).
 
 See [the project boundary](docs/project.md) and
 [architecture](docs/architecture.md) for the complete ownership contract.
