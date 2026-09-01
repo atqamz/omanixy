@@ -1908,6 +1908,13 @@
             PYTHON=${pkgs.python3}/bin/python3 ${pkgs.bash}/bin/bash ${./test/qml-patch-behavior.sh} ${compatibilityRoot} ${runtime.passthru.omarchySource} ${./scripts/patch-transparent-foreground-process} ${runtime}/bin/quickshell ${./scripts/patch-menu-power-provider} ${./scripts/patch-menu-font-provider} ${./scripts/patch-menu-terminal-provider} ${./scripts/patch-background}
             touch "$out"
           '';
+          workspaces-widget = pkgs.runCommand "omanixy-workspaces-widget"
+            {
+              nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnused pkgs.nodejs pkgs.python3 ];
+            } ''
+            PYTHON=${pkgs.python3}/bin/python3 ${pkgs.bash}/bin/bash ${./test/workspaces-widget.sh} ${runtime.passthru.omarchySource} ${compatibilityRoot} ${./scripts/patch-workspaces-widget} ${runtime}/bin/quickshell
+            touch "$out"
+          '';
           launcher-delete-contract = pkgs.runCommand "omanixy-launcher-delete-contract"
             {
               nativeBuildInputs = [ pkgs.bash pkgs.nodejs pkgs.gnugrep pkgs.coreutils ];

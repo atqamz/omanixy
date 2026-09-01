@@ -191,6 +191,10 @@ let
             for file in Spacer.qml Spacer.manifest.json Tray.qml Tray.manifest.json TrayModel.js Workspaces.qml Workspaces.manifest.json; do
               install -Dm644 "${omarchySource}/shell/plugins/bar/widgets/$file" "$out/shell/plugins/bar/widgets/$file"
             done
+            install -Dm644 ${./WorkspaceSupport.js} "$out/shell/plugins/bar/widgets/WorkspaceSupport.js"
+            chmod u+w "$out/shell/plugins/bar/widgets/Workspaces.qml"
+            ${pkgs.python3}/bin/python3 ${../../scripts/patch-workspaces-widget} \
+              "$out/shell/plugins/bar/widgets/Workspaces.qml"
 
             for plugin in clipboard emojis menu osd; do
               cp -R "${omarchySource}/shell/plugins/$plugin" "$out/shell/plugins/$plugin"

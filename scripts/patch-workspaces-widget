@@ -1,0 +1,115 @@
+#!/usr/bin/env python3
+
+from pathlib import Path
+import sys
+
+
+REPLACEMENTS = (
+    (
+        r"""import Quickshell.Hyprland
+import qs.Commons
+import qs.Ui
+""",
+        r"""import Quickshell
+import Quickshell.Hyprland
+import qs.Commons
+import qs.Ui
+import "WorkspaceSupport.js" as WorkspaceSupport
+""",
+    ),
+    (
+        r"""  function workspaceById(id) {
+    var values = Hyprland.workspaces.values
+    for (var i = 0; i < values.length; i++) {
+      if (values[i].id === id) return values[i]
+    }
+
+    return null
+  }
+
+  function workspaceIds() {
+    var ids = [1, 2, 3, 4, 5]
+    var values = Hyprland.workspaces.values
+
+    for (var i = 0; i < values.length; i++) {
+      var id = values[i].id
+      if (id > 0 && id <= 10 && ids.indexOf(id) === -1) ids.push(id)
+    }
+
+    ids.sort(function(left, right) { return left - right })
+    return ids
+  }
+""",
+        r"""  readonly property var barWindow: root.QsWindow ? root.QsWindow.window : null
+  property var workspaceMonitor: barWindow && barWindow.screen ? Hyprland.monitorFor(barWindow.screen) : null
+  property var workspaceValues: Hyprland.workspaces.values
+
+  function workspaceEntries() {
+    return WorkspaceSupport.entries(workspaceValues, workspaceMonitor)
+  }
+""",
+    ),
+    (
+        r"""    columns: root.vertical ? 1 : root.workspaceIds().length
+""",
+        r"""    columns: root.vertical ? 1 : root.workspaceEntries().length
+""",
+    ),
+    (
+        r"""      model: root.workspaceIds()
+
+      WidgetButton {
+        required property int modelData
+
+        readonly property var workspace: root.workspaceById(modelData)
+        readonly property bool occupied: workspace !== null && workspace.toplevels.values.length > 0
+        readonly property bool focused: Hyprland.focusedWorkspace !== null && Hyprland.focusedWorkspace.id === modelData
+
+        bar: root.bar
+        text: focused ? "\uDB85\uDCFB" : (modelData === 10 ? "0" : String(modelData))
+        opacity: occupied || focused ? 1 : 0.5
+        horizontalMargin: 6
+        verticalPadding: 6
+        fixedWidth: root.vertical ? root.barSize : Style.space(20)
+        fixedHeight: root.barSize
+        onPressed: function() { root.focusWorkspace(modelData) }
+""",
+        r"""      model: root.workspaceEntries()
+
+      WidgetButton {
+        required property var modelData
+
+        readonly property var workspace: modelData.workspace
+        readonly property bool occupied: workspace !== null && workspace.toplevels.values.length > 0
+        readonly property bool focused: workspace !== null && workspace.active
+
+        bar: root.bar
+        text: focused ? "\uDB85\uDCFB" : modelData.label
+        opacity: occupied || focused ? 1 : 0.5
+        horizontalMargin: 6
+        verticalPadding: 6
+        fixedWidth: root.vertical ? root.barSize : Style.space(20)
+        fixedHeight: root.barSize
+        onPressed: function() { root.focusWorkspace(modelData.id) }
+""",
+    ),
+)
+
+
+def main() -> int:
+    if len(sys.argv) != 2:
+        print(f"usage: {sys.argv[0]} WORKSPACES_QML", file=sys.stderr)
+        return 2
+    path = Path(sys.argv[1])
+    text = path.read_text(encoding="utf-8")
+    for index, (old, new) in enumerate(REPLACEMENTS, start=1):
+        count = text.count(old)
+        if count != 1:
+            raise SystemExit(f"expected exactly one pinned workspace widget block {index}, found {count}")
+        text = text.replace(old, new, 1)
+    path.write_text(text, encoding="utf-8")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -56,7 +56,7 @@ immutable compatibility root derived from the source-only flake input.
 The root contains the pinned runtime entrypoint, shared QML libraries, service
 objects, and the selected plugin files required by the supported baseline and
 its reachable panels.
-It applies twelve narrow compatibility patch sites and packages one pinned
+It applies thirteen narrow compatibility patch sites and packages one pinned
 font asset:
 
 - `shell/plugins/background/Background.qml` keeps the pinned renderer and its
@@ -79,6 +79,9 @@ font asset:
   supported clock panel instead of the unavailable timezone command.
 - `shell/plugins/bar/Bar.qml` replaces the Omarchy helper-backed transparent
   foreground path with the native theme color and removes its helper process.
+- `shell/plugins/bar/widgets/Workspaces.qml` derives the bar surface's monitor,
+  filters native Hyprland workspaces to that monitor, and presents their sorted
+  global IDs as local one-based labels while preserving native focus targets.
 - `shell/plugins/menu/Menu.qml` removes the pinned power-profile provider when
   the selected runtime lacks the power-control capability, so persisted menu state cannot
   invoke an absent helper or backend.
