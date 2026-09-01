@@ -150,11 +150,12 @@ Quattro is consumed from a deterministic immutable compatibility root through
 The root contains the pinned source view used by the supported runtime graph,
 including shared QML libraries, shell services, the baseline bar widgets, and
 the copied panel and overlay sources needed by the registry.
-It applies twelve narrow patch sites: the background renderer reachability guard,
+It applies thirteen narrow patch sites: the background renderer reachability guard,
 the disabled-plugin floor on bar widgets,
 enterprise Wi-Fi filtering through the network panel's model, removal of the
 Custom DNS provider/action/pill, hiding the unsupported speed-test action,
-clock middle-click routing, the native bar transparency fallback, the
+clock middle-click routing, the native bar transparency fallback, monitor-local
+workspace filtering and labels, the
 selected-feature power-provider gate, a user-owned launcher-delete guard, and
 the validated app-library launch and removability path, plus the conditional
 terminal-provider right-click guard for runtimes without the launcher feature.

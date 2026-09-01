@@ -165,13 +165,13 @@ items:
       - It never starts or supervises the shell.
 
   - id: bar.workspaces
-    classification: exact
+    classification: adapted
     maturity: validated
     upstream:
       project: basecamp/omarchy
       revision: f0020448ca87329199de7cb12f2015ebc4a3e5e7
       paths:
-        - path: shell/plugins/bar/
+        - path: shell/plugins/bar/widgets/Workspaces.qml
           role: Quattro bar presentation
           consumption: runtime
         - path: shell/plugins/panels/workspaces/
@@ -185,15 +185,16 @@ items:
     requirement: Workspaces expose Hyprland state and focus actions.
     ownership:
       presentation: omarchy
-      adapter: none
+      adapter: omanixy
       backend: host Hyprland
     dependencies:
       host:
         - Hyprland
     tests:
       - test/runtime-closure.sh
+      - test/workspaces-widget.sh
     notes:
-      - Workspace state and focus remain native Quickshell and Hyprland contracts.
+      - Each bar instance filters native Hyprland workspace objects to its own monitor, labels the sorted results locally, and focuses the original global ID.
 
   - id: launcher.apps
     classification: adapted

@@ -26,12 +26,13 @@ definition.
 Its complete `bin/` surface is not copied into the root.
 The root contains only dispatch wrappers for the audited helper names required
 by reachable Quattro consumers.
-The compatibility view carries twelve documented persistent source patch sites:
+The compatibility view carries thirteen documented persistent source patch sites:
 the pinned background renderer's selector and theme-switch reachability guard,
 the registry safety floor for bar widgets, enterprise Wi-Fi filtering through
 the network panel's model, removal of the Custom DNS provider/action/pill,
 hiding the unsupported speed-test action, clock middle-click routing, the
-native bar transparency fallback, the selected-feature power-provider gate, a
+native bar transparency fallback, monitor-local workspace presentation, the
+selected-feature power-provider gate, a
 selective user-owned launcher-delete action, and the app-library ownership scan
 and validated launch path behind it.
 Each patch is pinned to a source path and covered by a focused closure or
@@ -76,7 +77,7 @@ User-owned extension menus remain outside the baseline support claim.
 
 ### Persistent source patch inventory
 
-The compatibility view carries exactly these twelve pinned-source patch sites.
+The compatibility view carries exactly these thirteen pinned-source patch sites.
 Each patch is a presentation reachability guard or a native portability fix,
 not a replacement for an adapter that could provide the same contract.
 
@@ -89,6 +90,7 @@ not a replacement for an adapter that could provide the same contract.
 | `shell/plugins/panels/network/Panel.qml`, `canRunSpeedTest` and speed header/action properties | Hides the speed-test action. | The benchmark helper cannot provide honest generic measurements without its Omarchy-specific endpoint and transfer stack. | Omanixy omits the feature; `test/runtime-closure.sh` proves the unsupported speed-test source and overlay are absent. |
 | `shell/plugins/panels/clock/BarWidget.qml`, middle-button handler | Opens the supported clock panel instead of invoking `omarchy-menu-timezone`. | The timezone command is outside the generic boundary and the panel route is a presentation event, not an external helper contract. | Omanixy owns the portability patch; the exact pinned-text substitution fails closed during package construction. |
 | `shell/plugins/bar/Bar.qml`, `refreshTransparentForeground()` and its helper `Process` | Uses the native Quickshell theme foreground for transparent bars and removes the unavailable helper process. | A helper could not reproduce the bar's live theme binding without retaining a downstream presentation process, while the pinned Quickshell property already supplies the required value. | Omarchy remains presentation owner and Quickshell remains runtime owner; `test/qml-patch-behavior.sh` executes the patched bar and verifies its native foreground binding and bar-off state. |
+| `shell/plugins/bar/widgets/Workspaces.qml`, monitor selection, repeater model, labels, active state, and focus target | Filters each bar instance to the native Hyprland workspaces assigned to its screen, labels sorted results from one, and preserves the original global ID for focus. | Global workspace IDs are host topology, while the bar must present an independent local index per screen before any focus command is emitted. | Omanixy owns the narrow presentation adaptation; `scripts/patch-workspaces-widget` fails closed on pinned-source drift and `test/workspaces-widget.sh` executes the monitor filter, local labels, active state, and real workspace identity under offscreen Quickshell. |
 | `shell/plugins/menu/Menu.qml`, pinned power-profile provider block | Removes the power-profile provider and its helper actions when the selected runtime does not include the power feature, while preserving unrelated menu providers. | The immutable feature boundary must not leave a persisted user menu able to invoke helpers or backends absent from the selected runtime. | Omanixy owns the fail-closed feature gate; `scripts/patch-menu-power-provider` performs an exact source-shape replacement and `test/qml-patch-behavior.sh` proves both removal and drift failure. |
 | `shell/plugins/menu/Menu.qml`, pinned font provider block | Removes the font provider and its unsupported enumeration and mutation commands. | A generic runtime cannot claim Omarchy font management without a separate Nix-native design. | Omanixy omits the provider; `scripts/patch-menu-font-provider` performs an exact source-shape replacement and `test/qml-patch-behavior.sh` proves both removal and drift failure. |
 | `shell/plugins/menu/Menu.qml`, Delete-key handler | Routes Delete through `AppLibrary.canRemove()` and does not invoke removal for system, Nix-store, missing, malformed, symlink, or traversal entries. | Omanixy can safely remove only a user-owned desktop entry, while AppLibrary displays system and Nix-managed entries too. | Omanixy owns the removability guard and the adapter retains a separately tested user-entry contract; `test/qml-patch-behavior.sh`, `test/launcher-delete-contract.sh`, and `test/compat-adapters.sh` cover both sides. |
@@ -97,7 +99,7 @@ not a replacement for an adapter that could provide the same contract.
 | `shell/plugins/menu/BarWidget.qml`, pinned terminal right-click handler | Retains the `xdg-terminal-exec` invocation for launcher runtimes and removes it from runtimes without launcher while preserving the rest of the bar-menu behavior. | `xdg-terminal-exec` is a generic XDG terminal resolver when Omanixy provisions it with the launcher feature; runtimes without that feature must not retain an unreachable terminal action. | The feature-gated package construction and live `Terminal=true` launch are covered by `test/launcher-terminal.sh`; the exact fallback substitution still fails on source drift and is covered by `test/qml-patch-behavior.sh`. |
 
 The network model and panel edits are one behavioral patch site family, so the
-inventory has twelve sites while documenting every persistent file and symbol.
+inventory has thirteen sites while documenting every persistent file and symbol.
 Each source edit uses an exact pinned-text substitution or a fail-closed
 structured transformer and therefore fails the build if the pinned source
 shape changes.
