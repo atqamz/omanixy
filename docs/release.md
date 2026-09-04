@@ -110,6 +110,13 @@ It is defense in depth, not branch protection: a rejected direct-push CI run hap
 CI runs formatting, `just check`, all-system flake evaluation, source-comment policy, release contract checks, release-context selftests, actionlint, and release-owned-file validation.
 Nix helper packages referenced as `nixpkgs#...` use `--inputs-from .`, so they resolve through the repository's locked `nixpkgs` input rather than the runner registry.
 
+CI keeps `max-jobs = 1` and builds each derivation with two cores.
+Four-way Quickshell compilation exceeded the hosted runner memory limit even with the 4G swap file, so higher parallelism requires new measurements rather than removing the throttle.
+
+The pinned Magic Nix Cache action stores locally built Nix paths in GitHub Actions cache.
+FlakeHub is explicitly disabled, no cache secret is required, and diagnostics are disabled.
+This primarily prevents the patched Quickshell derivation from recompiling when its store path is unchanged.
+
 ## Privileged release trust boundary
 
 The release workflow has write permission and therefore never executes executable code from a pending Release PR.
@@ -271,10 +278,12 @@ Third-party workflow actions use immutable commit SHAs:
 ```text
 actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 DeterminateSystems/determinate-nix-action@527f17dd63d2d60d3e5552934bc84b9a33a14d11
+DeterminateSystems/magic-nix-cache-action@908b263ff629f4cc17666315b7fd3ec127c6244d
 googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7
 ```
 
 The Determinate action commit is its `v3.22.2` release and pins a consistent Determinate Nix `v3.22.2` installation.
+The Magic Nix Cache action commit is its `v14` release; CI enables only GitHub Actions cache, disables FlakeHub, and disables diagnostics.
 The Release Please action commit is its `v5.0.0` release; that release uses the Release Please `17.6.x` dependency line reviewed here.
 The manifest schema points to the exact signed Release Please `17.6.0` commit `712fcf01effd08d7b0e7b1fd3861f2cb388bc8d1` rather than a mutable branch or tag.
 Repository contract tests lock these identities and publication boundaries.

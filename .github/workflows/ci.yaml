@@ -45,6 +45,12 @@ jobs:
       - uses: DeterminateSystems/determinate-nix-action@527f17dd63d2d60d3e5552934bc84b9a33a14d11
         with:
           github-token: ""
+      - name: Cache Nix builds
+        uses: DeterminateSystems/magic-nix-cache-action@908b263ff629f4cc17666315b7fd3ec127c6244d
+        with:
+          use-gha-cache: true
+          use-flakehub: false
+          diagnostic-endpoint: ""
       - name: Configure swap
         run: |
           swap_path="$RUNNER_TEMP/omanixy.swap"
