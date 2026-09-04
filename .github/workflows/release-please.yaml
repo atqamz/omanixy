@@ -414,6 +414,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -eu -o pipefail
+          wait_for_pr_head() {
+            attempt=1
+            while [ "$attempt" -le 10 ]; do
+              pr_head_sha="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$RELEASE_PR_NUMBER" --jq '.head.sha')"
+              printf 'candidate_sha=%s pr_head_sha=%s attempt=%s\n' "$candidate_sha" "$pr_head_sha" "$attempt"
+              if [ "$pr_head_sha" = "$candidate_sha" ]; then
+                return 0
+              fi
+              attempt=$((attempt + 1))
+              sleep 1
+            done
+            return 1
+          }
           current_sha="$(git -C "$TRUSTED_ROOT" ls-remote --refs origin refs/heads/main | cut -f1)"
           test "$current_sha" = "$VALIDATED_SHA"
           pyyaml_store="$(nix build --inputs-from "$TRUSTED_ROOT" --no-link --print-out-paths nixpkgs#python3Packages.pyyaml)"
@@ -426,6 +439,7 @@ jobs:
             test "$current_sha" = "$VALIDATED_SHA"
             candidate_sha="$(git rev-parse HEAD)"
             remote_candidate_sha="$(git ls-remote --refs origin "refs/heads/$RELEASE_BRANCH" | cut -f1)"
+            printf 'candidate_sha=%s remote_candidate_sha=%s\n' "$candidate_sha" "$remote_candidate_sha"
             test "$remote_candidate_sha" = "$candidate_sha"
             git config user.name "release-please[bot]"
             git config user.email "49699333+release-please[bot]@users.noreply.github.com"
@@ -438,14 +452,15 @@ jobs:
           test "$current_sha" = "$VALIDATED_SHA"
           candidate_sha="$(git rev-parse HEAD)"
           remote_candidate_sha="$(git ls-remote --refs origin "refs/heads/$RELEASE_BRANCH" | cut -f1)"
+          printf 'candidate_sha=%s remote_candidate_sha=%s\n' "$candidate_sha" "$remote_candidate_sha"
           test "$remote_candidate_sha" = "$candidate_sha"
-          pr_head_sha="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$RELEASE_PR_NUMBER" --jq '.head.sha')"
+          wait_for_pr_head
           test "$pr_head_sha" = "$candidate_sha"
           expected_body="$(python3 "$TRUSTED_ROOT/scripts/release-context" --render-pr-body)"
           jq -n --arg body "$expected_body" '{body: $body}' |
             gh api --method PATCH "repos/$GITHUB_REPOSITORY/pulls/$RELEASE_PR_NUMBER" --input - >/dev/null
           actual_body="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$RELEASE_PR_NUMBER" --jq '.body')"
           test "$actual_body" = "$expected_body"
-          pr_head_sha="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$RELEASE_PR_NUMBER" --jq '.head.sha')"
+          wait_for_pr_head
           test "$pr_head_sha" = "$candidate_sha"
           PYTHONPATH="$pyyaml_site" nix shell --inputs-from "$TRUSTED_ROOT" nixpkgs#python3 -c python3 "$TRUSTED_ROOT/scripts/release-context" --check
