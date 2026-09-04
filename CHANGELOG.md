@@ -7,6 +7,26 @@
 
 * **shell:** present monitor-local workspace grids ([#77](https://github.com/atqamz/omanixy/issues/77)) ([84e8d19](https://github.com/atqamz/omanixy/commit/84e8d19088fb78e811839b07b93408a62e98522d))
 
+### Upstream
+
+- Omarchy Quattro: `f0020448ca87329199de7cb12f2015ebc4a3e5e7`
+- Quickshell: `28771c7c74b42e20afca0b1b63980cb46515537c`
+- nixpkgs: `241313f4e8e508cb9b13278c2b0fa25b9ca27163`
+
+### Compatibility
+
+- Classification counts:
+- exact: 6
+- adapted: 27
+- omitted: 6
+- blocked: 0
+- Support counts:
+- supported: 0
+- experimental: 7
+- omitted: 0
+- blocked: 0
+- Security posture: 7 security/session entries remain experimental, opt-in, and disabled by default; none are supported.
+- Full ledger: [upstream/porting-matrix.yaml](https://github.com/atqamz/omanixy/blob/v0.2.0/upstream/porting-matrix.yaml)
 ## 0.1.0 (2026-08-31)
 
 
