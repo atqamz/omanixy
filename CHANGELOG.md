@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/atqamz/omanixy/compare/v0.1.0...v0.2.0) (2026-09-04)
+
+
+### Features
+
+* **shell:** present monitor-local workspace grids ([#77](https://github.com/atqamz/omanixy/issues/77)) ([84e8d19](https://github.com/atqamz/omanixy/commit/84e8d19088fb78e811839b07b93408a62e98522d))
+
 ## 0.1.0 (2026-08-31)
 
 
