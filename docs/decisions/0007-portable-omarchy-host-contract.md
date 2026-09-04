@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted for Omanixy v0.2.
+Accepted for Omanixy v0.3.
 
 ## Context
 
@@ -10,7 +10,7 @@ Omanixy v0.1 proves the Quattro runtime and Nix-native host adapters, but its
 compatibility model mixes semantic capabilities, helper spellings, runtime
 dependencies, source mutations, and presentation feature selection.
 
-The v0.2 boundary keeps one ownership rule:
+The v0.3 boundary keeps one ownership rule:
 
 ```text
 Omarchy owns presentation.
@@ -165,7 +165,7 @@ is not a Quattro portable ABI.
 
 #26 introduces `upstream/host-contract.json` as `registryState = schema-only`
 with no capability rows. This records the ontology without claiming that the
-unfrozen v0.2 graph has already been audited.
+unfrozen v0.3 graph has already been audited.
 
 #36 freezes the compatibility tuple. #27 then creates and populates
 `quattro-host-crossings.json` and `portability-overlay.json`, populates semantic
