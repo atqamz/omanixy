@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/atqamz/omanixy/compare/v0.2.0...v0.2.1) (2026-09-05)
+
+
+### Bug Fixes
+
+* **release:** tolerate PR head propagation ([#81](https://github.com/atqamz/omanixy/issues/81)) ([ab6984c](https://github.com/atqamz/omanixy/commit/ab6984cd937f4ab7a7fe64d36a5126a110e8951f))
+
 ## [0.2.0](https://github.com/atqamz/omanixy/compare/v0.1.0...v0.2.0) (2026-09-04)
 
 
