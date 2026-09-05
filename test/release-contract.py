@@ -15,6 +15,7 @@ BOOTSTRAP_SHA = "ce7d3d8b53bec61585ca9efa377fdb3ae6763499"
 RELEASE_PLEASE_SCHEMA = "https://raw.githubusercontent.com/googleapis/release-please/712fcf01effd08d7b0e7b1fd3861f2cb388bc8d1/schemas/config.json"
 CHECKOUT_ACTION = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
 NIX_ACTION = "DeterminateSystems/determinate-nix-action@527f17dd63d2d60d3e5552934bc84b9a33a14d11"
+NIX_CACHE_ACTION = "DeterminateSystems/magic-nix-cache-action@908b263ff629f4cc17666315b7fd3ec127c6244d"
 RELEASE_PLEASE_ACTION = "googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7"
 RELEASE_FILES = (".release-please-manifest.json", "CHANGELOG.md", "version.txt")
 RELEASE_VERSION = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
@@ -467,6 +468,14 @@ def assert_ci(ci):
     nix_steps = [step for step in ordered if step.get("uses") == NIX_ACTION]
     assert len(nix_steps) == 1
     assert nix_steps[0]["with"]["github-token"] == ""
+    cache_steps = [step for step in ordered if step.get("uses") == NIX_CACHE_ACTION]
+    assert len(cache_steps) == 1
+    assert cache_steps[0]["with"] == {
+        "use-gha-cache": True,
+        "use-flakehub": False,
+        "diagnostic-endpoint": "",
+    }
+    assert ordered.index(nix_steps[0]) < ordered.index(cache_steps[0])
     assert named["Format"]["run"].strip() == "nix fmt\ngit diff --exit-code"
     assert named["Canonical checks"]["run"].strip() == "nix shell --inputs-from . nixpkgs#just -c just check"
     assert named["All systems evaluation"]["run"].strip() == "nix flake check --show-trace --print-build-logs --all-systems --no-build"
@@ -787,7 +796,7 @@ def assert_immutable_actions(ci, release):
         for step in job["steps"]
         if "uses" in step
     ]
-    assert set(uses) == {CHECKOUT_ACTION, NIX_ACTION, RELEASE_PLEASE_ACTION}
+    assert set(uses) == {CHECKOUT_ACTION, NIX_ACTION, NIX_CACHE_ACTION, RELEASE_PLEASE_ACTION}
     assert all(IMMUTABLE_ACTION.fullmatch(action) for action in uses)
     assert uses.count(RELEASE_PLEASE_ACTION) == 2
 
