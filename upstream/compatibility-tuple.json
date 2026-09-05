@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "releaseLine": "0.3.x",
+  "status": "frozen",
+  "omarchy": {
+    "repository": "omacom/omarchy",
+    "track": "quattro",
+    "revision": "f0020448ca87329199de7cb12f2015ebc4a3e5e7"
+  },
+  "quickshell": {
+    "repository": "quickshell-mirror/quickshell",
+    "revision": "28771c7c74b42e20afca0b1b63980cb46515537c",
+    "packaging": "source-pinned-over-nixpkgs"
+  },
+  "nixpkgs": {
+    "repository": "NixOS/nixpkgs",
+    "revision": "241313f4e8e508cb9b13278c2b0fa25b9ca27163"
+  },
+  "homeManager": {
+    "repository": "nix-community/home-manager",
+    "revision": "3ee51fbdac8c8bdfe1e7e1fcaba6520a563f394f"
+  },
+  "reviewedCandidate": {
+    "omarchyQuattroHead": "f99d33a8ddee7b36509a71a6d20d5d23355ce8b1",
+    "omarchyCommitsAhead": 270,
+    "quickshellRelease": "0.3.1",
+    "quickshellReleaseRevision": "1a4716cde794a59928d9d9fc15f2afc7a95de360",
+    "decision": "retain-current-validated-tuple"
+  }
+}
