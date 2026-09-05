@@ -1,0 +1,459 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Omanixy portable Omarchy Host Contract v1",
+  "oneOf": [
+    { "$ref": "#/$defs/hostContractRegistry" },
+    { "$ref": "#/$defs/quattroCrossingInventory" },
+    { "$ref": "#/$defs/portabilityOverlay" }
+  ],
+  "$defs": {
+    "revision": {
+      "type": "string",
+      "minLength": 1
+    },
+    "compatibilityTuple": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "omarchyRevision",
+        "quickshellRevision",
+        "nixpkgsRevision",
+        "homeManagerRevision"
+      ],
+      "properties": {
+        "omarchyRevision": { "$ref": "#/$defs/revision" },
+        "quickshellRevision": { "$ref": "#/$defs/revision" },
+        "nixpkgsRevision": { "$ref": "#/$defs/revision" },
+        "homeManagerRevision": { "$ref": "#/$defs/revision" }
+      }
+    },
+    "capabilityId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*(?:\\.[a-z][a-z0-9-]*)+$"
+    },
+    "supportState": {
+      "enum": [
+        "supported",
+        "experimental",
+        "omitted",
+        "blocked",
+        "not-applicable"
+      ]
+    },
+    "crossingKind": {
+      "enum": [
+        "native-api",
+        "host-contract",
+        "declarative-host-integration",
+        "state-contract",
+        "trusted-extension",
+        "distribution-policy",
+        "internal-provider-seam"
+      ]
+    },
+    "argument": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "kind", "required", "valueContract"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "kind": { "enum": ["positional", "option", "flag"] },
+        "required": { "type": "boolean" },
+        "valueContract": { "type": "string", "minLength": 1 }
+      }
+    },
+    "exitContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profile", "deviations"],
+      "properties": {
+        "profile": { "const": "host-contract-v1" },
+        "deviations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["exitCode", "class", "evidence"],
+            "properties": {
+              "exitCode": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 255
+              },
+              "class": { "type": "string", "minLength": 1 },
+              "evidence": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    "backendUnavailableSemantics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["exitCode", "evidence"],
+      "properties": {
+        "exitCode": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        },
+        "evidence": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "exitCode": { "not": { "const": 69 } } },
+            "required": ["exitCode"]
+          },
+          "then": {
+            "properties": { "evidence": { "minItems": 1 } }
+          }
+        }
+      ]
+    },
+    "upstreamEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["compatibilityTuple", "sources"],
+      "properties": {
+        "compatibilityTuple": { "$ref": "#/$defs/compatibilityTuple" },
+        "sources": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "routerMetadata": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        }
+      }
+    },
+    "hostContractCapability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "capabilityId",
+        "schemaVersion",
+        "semanticDomain",
+        "operation",
+        "executionClass",
+        "canonicalRoute",
+        "flatBackingBinary",
+        "acceptedArguments",
+        "stdoutContract",
+        "stderrContract",
+        "exitContract",
+        "sideEffects",
+        "idempotence",
+        "retrySemantics",
+        "deadlineSemantics",
+        "backendUnavailableSemantics",
+        "requiredHostCapabilities",
+        "privilegeModel",
+        "supportState",
+        "stability",
+        "upstreamEvidence",
+        "intentionalDeviations"
+      ],
+      "properties": {
+        "capabilityId": { "$ref": "#/$defs/capabilityId" },
+        "schemaVersion": { "const": 1 },
+        "semanticDomain": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "operation": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*(?:\\.[a-z][a-z0-9-]*)*$"
+        },
+        "executionClass": {
+          "enum": ["query", "mutation", "interactive"]
+        },
+        "canonicalRoute": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*(?: [a-z0-9][a-z0-9-]*)*$"
+        },
+        "flatBackingBinary": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^omarchy-[a-z0-9][a-z0-9-]*$"
+            },
+            { "type": "null" }
+          ]
+        },
+        "acceptedArguments": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/argument" }
+        },
+        "stdoutContract": { "type": "string", "minLength": 1 },
+        "stderrContract": { "type": "string", "minLength": 1 },
+        "exitContract": { "$ref": "#/$defs/exitContract" },
+        "sideEffects": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "idempotence": {
+          "enum": ["idempotent", "non-idempotent", "conditional"]
+        },
+        "retrySemantics": { "type": "string", "minLength": 1 },
+        "deadlineSemantics": { "type": "string", "minLength": 1 },
+        "backendUnavailableSemantics": {
+          "$ref": "#/$defs/backendUnavailableSemantics"
+        },
+        "requiredHostCapabilities": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "privilegeModel": {
+          "enum": ["unprivileged", "authorized-runtime-api"]
+        },
+        "supportState": { "$ref": "#/$defs/supportState" },
+        "stability": { "enum": ["provisional", "stable"] },
+        "upstreamEvidence": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/upstreamEvidence" }
+        },
+        "intentionalDeviations": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        }
+      }
+    },
+    "hostContractRegistry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "documentType",
+        "schemaVersion",
+        "capabilityIdRule",
+        "registryState",
+        "capabilities"
+      ],
+      "properties": {
+        "documentType": { "const": "host-contract" },
+        "schemaVersion": { "const": 1 },
+        "capabilityIdRule": { "const": "semanticDomain.operation" },
+        "registryState": { "enum": ["schema-only", "authoritative"] },
+        "capabilities": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/hostContractCapability" }
+        }
+      }
+    },
+    "statePath": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "access", "owner"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "access": { "enum": ["read", "write", "read-write"] },
+        "owner": {
+          "enum": [
+            "immutable-upstream-source",
+            "immutable-runtime-root",
+            "user-config-extension",
+            "upstream-compatible-runtime-state",
+            "omanixy-private-state",
+            "declarative-host-policy"
+          ]
+        }
+      }
+    },
+    "crossing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "crossingId",
+        "compatibilityTuple",
+        "sourceGraph",
+        "sourcePath",
+        "sourceSymbolOrLocation",
+        "featureOrPlugin",
+        "semanticDomain",
+        "semanticOperation",
+        "mechanism",
+        "rawTarget",
+        "kind",
+        "transport",
+        "disposition",
+        "supportState",
+        "capabilityId",
+        "statePaths",
+        "requiredServices",
+        "requiredHostCapabilities",
+        "currentOmanixyTreatment",
+        "sourceMutationId",
+        "behavioralTest",
+        "reason"
+      ],
+      "properties": {
+        "crossingId": { "type": "string", "minLength": 1 },
+        "compatibilityTuple": { "$ref": "#/$defs/compatibilityTuple" },
+        "sourceGraph": { "enum": ["upstream", "post-overlay"] },
+        "sourcePath": { "type": "string", "minLength": 1 },
+        "sourceSymbolOrLocation": { "type": "string", "minLength": 1 },
+        "featureOrPlugin": { "type": "string", "minLength": 1 },
+        "semanticDomain": { "type": "string", "minLength": 1 },
+        "semanticOperation": { "type": "string", "minLength": 1 },
+        "mechanism": { "type": "string", "minLength": 1 },
+        "rawTarget": { "type": "string", "minLength": 1 },
+        "kind": { "$ref": "#/$defs/crossingKind" },
+        "transport": { "type": "string", "minLength": 1 },
+        "disposition": { "type": "string", "minLength": 1 },
+        "supportState": { "$ref": "#/$defs/supportState" },
+        "capabilityId": {
+          "oneOf": [
+            { "$ref": "#/$defs/capabilityId" },
+            { "type": "null" }
+          ]
+        },
+        "statePaths": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/statePath" }
+        },
+        "requiredServices": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "requiredHostCapabilities": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "currentOmanixyTreatment": { "type": "string", "minLength": 1 },
+        "sourceMutationId": {
+          "oneOf": [
+            { "type": "string", "minLength": 1 },
+            { "type": "null" }
+          ]
+        },
+        "behavioralTest": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "reason": { "type": "string", "minLength": 1 }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "kind": { "const": "host-contract" } },
+            "required": ["kind"]
+          },
+          "then": {
+            "properties": {
+              "capabilityId": { "$ref": "#/$defs/capabilityId" }
+            }
+          },
+          "else": {
+            "properties": { "capabilityId": { "type": "null" } }
+          }
+        }
+      ]
+    },
+    "quattroCrossingInventory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "documentType",
+        "schemaVersion",
+        "compatibilityTuple",
+        "crossings"
+      ],
+      "properties": {
+        "documentType": { "const": "quattro-host-crossings" },
+        "schemaVersion": { "const": 1 },
+        "compatibilityTuple": { "$ref": "#/$defs/compatibilityTuple" },
+        "crossings": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/crossing" }
+        }
+      }
+    },
+    "overlayMutation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mutationId",
+        "compatibilityTuple",
+        "sourcePath",
+        "mutationKind",
+        "crossingIds",
+        "reason",
+        "behavioralProof",
+        "temporary",
+        "removalCondition"
+      ],
+      "properties": {
+        "mutationId": { "type": "string", "minLength": 1 },
+        "compatibilityTuple": { "$ref": "#/$defs/compatibilityTuple" },
+        "sourcePath": { "type": "string", "minLength": 1 },
+        "mutationKind": { "type": "string", "minLength": 1 },
+        "crossingIds": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "reason": { "type": "string", "minLength": 1 },
+        "behavioralProof": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "temporary": { "type": "boolean" },
+        "removalCondition": {
+          "oneOf": [
+            { "type": "string", "minLength": 1 },
+            { "type": "null" }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "temporary": { "const": true } },
+            "required": ["temporary"]
+          },
+          "then": {
+            "properties": {
+              "removalCondition": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      ]
+    },
+    "portabilityOverlay": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "documentType",
+        "schemaVersion",
+        "compatibilityTuple",
+        "mutations"
+      ],
+      "properties": {
+        "documentType": { "const": "portability-overlay" },
+        "schemaVersion": { "const": 1 },
+        "compatibilityTuple": { "$ref": "#/$defs/compatibilityTuple" },
+        "mutations": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/overlayMutation" }
+        }
+      }
+    }
+  }
+}

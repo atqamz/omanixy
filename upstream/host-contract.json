@@ -1,0 +1,7 @@
+{
+  "documentType": "host-contract",
+  "schemaVersion": 1,
+  "capabilityIdRule": "semanticDomain.operation",
+  "registryState": "schema-only",
+  "capabilities": []
+}
