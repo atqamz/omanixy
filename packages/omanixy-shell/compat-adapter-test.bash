@@ -3,7 +3,9 @@
 set -euo pipefail
 
 adapter_dir=${OMANIXY_ADAPTER_DIR:-${BASH_SOURCE[0]%/*}}
-if (
+set +e
+(
+  set -e
   source "$adapter_dir/adapters/common.bash"
   source "$adapter_dir/adapters/weather.bash"
   source "$adapter_dir/adapters/audio.bash"
@@ -13,11 +15,9 @@ if (
   source "$adapter_dir/adapters/notification.bash"
   source "$adapter_dir/adapters/clipboard.bash"
   source "$adapter_dir/compat-adapter.bash"
-); then
-  exit 0
-else
-  status=$?
-fi
+)
+status=$?
+set -e
 
 [[ $status == 69 ]] && exit 127
 exit "$status"
