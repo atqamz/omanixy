@@ -14,6 +14,7 @@ test -s docs/runtime.md
 test -s docs/adoption.md
 test -s upstream/omarchy.yaml
 test -s upstream/porting-matrix.yaml
+test -s upstream/compatibility-tuple.json
 test -s release-please-config.json
 test -s .release-please-manifest.json
 test -s version.txt
@@ -31,4 +32,5 @@ test -x .githooks/pre-commit
 test -x .githooks/commit-msg
 test -s .github/copilot-instructions.md
 
+python3 test/compatibility-tuple.py
 nix flake check --show-trace --print-build-logs --no-write-lock-file ./examples/standalone
