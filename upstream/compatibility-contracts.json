@@ -80,7 +80,7 @@
     "omarchy-weather-status": "weather-network"
   },
   "adapter": "packages/omanixy-shell/compat-adapter.bash",
-  "adapterHash": "b49f7bc142e9dd5f8c2bc68827cfa9aac88566707d743f483a42fae4639b7c9c",
+  "adapterHash": "023b28f2f7ee37ec850c03dcebc3d60df732564dea42d9de8ddd49624b68dea8",
   "adapterSources": [
     "packages/omanixy-shell/adapters/common.bash",
     "packages/omanixy-shell/adapters/weather.bash",
