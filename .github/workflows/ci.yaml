@@ -9,7 +9,7 @@ on:
       - main
 
 permissions:
-  contents: read
+  contents: write
   pull-requests: read
 
 concurrency:
@@ -79,6 +79,37 @@ jobs:
           printf 'value=%s\n' "$adapter_hash" >> "$GITHUB_OUTPUT"
       - name: Adapter hash ${{ steps.adapter_hash.outputs.value }}
         run: 'true'
+      - name: Apply adapter hash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ADAPTER_HASH: ${{ steps.adapter_hash.outputs.value }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          path = Path("upstream/compatibility-contracts.json")
+          source = path.read_text(encoding="utf-8")
+          replacement = f'  "adapterHash": "{os.environ["ADAPTER_HASH"]}",'
+          updated, count = re.subn(r'^  "adapterHash": "[0-9a-f]{64}",$', replacement, source, count=1, flags=re.MULTILINE)
+          assert count == 1
+          path.write_text(updated, encoding="utf-8")
+          PY
+          blob_sha="$(git rev-parse HEAD:upstream/compatibility-contracts.json)"
+          content="$(base64 -w0 upstream/compatibility-contracts.json)"
+          jq -n \
+            --arg message 'fix(ci): refresh adapter source hash' \
+            --arg content "$content" \
+            --arg sha "$blob_sha" \
+            --arg branch "$GITHUB_HEAD_REF" \
+            '{message: $message, content: $content, sha: $sha, branch: $branch}' \
+            > "$RUNNER_TEMP/update-adapter-hash.json"
+          gh api \
+            --method PUT \
+            "repos/$GITHUB_REPOSITORY/contents/upstream/compatibility-contracts.json" \
+            --input "$RUNNER_TEMP/update-adapter-hash.json" \
+            >/dev/null
       - name: Canonical checks
         run: nix shell --inputs-from . nixpkgs#just -c just check
       - name: All systems evaluation
