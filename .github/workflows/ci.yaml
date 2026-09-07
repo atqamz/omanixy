@@ -62,6 +62,23 @@ jobs:
         run: |
           nix fmt
           git diff --exit-code
+      - name: Compute adapter hash
+        id: adapter_hash
+        run: |
+          manifest=upstream/compatibility-contracts.json
+          adapter_hash="$(
+            {
+              first=true
+              while IFS= read -r source; do
+                if [[ $first == false ]]; then printf '\n'; fi
+                first=false
+                cat "$source"
+              done < <(jq -er '.adapterSources[]' "$manifest")
+            } | sha256sum | awk '{print $1}'
+          )"
+          printf 'value=%s\n' "$adapter_hash" >> "$GITHUB_OUTPUT"
+      - name: Adapter hash ${{ steps.adapter_hash.outputs.value }}
+        run: 'true'
       - name: Canonical checks
         run: nix shell --inputs-from . nixpkgs#just -c just check
       - name: All systems evaluation
