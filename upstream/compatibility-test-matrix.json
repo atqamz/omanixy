@@ -21,6 +21,8 @@
     "backendFailure": {
       "default": 1,
       "omarchy-audio-sink-availability": 4,
+      "omarchy-bluetooth-power": 124,
+      "omarchy-powerprofiles-list": 124,
       "omarchy-shell": 1
     },
     "stdout": 0,
