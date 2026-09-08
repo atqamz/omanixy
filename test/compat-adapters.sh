@@ -3,6 +3,10 @@ set -euo pipefail
 
 repo=$(cd "${1:?repository path required}" && pwd)
 runtime_bin=${3:-}
+expected_missing_backend_status=127
+if [[ -n "$runtime_bin" ]]; then
+  expected_missing_backend_status=69
+fi
 adapter="$repo/packages/omanixy-shell/compat-adapter-test.bash"
 test_root=$(mktemp -d)
 bin="$test_root/bin"
@@ -1493,7 +1497,7 @@ run_missing_backend() {
   else
     status=$?
   fi
-  test "$status" -eq 127
+  test "$status" -eq "$expected_missing_backend_status"
   grep -Fq "required backend is unavailable: $backend" "$test_root/error"
   record_case "$helper" missingBackend
 }
@@ -1533,7 +1537,7 @@ if XDG_STATE_HOME="$test_root/no-weather-state" PATH="$missing_bin" HOME="$home"
 else
   weather_location_missing_status=$?
 fi
-test "$weather_location_missing_status" -eq 127
+test "$weather_location_missing_status" -eq "$expected_missing_backend_status"
 grep -Fq 'required backend is unavailable: curl' "$test_root/error"
 record_case omarchy-weather-location missingBackend
 
