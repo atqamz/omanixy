@@ -267,6 +267,438 @@
       "intentionalDeviations": [
         "Omanixy derives availability from structured PipeWire node/port data instead of preserving the pinned helper's PulseAudio/tuning-helper implementation."
       ]
+    },
+    {
+      "capabilityId": "network.status.query",
+      "schemaVersion": 1,
+      "semanticDomain": "network",
+      "operation": "status.query",
+      "executionClass": "query",
+      "canonicalRoute": "network status",
+      "flatBackingBinary": "omarchy-network-status",
+      "acceptedArguments": [
+        {
+          "name": "verbose",
+          "kind": "flag",
+          "required": false,
+          "valueContract": "Optional --verbose flag requests detailed interface, address, link, and bounded latency telemetry."
+        }
+      ],
+      "stdoutContract": "Without --verbose, one tab-separated disconnected, ethernet, or wifi status row. With --verbose, one tab-separated key/value record per line.",
+      "stderrContract": "Diagnostics only; no success data is written to stderr.",
+      "exitContract": {
+        "profile": "host-contract-v1",
+        "deviations": []
+      },
+      "sideEffects": [
+        "Verbose queries may send bounded ICMP probes to the active gateway and 1.1.1.1."
+      ],
+      "idempotence": "idempotent",
+      "retrySemantics": "Retry is safe; every result is recomputed from current network state.",
+      "deadlineSemantics": "Each external backend call is bounded by Omanixy timed(); direct deadline expiration returns 124. A higher-level operation that catches a timed backend failure while deriving a domain result may return domain failure 1 with a diagnostic.",
+      "backendUnavailableSemantics": {
+        "exitCode": 69,
+        "evidence": [
+          "packages/omanixy-shell/adapters/common.bash",
+          "test/host-contract-status.sh",
+          "test/compat-adapters.sh"
+        ]
+      },
+      "requiredHostCapabilities": [
+        "network-manager"
+      ],
+      "privilegeModel": "unprivileged",
+      "supportState": "supported",
+      "stability": "provisional",
+      "upstreamEvidence": [
+        {
+          "compatibilityTuple": {
+            "omarchyRevision": "f0020448ca87329199de7cb12f2015ebc4a3e5e7",
+            "quickshellRevision": "28771c7c74b42e20afca0b1b63980cb46515537c",
+            "nixpkgsRevision": "241313f4e8e508cb9b13278c2b0fa25b9ca27163",
+            "homeManagerRevision": "3ee51fbdac8c8bdfe1e7e1fcaba6520a563f394f"
+          },
+          "sources": [
+            "bin/omarchy-network-status",
+            "shell/plugins/panels/network/"
+          ],
+          "routerMetadata": [
+            "bin/omarchy",
+            "bin/omarchy-network-status"
+          ]
+        }
+      ],
+      "intentionalDeviations": [
+        "Omanixy uses locale-stable bounded backend calls and structured route/address inspection while preserving the shell-consumed status semantics."
+      ]
+    },
+    {
+      "capabilityId": "network.password.query",
+      "schemaVersion": 1,
+      "semanticDomain": "network",
+      "operation": "password.query",
+      "executionClass": "query",
+      "canonicalRoute": "network password",
+      "flatBackingBinary": "omarchy-network-password",
+      "acceptedArguments": [
+        {
+          "name": "interface",
+          "kind": "positional",
+          "required": true,
+          "valueContract": "Active Wi-Fi NetworkManager interface name."
+        }
+      ],
+      "stdoutContract": "Exactly the active non-enterprise Wi-Fi password followed by a newline.",
+      "stderrContract": "Diagnostics only; secrets are never written to stderr.",
+      "exitContract": {
+        "profile": "host-contract-v1",
+        "deviations": []
+      },
+      "sideEffects": [],
+      "idempotence": "idempotent",
+      "retrySemantics": "Retry is safe; the secret is reread from the active NetworkManager connection.",
+      "deadlineSemantics": "Each external backend call is bounded by Omanixy timed(); direct deadline expiration returns 124. A higher-level operation that catches a timed backend failure while deriving a domain result may return domain failure 1 with a diagnostic.",
+      "backendUnavailableSemantics": {
+        "exitCode": 69,
+        "evidence": [
+          "packages/omanixy-shell/adapters/common.bash",
+          "test/host-contract-status.sh",
+          "test/compat-adapters.sh"
+        ]
+      },
+      "requiredHostCapabilities": [
+        "network-manager"
+      ],
+      "privilegeModel": "authorized-runtime-api",
+      "supportState": "supported",
+      "stability": "provisional",
+      "upstreamEvidence": [
+        {
+          "compatibilityTuple": {
+            "omarchyRevision": "f0020448ca87329199de7cb12f2015ebc4a3e5e7",
+            "quickshellRevision": "28771c7c74b42e20afca0b1b63980cb46515537c",
+            "nixpkgsRevision": "241313f4e8e508cb9b13278c2b0fa25b9ca27163",
+            "homeManagerRevision": "3ee51fbdac8c8bdfe1e7e1fcaba6520a563f394f"
+          },
+          "sources": [
+            "bin/omarchy-network-password",
+            "shell/plugins/panels/wifiqr/"
+          ],
+          "routerMetadata": [
+            "bin/omarchy",
+            "bin/omarchy-network-password"
+          ]
+        }
+      ],
+      "intentionalDeviations": [
+        "Omanixy rejects enterprise credentials and unsupported multiline secret data explicitly and bounds NetworkManager requests."
+      ]
+    },
+    {
+      "capabilityId": "network.qr.generate",
+      "schemaVersion": 1,
+      "semanticDomain": "network",
+      "operation": "qr.generate",
+      "executionClass": "query",
+      "canonicalRoute": "network qr",
+      "flatBackingBinary": "omarchy-network-qr",
+      "acceptedArguments": [
+        {
+          "name": "meta",
+          "kind": "flag",
+          "required": false,
+          "valueContract": "Optional --meta flag prepends interface, security type, and SSID metadata."
+        },
+        {
+          "name": "interface",
+          "kind": "positional",
+          "required": false,
+          "valueContract": "Optional active Wi-Fi interface; when omitted the active Wi-Fi connection is discovered."
+        }
+      ],
+      "stdoutContract": "Optional meta TAB interface TAB security TAB ssid row followed by a QR matrix encoded as lines of 0 and 1 characters.",
+      "stderrContract": "Diagnostics only; Wi-Fi credentials are never written to stderr.",
+      "exitContract": {
+        "profile": "host-contract-v1",
+        "deviations": []
+      },
+      "sideEffects": [],
+      "idempotence": "idempotent",
+      "retrySemantics": "Retry is safe; connection data and QR output are regenerated from current NetworkManager state.",
+      "deadlineSemantics": "Each external backend call is bounded by Omanixy timed(); direct deadline expiration returns 124. A higher-level operation that catches a timed backend failure while deriving a domain result may return domain failure 1 with a diagnostic.",
+      "backendUnavailableSemantics": {
+        "exitCode": 69,
+        "evidence": [
+          "packages/omanixy-shell/adapters/common.bash",
+          "test/host-contract-status.sh",
+          "test/compat-adapters.sh"
+        ]
+      },
+      "requiredHostCapabilities": [
+        "network-manager"
+      ],
+      "privilegeModel": "authorized-runtime-api",
+      "supportState": "supported",
+      "stability": "provisional",
+      "upstreamEvidence": [
+        {
+          "compatibilityTuple": {
+            "omarchyRevision": "f0020448ca87329199de7cb12f2015ebc4a3e5e7",
+            "quickshellRevision": "28771c7c74b42e20afca0b1b63980cb46515537c",
+            "nixpkgsRevision": "241313f4e8e508cb9b13278c2b0fa25b9ca27163",
+            "homeManagerRevision": "3ee51fbdac8c8bdfe1e7e1fcaba6520a563f394f"
+          },
+          "sources": [
+            "bin/omarchy-network-qr",
+            "shell/plugins/panels/wifiqr/"
+          ],
+          "routerMetadata": [
+            "bin/omarchy",
+            "bin/omarchy-network-qr"
+          ]
+        }
+      ],
+      "intentionalDeviations": [
+        "Omanixy rejects enterprise Wi-Fi sharing, validates connection data, and bounds both NetworkManager and QR encoder calls."
+      ]
+    },
+    {
+      "capabilityId": "network.band.query",
+      "schemaVersion": 1,
+      "semanticDomain": "network",
+      "operation": "band.query",
+      "executionClass": "query",
+      "canonicalRoute": "network band",
+      "flatBackingBinary": "omarchy-network-band",
+      "acceptedArguments": [],
+      "stdoutContract": "Three tab-separated records: band, available, and selected, each followed by a newline.",
+      "stderrContract": "Diagnostics only; no success data is written to stderr.",
+      "exitContract": {
+        "profile": "host-contract-v1",
+        "deviations": []
+      },
+      "sideEffects": [],
+      "idempotence": "idempotent",
+      "retrySemantics": "Retry is safe; current and available bands are recomputed from NetworkManager and wireless link state.",
+      "deadlineSemantics": "Each external backend call is bounded by Omanixy timed(); direct deadline expiration returns 124. A higher-level operation that catches a timed backend failure while deriving a domain result may return domain failure 1 with a diagnostic.",
+      "backendUnavailableSemantics": {
+        "exitCode": 69,
+        "evidence": [
+          "packages/omanixy-shell/adapters/common.bash",
+          "test/host-contract-status.sh",
+          "test/compat-adapters.sh"
+        ]
+      },
+      "requiredHostCapabilities": [
+        "network-manager"
+      ],
+      "privilegeModel": "unprivileged",
+      "supportState": "supported",
+      "stability": "provisional",
+      "upstreamEvidence": [
+        {
+          "compatibilityTuple": {
+            "omarchyRevision": "f0020448ca87329199de7cb12f2015ebc4a3e5e7",
+            "quickshellRevision": "28771c7c74b42e20afca0b1b63980cb46515537c",
+            "nixpkgsRevision": "241313f4e8e508cb9b13278c2b0fa25b9ca27163",
+            "homeManagerRevision": "3ee51fbdac8c8bdfe1e7e1fcaba6520a563f394f"
+          },
+          "sources": [
+            "bin/omarchy-network-band",
+            "shell/plugins/panels/network/"
+          ],
+          "routerMetadata": [
+            "bin/omarchy",
+            "bin/omarchy-network-band"
+          ]
+        }
+      ],
+      "intentionalDeviations": [
+        "Omanixy reports current, available, and selected band state explicitly using bounded locale-stable NetworkManager and wireless inspection."
+      ]
+    },
+    {
+      "capabilityId": "network.band.set",
+      "schemaVersion": 1,
+      "semanticDomain": "network",
+      "operation": "band.set",
+      "executionClass": "mutation",
+      "canonicalRoute": "network band",
+      "flatBackingBinary": "omarchy-network-band",
+      "acceptedArguments": [
+        {
+          "name": "band",
+          "kind": "positional",
+          "required": true,
+          "valueContract": "Exactly one of auto, 2.4, 5, or 6."
+        }
+      ],
+      "stdoutContract": "No stdout on success.",
+      "stderrContract": "Diagnostics only; rollback and partial-failure diagnostics are written to stderr.",
+      "exitContract": {
+        "profile": "host-contract-v1",
+        "deviations": []
+      },
+      "sideEffects": [
+        "Changes the active NetworkManager connection's Wi-Fi band and reassociates it; restores the previous band when activation or verification fails when possible."
+      ],
+      "idempotence": "conditional",
+      "retrySemantics": "Retry only after rereading active profile and link state; the implementation verifies the requested band and attempts rollback before reporting failure.",
+      "deadlineSemantics": "Each external backend call is bounded by Omanixy timed(); direct deadline expiration returns 124. A higher-level operation that catches a timed backend failure for activation, verification, or rollback may return domain failure 1 with a diagnostic.",
+      "backendUnavailableSemantics": {
+        "exitCode": 69,
+        "evidence": [
+          "packages/omanixy-shell/adapters/common.bash",
+          "test/host-contract-status.sh",
+          "test/compat-adapters.sh"
+        ]
+      },
+      "requiredHostCapabilities": [
+        "network-manager"
+      ],
+      "privilegeModel": "authorized-runtime-api",
+      "supportState": "supported",
+      "stability": "provisional",
+      "upstreamEvidence": [
+        {
+          "compatibilityTuple": {
+            "omarchyRevision": "f0020448ca87329199de7cb12f2015ebc4a3e5e7",
+            "quickshellRevision": "28771c7c74b42e20afca0b1b63980cb46515537c",
+            "nixpkgsRevision": "241313f4e8e508cb9b13278c2b0fa25b9ca27163",
+            "homeManagerRevision": "3ee51fbdac8c8bdfe1e7e1fcaba6520a563f394f"
+          },
+          "sources": [
+            "bin/omarchy-network-band",
+            "shell/plugins/panels/network/"
+          ],
+          "routerMetadata": [
+            "bin/omarchy",
+            "bin/omarchy-network-band"
+          ]
+        }
+      ],
+      "intentionalDeviations": [
+        "Omanixy validates band availability before mutation and verifies post-association link state with bounded rollback on failure."
+      ]
+    },
+    {
+      "capabilityId": "network.dns.query",
+      "schemaVersion": 1,
+      "semanticDomain": "network",
+      "operation": "dns.query",
+      "executionClass": "query",
+      "canonicalRoute": "dns",
+      "flatBackingBinary": "omarchy-dns",
+      "acceptedArguments": [],
+      "stdoutContract": "Exactly one provider name followed by a newline: DHCP, Cloudflare, Google, or Custom.",
+      "stderrContract": "Diagnostics only; no success data is written to stderr.",
+      "exitContract": {
+        "profile": "host-contract-v1",
+        "deviations": []
+      },
+      "sideEffects": [],
+      "idempotence": "idempotent",
+      "retrySemantics": "Retry is safe; the provider is derived from current active NetworkManager connection state.",
+      "deadlineSemantics": "Each external backend call is bounded by Omanixy timed(); direct deadline expiration returns 124. A higher-level operation that catches a timed backend failure while deriving a domain result may return domain failure 1 with a diagnostic.",
+      "backendUnavailableSemantics": {
+        "exitCode": 69,
+        "evidence": [
+          "packages/omanixy-shell/adapters/common.bash",
+          "test/host-contract-status.sh",
+          "test/compat-adapters.sh"
+        ]
+      },
+      "requiredHostCapabilities": [
+        "network-manager"
+      ],
+      "privilegeModel": "unprivileged",
+      "supportState": "supported",
+      "stability": "provisional",
+      "upstreamEvidence": [
+        {
+          "compatibilityTuple": {
+            "omarchyRevision": "f0020448ca87329199de7cb12f2015ebc4a3e5e7",
+            "quickshellRevision": "28771c7c74b42e20afca0b1b63980cb46515537c",
+            "nixpkgsRevision": "241313f4e8e508cb9b13278c2b0fa25b9ca27163",
+            "homeManagerRevision": "3ee51fbdac8c8bdfe1e7e1fcaba6520a563f394f"
+          },
+          "sources": [
+            "bin/omarchy-dns",
+            "shell/plugins/panels/network/"
+          ],
+          "routerMetadata": [
+            "bin/omarchy",
+            "bin/omarchy-dns"
+          ]
+        }
+      ],
+      "intentionalDeviations": [
+        "Omanixy derives DNS ownership from the active NetworkManager profile instead of reading or mutating Omarchy-owned /etc policy files."
+      ]
+    },
+    {
+      "capabilityId": "network.dns.set",
+      "schemaVersion": 1,
+      "semanticDomain": "network",
+      "operation": "dns.set",
+      "executionClass": "mutation",
+      "canonicalRoute": "dns",
+      "flatBackingBinary": "omarchy-dns",
+      "acceptedArguments": [
+        {
+          "name": "provider",
+          "kind": "positional",
+          "required": true,
+          "valueContract": "Exactly one of DHCP, Cloudflare, or Google. Custom is intentionally not a portable mutation."
+        }
+      ],
+      "stdoutContract": "No stdout on success.",
+      "stderrContract": "Diagnostics only; rollback and partial-failure diagnostics are written to stderr.",
+      "exitContract": {
+        "profile": "host-contract-v1",
+        "deviations": []
+      },
+      "sideEffects": [
+        "Changes ipv4.ignore-auto-dns and ipv4.dns on the active NetworkManager connection and reactivates it; restores previous values when application or verification fails when possible."
+      ],
+      "idempotence": "conditional",
+      "retrySemantics": "Retry only after rereading the active profile; the implementation verifies the requested provider state and attempts rollback before reporting failure.",
+      "deadlineSemantics": "Each external backend call is bounded by Omanixy timed(); direct deadline expiration returns 124. A higher-level operation that catches a timed backend failure for activation, verification, or rollback may return domain failure 1 with a diagnostic.",
+      "backendUnavailableSemantics": {
+        "exitCode": 69,
+        "evidence": [
+          "packages/omanixy-shell/adapters/common.bash",
+          "test/host-contract-status.sh",
+          "test/compat-adapters.sh"
+        ]
+      },
+      "requiredHostCapabilities": [
+        "network-manager"
+      ],
+      "privilegeModel": "authorized-runtime-api",
+      "supportState": "supported",
+      "stability": "provisional",
+      "upstreamEvidence": [
+        {
+          "compatibilityTuple": {
+            "omarchyRevision": "f0020448ca87329199de7cb12f2015ebc4a3e5e7",
+            "quickshellRevision": "28771c7c74b42e20afca0b1b63980cb46515537c",
+            "nixpkgsRevision": "241313f4e8e508cb9b13278c2b0fa25b9ca27163",
+            "homeManagerRevision": "3ee51fbdac8c8bdfe1e7e1fcaba6520a563f394f"
+          },
+          "sources": [
+            "bin/omarchy-dns",
+            "shell/plugins/panels/network/"
+          ],
+          "routerMetadata": [
+            "bin/omarchy",
+            "bin/omarchy-dns"
+          ]
+        }
+      ],
+      "intentionalDeviations": [
+        "Omanixy limits portable DNS mutation to DHCP, Cloudflare, and Google through NetworkManager; upstream Custom distribution-policy editing is intentionally excluded."
+      ]
     }
   ]
 }
