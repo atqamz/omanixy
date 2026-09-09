@@ -47,8 +47,7 @@
         ]
       },
       "requiredHostCapabilities": [
-        "pipewire-control",
-        "pulseaudio-compatibility-control"
+        "audio-control"
       ],
       "privilegeModel": "unprivileged",
       "supportState": "supported",
@@ -118,8 +117,7 @@
         ]
       },
       "requiredHostCapabilities": [
-        "pipewire-control",
-        "pulseaudio-compatibility-control"
+        "audio-default-output"
       ],
       "privilegeModel": "unprivileged",
       "supportState": "supported",
@@ -182,7 +180,7 @@
         ]
       },
       "requiredHostCapabilities": [
-        "pulseaudio-compatibility-inspection"
+        "audio-control"
       ],
       "privilegeModel": "unprivileged",
       "supportState": "supported",
@@ -243,7 +241,7 @@
         ]
       },
       "requiredHostCapabilities": [
-        "pipewire-inspection"
+        "audio-control"
       ],
       "privilegeModel": "unprivileged",
       "supportState": "supported",
