@@ -7,6 +7,7 @@ compatibility_root=${3:?compatibility root path required}
 compatibility_bin=${4:?compatibility bin path required}
 compatibility_probes=${5:?compatibility probes path required}
 manifest=$repo/upstream/compatibility-contracts.json
+registry=$repo/upstream/host-contract.json
 snapshot=$repo/upstream/quattro-contracts.json
 checker=$repo/scripts/check-contract-closure
 test_script=$repo/test/compat-adapters.sh
@@ -22,6 +23,20 @@ snapshot_b=$test_root/b.json
 "${PYTHON:-python3}" "$repo/scripts/audit-quattro-contracts" "$pinned_source" > "$snapshot_b"
 cmp "$snapshot_a" "$snapshot_b"
 cmp "$snapshot_a" "$snapshot"
+
+router_json=$test_root/router.json
+"${BASH:-bash}" "$pinned_source/bin/omarchy" commands --all --json > "$router_json"
+jq -e '((.commands // .) | type) == "array"' "$router_json" >/dev/null
+while IFS=$'\t' read -r capability binary route; do
+  expected_route="omarchy $route"
+  matches=$(jq -r --arg binary "$binary" --arg route "$expected_route" \
+    '[(.commands // .)[] | select(.binary == $binary and .route == $route)] | length' "$router_json")
+  if [[ $matches != 1 ]]; then
+    printf 'Host Contract router evidence mismatch: capability=%s binary=%s route=%s matches=%s\n' \
+      "$capability" "$binary" "$expected_route" "$matches" >&2
+    exit 1
+  fi
+done < <(jq -r '.capabilities[] | [.capabilityId, .flatBackingBinary, .canonicalRoute] | @tsv' "$registry")
 
 checker_probes=$compatibility_probes
 jq -e '.helpers | index("omarchy-remove-launcher-entry") | not' \
