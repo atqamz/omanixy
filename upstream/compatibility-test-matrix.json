@@ -15,7 +15,7 @@
       "omarchy-shell": 1
     },
     "missingBackend": {
-      "default": 127,
+      "default": 69,
       "omarchy-shell": 1
     },
     "backendFailure": {

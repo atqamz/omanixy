@@ -33,4 +33,5 @@ test -x .githooks/commit-msg
 test -s .github/copilot-instructions.md
 
 python3 test/compatibility-tuple.py
+bash test/host-contract-status.sh .
 nix flake check --show-trace --print-build-logs --no-write-lock-file ./examples/standalone

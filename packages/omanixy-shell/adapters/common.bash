@@ -14,7 +14,7 @@ fail() {
 }
 
 need() {
-  command -v "$1" >/dev/null 2>&1 || fail "$name: required backend is unavailable: $1" 127
+  command -v "$1" >/dev/null 2>&1 || fail "$name: required backend is unavailable: $1" 69
 }
 
 [[ $state_home == /* ]] || fail "$name: XDG_STATE_HOME must be an absolute path"
@@ -31,6 +31,7 @@ timed() {
   fi
   if [[ $status == 124 || $status == 137 || $status == 143 ]]; then
     printf '%s: %s timed out\n' "$name" "$label" >&2
+    return 124
   fi
   return "$status"
 }
