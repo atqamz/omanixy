@@ -66,6 +66,7 @@ jq -e '
 jq -e \
   --slurpfile tuple "$tuple" \
   --slurpfile legacy "$legacy" \
+  --slurpfile contract_schema "$schema" \
   '
     ($tuple[0] | {
       omarchyRevision: .omarchy.revision,
@@ -73,11 +74,18 @@ jq -e \
       nixpkgsRevision: .nixpkgs.revision,
       homeManagerRevision: .homeManager.revision
     }) as $expectedTuple
+    | $contract_schema[0]."$defs".hostContractCapability.required as $requiredFields
+    | ($contract_schema[0]."$defs".hostContractCapability.properties | keys) as $allowedFields
     | .documentType == "host-contract"
       and .schemaVersion == 1
       and .capabilityIdRule == "semanticDomain.operation"
       and .registryState == "schema-only"
       and (.capabilities | type) == "array"
+      and all(.capabilities[];
+        . as $capability
+        | all($requiredFields[] as $field; $capability | has($field))
+          and (((($capability | keys) - $allowedFields) | length) == 0)
+      )
       and all(.capabilities[]; .capabilityId == (.semanticDomain + "." + .operation))
       and (([.capabilities[].capabilityId] | length) == ([.capabilities[].capabilityId] | unique | length))
       and all(.capabilities[];
