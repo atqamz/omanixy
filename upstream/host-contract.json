@@ -3,5 +3,272 @@
   "schemaVersion": 1,
   "capabilityIdRule": "semanticDomain.operation",
   "registryState": "schema-only",
-  "capabilities": []
+  "capabilities": [
+    {
+      "capabilityId": "audio.default-input.set",
+      "schemaVersion": 1,
+      "semanticDomain": "audio",
+      "operation": "default-input.set",
+      "executionClass": "mutation",
+      "canonicalRoute": "audio input set default",
+      "flatBackingBinary": "omarchy-audio-input-set-default",
+      "acceptedArguments": [
+        {
+          "name": "node-id",
+          "kind": "positional",
+          "required": true,
+          "valueContract": "Decimal PipeWire Audio/Source node ID."
+        },
+        {
+          "name": "source-name",
+          "kind": "positional",
+          "required": true,
+          "valueContract": "Exact PipeWire source node.name matching node-id."
+        }
+      ],
+      "stdoutContract": "No stdout on success.",
+      "stderrContract": "Diagnostics only; no success data is written to stderr.",
+      "exitContract": {
+        "profile": "host-contract-v1",
+        "deviations": []
+      },
+      "sideEffects": [
+        "Changes the PipeWire/PulseAudio default input and moves active application source streams; rolls back on migration failure when possible."
+      ],
+      "idempotence": "conditional",
+      "retrySemantics": "Retry only after observing current state; the implementation validates the target and attempts rollback before reporting partial failure.",
+      "deadlineSemantics": "Each external backend call is bounded by Omanixy timed(); direct deadline expiration returns 124. A higher-level operation that catches a timed backend failure for validation or rollback may return domain failure 1 with a diagnostic.",
+      "backendUnavailableSemantics": {
+        "exitCode": 69,
+        "evidence": [
+          "packages/omanixy-shell/adapters/common.bash",
+          "test/host-contract-status.sh",
+          "test/compat-adapters.sh"
+        ]
+      },
+      "requiredHostCapabilities": [
+        "pipewire-control",
+        "pulseaudio-compatibility-control"
+      ],
+      "privilegeModel": "unprivileged",
+      "supportState": "supported",
+      "stability": "provisional",
+      "upstreamEvidence": [
+        {
+          "compatibilityTuple": {
+            "omarchyRevision": "f0020448ca87329199de7cb12f2015ebc4a3e5e7",
+            "quickshellRevision": "28771c7c74b42e20afca0b1b63980cb46515537c",
+            "nixpkgsRevision": "241313f4e8e508cb9b13278c2b0fa25b9ca27163",
+            "homeManagerRevision": "3ee51fbdac8c8bdfe1e7e1fcaba6520a563f394f"
+          },
+          "sources": [
+            "bin/omarchy-audio-input-set-default",
+            "shell/plugins/panels/audio/"
+          ],
+          "routerMetadata": [
+            "bin/omarchy",
+            "bin/omarchy-audio-input-set-default"
+          ]
+        }
+      ],
+      "intentionalDeviations": [
+        "Omanixy validates exact PipeWire identity, hard-fails backend errors, and applies bounded rollback instead of the pinned helper's best-effort mutations."
+      ]
+    },
+    {
+      "capabilityId": "audio.default-output.set",
+      "schemaVersion": 1,
+      "semanticDomain": "audio",
+      "operation": "default-output.set",
+      "executionClass": "mutation",
+      "canonicalRoute": "audio output set default",
+      "flatBackingBinary": "omarchy-audio-output-set-default",
+      "acceptedArguments": [
+        {
+          "name": "node-id",
+          "kind": "positional",
+          "required": true,
+          "valueContract": "Decimal PipeWire Audio/Sink node ID."
+        },
+        {
+          "name": "sink-name",
+          "kind": "positional",
+          "required": true,
+          "valueContract": "Exact PipeWire sink node.name matching node-id."
+        }
+      ],
+      "stdoutContract": "No stdout on success.",
+      "stderrContract": "Diagnostics only; no success data is written to stderr.",
+      "exitContract": {
+        "profile": "host-contract-v1",
+        "deviations": []
+      },
+      "sideEffects": [
+        "Changes the PipeWire/PulseAudio default output and moves active application sink streams; rolls back on migration failure when possible."
+      ],
+      "idempotence": "conditional",
+      "retrySemantics": "Retry only after observing current state; the implementation validates the target and attempts rollback before reporting partial failure.",
+      "deadlineSemantics": "Each external backend call is bounded by Omanixy timed(); direct deadline expiration returns 124. A higher-level operation that catches a timed backend failure for validation or rollback may return domain failure 1 with a diagnostic.",
+      "backendUnavailableSemantics": {
+        "exitCode": 69,
+        "evidence": [
+          "packages/omanixy-shell/adapters/common.bash",
+          "test/host-contract-status.sh",
+          "test/compat-adapters.sh"
+        ]
+      },
+      "requiredHostCapabilities": [
+        "pipewire-control",
+        "pulseaudio-compatibility-control"
+      ],
+      "privilegeModel": "unprivileged",
+      "supportState": "supported",
+      "stability": "provisional",
+      "upstreamEvidence": [
+        {
+          "compatibilityTuple": {
+            "omarchyRevision": "f0020448ca87329199de7cb12f2015ebc4a3e5e7",
+            "quickshellRevision": "28771c7c74b42e20afca0b1b63980cb46515537c",
+            "nixpkgsRevision": "241313f4e8e508cb9b13278c2b0fa25b9ca27163",
+            "homeManagerRevision": "3ee51fbdac8c8bdfe1e7e1fcaba6520a563f394f"
+          },
+          "sources": [
+            "bin/omarchy-audio-output-set-default",
+            "shell/plugins/panels/audio/",
+            "shell/plugins/panels/bluetooth/"
+          ],
+          "routerMetadata": [
+            "bin/omarchy",
+            "bin/omarchy-audio-output-set-default"
+          ]
+        }
+      ],
+      "intentionalDeviations": [
+        "Omanixy validates exact PipeWire identity, hard-fails backend errors, rolls back default/stream changes, and uses exit 2 for invalid arguments instead of the pinned helper's best-effort behavior."
+      ]
+    },
+    {
+      "capabilityId": "audio.output-sink.resolve",
+      "schemaVersion": 1,
+      "semanticDomain": "audio",
+      "operation": "output-sink.resolve",
+      "executionClass": "query",
+      "canonicalRoute": "audio output sink",
+      "flatBackingBinary": "omarchy-audio-output-sink",
+      "acceptedArguments": [
+        {
+          "name": "sink-name",
+          "kind": "positional",
+          "required": false,
+          "valueContract": "Optional selected sink name; when omitted the current PulseAudio default sink is inspected."
+        }
+      ],
+      "stdoutContract": "Exactly one resolved sink name followed by a newline.",
+      "stderrContract": "Diagnostics only; no success data is written to stderr.",
+      "exitContract": {
+        "profile": "host-contract-v1",
+        "deviations": []
+      },
+      "sideEffects": [],
+      "idempotence": "idempotent",
+      "retrySemantics": "Retry is safe; the result is recomputed from current audio graph state.",
+      "deadlineSemantics": "Each external backend call is bounded by Omanixy timed(); direct deadline expiration returns 124. A higher-level operation that catches a timed backend failure for validation or rollback may return domain failure 1 with a diagnostic.",
+      "backendUnavailableSemantics": {
+        "exitCode": 69,
+        "evidence": [
+          "packages/omanixy-shell/adapters/common.bash",
+          "test/host-contract-status.sh",
+          "test/compat-adapters.sh"
+        ]
+      },
+      "requiredHostCapabilities": [
+        "pulseaudio-compatibility-inspection"
+      ],
+      "privilegeModel": "unprivileged",
+      "supportState": "supported",
+      "stability": "provisional",
+      "upstreamEvidence": [
+        {
+          "compatibilityTuple": {
+            "omarchyRevision": "f0020448ca87329199de7cb12f2015ebc4a3e5e7",
+            "quickshellRevision": "28771c7c74b42e20afca0b1b63980cb46515537c",
+            "nixpkgsRevision": "241313f4e8e508cb9b13278c2b0fa25b9ca27163",
+            "homeManagerRevision": "3ee51fbdac8c8bdfe1e7e1fcaba6520a563f394f"
+          },
+          "sources": [
+            "bin/omarchy-audio-output-sink",
+            "shell/plugins/panels/audio/"
+          ],
+          "routerMetadata": [
+            "bin/omarchy",
+            "bin/omarchy-audio-output-sink"
+          ]
+        }
+      ],
+      "intentionalDeviations": [
+        "Omanixy bounds backend inspection and reports unresolved physical sinks as explicit domain failures."
+      ]
+    },
+    {
+      "capabilityId": "audio.sink-availability.query",
+      "schemaVersion": 1,
+      "semanticDomain": "audio",
+      "operation": "sink-availability.query",
+      "executionClass": "query",
+      "canonicalRoute": "audio sink availability",
+      "flatBackingBinary": "omarchy-audio-sink-availability",
+      "acceptedArguments": [],
+      "stdoutContract": "One line per PipeWire sink: <node.name> TAB <availability>, where availability is 1 or 0.",
+      "stderrContract": "Diagnostics only; no success data is written to stderr.",
+      "exitContract": {
+        "profile": "host-contract-v1",
+        "deviations": [
+          {
+            "exitCode": 4,
+            "class": "backend-data-invalid",
+            "evidence": "upstream/compatibility-test-matrix.json: omarchy-audio-sink-availability backendFailure"
+          }
+        ]
+      },
+      "sideEffects": [],
+      "idempotence": "idempotent",
+      "retrySemantics": "Retry is safe; the result is recomputed from current PipeWire graph state.",
+      "deadlineSemantics": "Each external backend call is bounded by Omanixy timed(); direct deadline expiration returns 124. A higher-level operation that catches a timed backend failure for validation or rollback may return domain failure 1 with a diagnostic.",
+      "backendUnavailableSemantics": {
+        "exitCode": 69,
+        "evidence": [
+          "packages/omanixy-shell/adapters/common.bash",
+          "test/host-contract-status.sh",
+          "test/compat-adapters.sh"
+        ]
+      },
+      "requiredHostCapabilities": [
+        "pipewire-inspection"
+      ],
+      "privilegeModel": "unprivileged",
+      "supportState": "supported",
+      "stability": "provisional",
+      "upstreamEvidence": [
+        {
+          "compatibilityTuple": {
+            "omarchyRevision": "f0020448ca87329199de7cb12f2015ebc4a3e5e7",
+            "quickshellRevision": "28771c7c74b42e20afca0b1b63980cb46515537c",
+            "nixpkgsRevision": "241313f4e8e508cb9b13278c2b0fa25b9ca27163",
+            "homeManagerRevision": "3ee51fbdac8c8bdfe1e7e1fcaba6520a563f394f"
+          },
+          "sources": [
+            "bin/omarchy-audio-sink-availability",
+            "shell/plugins/panels/audio/"
+          ],
+          "routerMetadata": [
+            "bin/omarchy",
+            "bin/omarchy-audio-sink-availability"
+          ]
+        }
+      ],
+      "intentionalDeviations": [
+        "Omanixy derives availability from structured PipeWire node/port data instead of preserving the pinned helper's PulseAudio/tuning-helper implementation."
+      ]
+    }
+  ]
 }
