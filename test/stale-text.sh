@@ -84,6 +84,7 @@ jq -e \
         .flatBackingBinary as $binary
         | $binary != "omarchy-shell"
           and ($legacy[0].helpers | has($binary))
+          and (.requiredHostCapabilities | index($legacy[0].helperCapabilities[$binary]) != null)
           and all(.upstreamEvidence[];
             .compatibilityTuple == $expectedTuple
             and (.routerMetadata | index("bin/omarchy") != null)
