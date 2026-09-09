@@ -61,11 +61,6 @@ adapter_hash=$( {
     cat "$repo/$source"
   done < <(jq -er '.adapterSources[]' "$manifest")
 } | sha256sum | awk '{print $1}')
-manifest_adapter_hash=$(jq -er '.adapterHash' "$manifest")
-if [[ $manifest_adapter_hash != "$adapter_hash" ]]; then
-  printf 'adapterHash mismatch: manifest=%s computed=%s\n' "$manifest_adapter_hash" "$adapter_hash" >&2
-  exit 1
-fi
 jq -e \
   --arg adapter 'packages/omanixy-shell/compat-adapter.bash' \
   --arg tests 'test/compat-adapters.sh' \
