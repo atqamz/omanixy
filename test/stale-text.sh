@@ -83,7 +83,7 @@ jq -e \
       and (.capabilities | type) == "array"
       and all(.capabilities[];
         . as $capability
-        | all($requiredFields[] as $field; $capability | has($field))
+        | all($requiredFields[]; . as $field | $capability | has($field))
           and (((($capability | keys) - $allowedFields) | length) == 0)
       )
       and all(.capabilities[]; .capabilityId == (.semanticDomain + "." + .operation))
