@@ -22,6 +22,8 @@ jq -e '
 
 schema=$repo/upstream/host-contract.schema.json
 registry=$repo/upstream/host-contract.json
+tuple=$repo/upstream/compatibility-tuple.json
+legacy=$repo/upstream/compatibility-contracts.json
 
 jq -e '
   ."$schema" == "https://json-schema.org/draft/2020-12/schema"
@@ -61,15 +63,34 @@ jq -e '
   and (."$defs".crossing.required | index("capabilityId") != null)
 ' "$schema" >/dev/null
 
-jq -e '
-  .documentType == "host-contract"
-  and .schemaVersion == 1
-  and .capabilityIdRule == "semanticDomain.operation"
-  and .registryState == "schema-only"
-  and (.capabilities | type) == "array"
-  and all(.capabilities[]; .capabilityId == (.semanticDomain + "." + .operation))
-  and (([.capabilities[].capabilityId] | length) == ([.capabilities[].capabilityId] | unique | length))
-' "$registry" >/dev/null
+jq -e \
+  --slurpfile tuple "$tuple" \
+  --slurpfile legacy "$legacy" \
+  '
+    ($tuple[0] | {
+      omarchyRevision: .omarchy.revision,
+      quickshellRevision: .quickshell.revision,
+      nixpkgsRevision: .nixpkgs.revision,
+      homeManagerRevision: .homeManager.revision
+    }) as $expectedTuple
+    | .documentType == "host-contract"
+      and .schemaVersion == 1
+      and .capabilityIdRule == "semanticDomain.operation"
+      and .registryState == "schema-only"
+      and (.capabilities | type) == "array"
+      and all(.capabilities[]; .capabilityId == (.semanticDomain + "." + .operation))
+      and (([.capabilities[].capabilityId] | length) == ([.capabilities[].capabilityId] | unique | length))
+      and all(.capabilities[];
+        .flatBackingBinary as $binary
+        | $binary != "omarchy-shell"
+          and ($legacy[0].helpers | has($binary))
+          and all(.upstreamEvidence[];
+            .compatibilityTuple == $expectedTuple
+            and (.routerMetadata | index("bin/omarchy") != null)
+            and (.routerMetadata | index("bin/" + $binary) != null)
+          )
+      )
+  ' "$registry" >/dev/null
 
 test -s "$repo/LICENSE"
 
