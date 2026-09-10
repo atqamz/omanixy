@@ -1,5 +1,18 @@
 # Omanixy
 
+## Project status: discontinued
+
+Omanixy is discontinued. No further development, compatibility updates, bug
+fixes, or releases are planned.
+
+The maintainer has moved to Omarchy Quattro and will wait for Omarchy Cinque
+rather than continue investing engineering effort in a parallel Nix
+integration. Omarchy has published its own plan to replace the Arch foundation
+with Nix: [Nix ideas](https://github.com/omacom/omarchy/commit/97a86af116b71ffd6b6dd0afc27cdefce5cacee2).
+
+Existing Omanixy releases remain available as-is. The rest of this README
+documents the last project state and is retained for reference.
+
 > Omarchy UX. NixOS ownership.
 
 Omanixy is an independent Nix-native integration layer for the Omarchy
