@@ -7,6 +7,26 @@
 
 * **release:** tolerate PR head propagation ([#81](https://github.com/atqamz/omanixy/issues/81)) ([ab6984c](https://github.com/atqamz/omanixy/commit/ab6984cd937f4ab7a7fe64d36a5126a110e8951f))
 
+### Upstream
+
+- Omarchy Quattro: `f0020448ca87329199de7cb12f2015ebc4a3e5e7`
+- Quickshell: `28771c7c74b42e20afca0b1b63980cb46515537c`
+- nixpkgs: `241313f4e8e508cb9b13278c2b0fa25b9ca27163`
+
+### Compatibility
+
+- Classification counts:
+- exact: 6
+- adapted: 27
+- omitted: 6
+- blocked: 0
+- Support counts:
+- supported: 0
+- experimental: 7
+- omitted: 0
+- blocked: 0
+- Security posture: 7 security/session entries remain experimental, opt-in, and disabled by default; none are supported.
+- Full ledger: [upstream/porting-matrix.yaml](https://github.com/atqamz/omanixy/blob/v0.2.1/upstream/porting-matrix.yaml)
 ## [0.2.0](https://github.com/atqamz/omanixy/compare/v0.1.0...v0.2.0) (2026-09-04)
 
 
